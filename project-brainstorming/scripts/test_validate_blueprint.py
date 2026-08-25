@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Black-box tests for the project blueprint and design document validator."""
+"""Black-box tests for the version-3 blueprint and design validator."""
 
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import sys
@@ -12,537 +13,607 @@ import unittest
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).with_name("validate_blueprint.py")
-SKILL_ROOT = SCRIPT.parent.parent
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+VALIDATOR = SKILL_ROOT / "scripts" / "validate_blueprint.py"
+EXAMPLE_ROOT = SKILL_ROOT / "references" / "examples" / "equipment-borrowing"
+DIMENSIONS = (
+    "交付边界",
+    "参与者与权限",
+    "触发与输入",
+    "结果、状态与不变量",
+    "失败与恢复",
+    "AI 决策边界",
+)
 
 
-def design_document(*, state: str = "已确认", second_anchor: str = "wp-02-review") -> str:
-    return textwrap.dedent(
-        f"""\
+def valid_design(
+    *,
+    state: str = "已确认",
+    package_states: tuple[str, str] = ("已确认", "已确认"),
+    include_staging: bool = False,
+    replacement: bool = False,
+) -> str:
+    package_sections: list[str] = []
+    for index, package_id in enumerate(("WP-01", "WP-02"), start=1):
+        anchor = f"wp-{index:02d}-example"
+        contract_rows = "\n".join(
+            f"| {package_id}-C{dimension_index:02d} | {dimension} | {package_id} 的{dimension}约束 |"
+            for dimension_index, dimension in enumerate(DIMENSIONS, start=1)
+        )
+        own_contracts = "、".join(f"{package_id}-C{i:02d}" for i in range(1, 7))
+        shared = "S-01、" if package_id == "WP-01" else ""
+        package_sections.append(
+            f"""<a id="{anchor}"></a>
+## {package_id} 示例工作包 {index}
+
+### 契约
+
+| 契约 | 维度 | 已确认约束 |
+|------|------|------------|
+{contract_rows}
+
+### 验收
+
+| 覆盖契约 | 场景 | 预期结果 |
+|----------|------|----------|
+| {shared}{own_contracts} | 执行 {package_id} 正常及失败场景 | 契约全部得到可观察验证 |"""
+        )
+
+    replacement_line = "> 替代来源：[新设计](replacement.md)\n" if replacement else ""
+    staging = ""
+    if include_staging:
+        staging = textwrap.dedent(
+            """
+
+            ## 3. 澄清暂存
+
+            | 类型 | 内容 | 来源 |
+            |------|------|------|
+            | 证据推断 | 现有入口可能需要保留 | 代码检索 |
+            | 待确认 | 是否保留现有入口 | 用户尚未决定 |
+            """
+        )
+
+    header = textwrap.dedent(
+        f"""
         # 示例史诗设计
 
+        > 设计规范版本：3
         > 设计状态：{state}
-        > 关联待办：WP-01、WP-02
-        > 必读范围：`PROJECT_BLUEPRINT.md`、本文件“公共上下文”、当前工作包章节及其直接依赖
-
+        > 工作包：WP-01、WP-02
+        {replacement_line}
         <a id="shared-context"></a>
-        ## 1. 公共上下文
+        ## 1. 共享约束
 
-        ### 问题与目标
+        ### 1.1 问题与成功结果
 
-        - 形成可验证的共同结果。
+        | 问题 | 成功结果 |
+        |------|----------|
+        | 两个工作包需要共享状态 | 状态和组合结果可验证 |
 
-        ### 明确非目标
+        ### 1.2 共享契约
 
-        - 不扩展无关能力。
-
-        ### 共享模型与不变量
-
-        - 两个工作包共享同一状态模型。
+        | 契约 | 已确认约束 |
+        |------|------------|
+        | S-01 | 两个工作包共享同一状态定义 |
 
         <a id="work-package-map"></a>
         ## 2. 工作包地图
 
-        | 工作包 | 状态 | 前置依赖 | 设计章节 | 组合验收关系 |
-        |--------|------|----------|----------|--------------|
-        | WP-01 | 已确认 | 无 | [章节](#wp-01-extract) | 与 WP-02 组合验收 |
-        | WP-02 | 已确认 | WP-01 | [章节](#{second_anchor}) | 与 WP-01 组合验收 |
-
-        <a id="wp-01-extract"></a>
-        ## WP-01 要求提取
-
-        ### 状态、范围与非目标
-
-        - 状态：已确认
-        - 范围：提取结构化要求。
-        - 非目标：不执行审核。
-
-        ### 前置条件、输入与输出
-
-        - 输入文档，输出结构化要求。
-
-        ### 正常行为、权限与状态
-
-        - 授权用户提交并查看结果。
-
-        ### 边界、失败与恢复
-
-        - 失败必须保留原输入并允许重试。
-
-        ### 依赖与影响范围
-
-        - 无前置工作包。
-
-        ### 验收标准
-
-        - 正常输入生成要求，失败输入返回明确错误。
-
-        <a id="{second_anchor}"></a>
-        ## WP-02 审核与版本管理
-
-        ### 状态、范围与非目标
-
-        - 状态：已确认
-        - 范围：审核并保存版本。
-        - 非目标：不重新执行提取。
-
-        ### 前置条件、输入与输出
-
-        - 输入 WP-01 结果，输出审核版本。
-
-        ### 正常行为、权限与状态
-
-        - 审核人确认后版本生效。
-
-        ### 边界、失败与恢复
-
-        - 保存失败不得改变当前生效版本。
-
-        ### 依赖与影响范围
-
-        - 依赖 WP-01。
-
-        ### 验收标准
-
-        - 覆盖保存成功、失败和组合验收。
-
-        ## 3. 证据推断
-
-        - 无。
-
-        ## 4. 待确认事项
-
-        1. 无。
+        | 工作包 | 状态 | 交付结果 | 前置依赖 | 设计章节 |
+        |--------|------|----------|----------|----------|
+        | WP-01 | {package_states[0]} | 交付第一个独立结果 | 无 | [章节](#wp-01-example) |
+        | WP-02 | {package_states[1]} | 交付第二个独立结果 | WP-01 | [章节](#wp-02-example) |
         """
+    ).strip()
+    return header + "\n\n" + "\n\n".join(package_sections) + staging + "\n"
+
+
+def valid_blueprint(rows: str) -> str:
+    rows_for_template = rows.replace("\n", "\n            ")
+    return (
+        textwrap.dedent(
+            f"""
+            # 示例项目 — 项目蓝图
+
+            > 蓝图规范版本：3
+
+            ## 1. 项目定位
+
+            | 对象 | 问题 | 成功结果 |
+            |------|------|----------|
+            | 用户 | 缺少受控流程 | 流程可验证 |
+
+            ## 2. 技术栈
+
+            | 类别 | 当前事实或硬约束 | 事实来源 |
+            |------|------------------|----------|
+            | 语言 | Python 3 | 运行环境 |
+
+            ## 3. 代码结构
+
+            ### 顶层目录
+
+            ```text
+            src/ 业务代码
+            tests/ 测试
+            ```
+
+            ### 代码落位规则
+
+            | 代码区域 | 职责 | 代码落位规则 |
+            |----------|------|--------------|
+            | `src/` | 业务实现 | 生产代码只放这里 |
+
+            ## 4. 模块架构
+
+            ### 模块职责
+
+            | 模块 | 职责 | 对外边界 |
+            |------|------|----------|
+            | 核心 | 执行业务规则 | 用例接口 |
+
+            ## 5. 跨模块契约
+
+            ### 全局契约
+
+            | 契约 | 适用范围 | 验证 |
+            |------|----------|------|
+            | C-01 | 全部模块 | 契约测试 |
+
+            ### 开发决策边界
+
+            | 边界 | 内容 |
+            |------|------|
+            | 本期必须实现 | 当前待办 |
+            | 明确不做 | 不增加外部服务 |
+            | 后续候选 | 表中未完成工作 |
+            | AI 可自行决定 | 内部命名 |
+            | 必须再次确认 | 改变公开行为 |
+
+            ## 6. 待开发功能
+
+            | 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |
+            |------|--------|------|------|----------|----------|----------|
+            {rows_for_template}
+
+            ## 7. 系统架构
+
+            ### 分层与代码映射
+
+            | 层 | 职责 | 对应代码结构 | 允许依赖 |
+            |----|------|--------------|----------|
+            | 应用层 | 用例编排 | `src/` | 核心模块 |
+
+            ### 数据与资源安全
+
+            | 适用范围 | 不变量 | 验证 |
+            |----------|--------|------|
+            | 文件写入 | 原子替换 | 故障测试 |
+
+            ### 运行与恢复
+
+            | 资源或失败点 | 所有者 | 恢复与清理 |
+            |--------------|--------|------------|
+            | 写入失败 | 应用层 | 回滚临时文件 |
+            """
+        ).strip()
+        + "\n"
     )
-
-
-def blueprint(rows: str, *, include_version: bool = True) -> str:
-    version = "> 蓝图规范版本：2\n" if include_version else ""
-    template = textwrap.dedent(
-        """\
-        # 示例项目 — 项目蓝图
-
-        __VERSION__> 文档定位：保存所有模块共同遵守的项目级约束。
-
-        ## 1. 项目定位
-
-        ### 目标
-
-        - 提供可验证能力。
-
-        ### 非目标
-
-        - 不扩展无关范围。
-
-        ## 2. 技术栈
-
-        - Python 3 标准库。
-
-        ## 3. 代码结构
-
-        - 顶层模块保持单一职责。
-
-        ## 4. 模块架构
-
-        - 模块只能按既定方向依赖。
-
-        ## 5. 跨模块契约
-
-        ### 业务规则与核心不变量
-
-        - 所有模块必须保留任务标识。
-
-        ### 外部契约、失败与资源边界
-
-        - 保存失败不得改变已确认状态，并允许恢复。
-
-        ### 安全与非功能要求
-
-        - 未授权数据不得输出。
-
-        ### 开发边界
-
-        #### 本期必须实现
-
-        - 完成待办。
-
-        #### 明确不做
-
-        - 不增加外部服务。
-
-        #### 后续候选
-
-        - 后续再评估扩展。
-
-        #### AI 可自行决定
-
-        - 内部函数命名。
-
-        #### 必须再次确认
-
-        - 公共契约变化。
-
-        ## 6. 待开发功能
-
-        | 编号 | 优先级 | 功能 | 设计依据 | 前置依赖 | 完成定义 |
-        |------|--------|------|----------|----------|----------|
-        __ROWS__
-
-        ## 7. 系统架构
-
-        ### 架构红线
-
-        - 不得绕过模块边界。
-        """
-    )
-    return template.replace("__VERSION__", version).replace("__ROWS__", rows)
 
 
 class ValidatorTests(unittest.TestCase):
     def run_validator(self, path: Path, *, design: bool = False) -> subprocess.CompletedProcess[str]:
-        args = [sys.executable, str(SCRIPT)]
+        args = [sys.executable, str(VALIDATOR)]
         if design:
             args.append("--design")
         args.append(str(path))
         return subprocess.run(args, check=False, capture_output=True, text=True)
 
-    def write_project(self, root: Path, blueprint_text: str, design_text: str | None = None) -> Path:
+    def write_project(
+        self, root: Path, blueprint: str, design: str | None = None
+    ) -> tuple[Path, Path | None]:
         blueprint_path = root / "PROJECT_BLUEPRINT.md"
-        blueprint_path.write_text(blueprint_text, encoding="utf-8")
-        if design_text is not None:
+        blueprint_path.write_text(blueprint, encoding="utf-8")
+        design_path = None
+        if design is not None:
             design_path = root / "docs" / "design" / "epic.md"
-            design_path.parent.mkdir(parents=True)
-            design_path.write_text(design_text, encoding="utf-8")
-        return blueprint_path
+            design_path.parent.mkdir(parents=True, exist_ok=True)
+            design_path.write_text(design, encoding="utf-8")
+        return blueprint_path, design_path
 
-    def test_two_work_packages_can_reference_different_sections_of_one_design(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            rows = "\n".join(
-                (
-                    "| WP-01 | P0 | 要求提取 | [设计 WP-01](docs/design/epic.md#wp-01-extract) | 无 | 正常和失败输入均可验证 |",
-                    "| WP-02 | P0 | 审核与版本管理 | [设计 WP-02](docs/design/epic.md#wp-02-review) | WP-01 | 保存成功和失败均可验证 |",
-                )
+    def test_two_pending_items_reference_different_work_packages_in_one_design(self) -> None:
+        rows = "\n".join(
+            (
+                "| TASK-01 | P1 | 用户提出 | 第一项 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 第一项可验收 |",
+                "| TASK-02 | P1 | 问题诊断 | 第二项 | [WP-02](docs/design/epic.md#wp-02-example) | TASK-01 | 第二项可验收 |",
             )
-            path = self.write_project(root, blueprint(rows), design_document())
-            result = self.run_validator(path)
-            design_result = self.run_validator(root / "docs" / "design" / "epic.md", design=True)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(design_result.returncode, 0, design_result.stdout + design_result.stderr)
-
-    def test_direct_migration_allows_unclarified_design_and_dependency(self) -> None:
+        )
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            row = "| PEND-001 | P2 | 原有待办 | 待澄清 | 待澄清 | 原有完成定义保持不变 |"
-            result = self.run_validator(self.write_project(root, blueprint(row)))
+            blueprint, design = self.write_project(Path(directory), valid_blueprint(rows), valid_design())
+            self.assertEqual(self.run_validator(design, design=True).returncode, 0)
+            result = self.run_validator(blueprint)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_escaped_pipe_in_pending_work_cell_is_not_a_column_separator(self) -> None:
+    def test_pending_item_rejects_design_document_from_older_format(self) -> None:
+        design = valid_design().replace("设计规范版本：3", "设计规范版本：2")
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            row = (
-                "| PEND-001 | P2 | 对比 A \\| B | 待澄清 | 无 | "
-                "原有完成定义保持不变 |"
-            )
-            result = self.run_validator(self.write_project(root, blueprint(row)))
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
+            result = self.run_validator(blueprint)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("invalid design document docs/design/epic.md", result.stdout)
+            self.assertIn("design format upgrade required: expected version 3, found 2", result.stdout)
 
-    def test_old_blueprint_requires_format_upgrade(self) -> None:
+    def test_pending_item_rejects_fenced_fake_design_version(self) -> None:
+        design = valid_design().replace(
+            "> 设计规范版本：3",
+            "> 设计规范版本：2\n\n```text\n> 设计规范版本：3\n```",
+        )
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            row = "| PEND-001 | P2 | 原有待办 | 待澄清 | 待澄清 | 原有完成定义 |"
-            result = self.run_validator(self.write_project(root, blueprint(row, include_version=False)))
+            blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
+            result = self.run_validator(blueprint)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("design format upgrade required: expected version 3, found 2", result.stdout)
+
+    def test_pending_item_requires_fully_valid_design_document(self) -> None:
+        invalid_designs = (
+            (
+                valid_design().replace(
+                    '<a id="wp-01-example"></a>',
+                    '<a id="wp-01-example"></a>\n<a id="wp-01-example"></a>',
+                ),
+                "duplicate explicit anchor",
+            ),
+            (
+                valid_design().replace("| WP-01 | 已确认 |", "| WP-01 | 未知 |"),
+                "invalid work package state",
+            ),
+        )
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
+        for design, expected_error in invalid_designs:
+            with self.subTest(expected_error=expected_error), tempfile.TemporaryDirectory() as directory:
+                blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
+                result = self.run_validator(blueprint)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("invalid design document docs/design/epic.md", result.stdout)
+                self.assertIn(expected_error, result.stdout)
+
+    def test_direct_migration_accepts_historical_source_and_pending_design(self) -> None:
+        row = "| PEND-001 | P2 | 历史迁移 | 未澄清功能 | 待澄清 | 待澄清 | 用户确认后可执行 |"
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, _ = self.write_project(Path(directory), valid_blueprint(row))
+            self.assertEqual(self.run_validator(blueprint).returncode, 0)
+
+    def test_pending_source_is_required_and_controlled(self) -> None:
+        row = "| TASK-01 | P1 | 技术债务 | 功能 | 待澄清 | 无 | 可执行 |"
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, _ = self.write_project(Path(directory), valid_blueprint(row))
+            result = self.run_validator(blueprint)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("invalid pending work source", result.stdout)
+
+    def test_old_six_column_table_and_version_require_upgrade(self) -> None:
+        content = valid_blueprint("| TASK-01 | P1 | 用户提出 | 功能 | 待澄清 | 无 | 可执行 |")
+        content = content.replace("蓝图规范版本：3", "蓝图规范版本：2")
+        content = content.replace("| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |", "| 编号 | 优先级 | 功能 | 设计依据 | 前置依赖 | 完成定义 |")
+        content = content.replace("|------|--------|------|------|----------|----------|----------|", "|------|--------|------|----------|----------|----------|", 1)
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, _ = self.write_project(Path(directory), content)
+            result = self.run_validator(blueprint)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("blueprint format upgrade required", result.stdout)
+            self.assertIn("pending work table headers must be", result.stdout)
 
-    def test_missing_design_document_fails(self) -> None:
+    def test_extra_pending_column_is_rejected(self) -> None:
+        content = valid_blueprint("| TASK-01 | P1 | 用户提出 | 功能 | 待澄清 | 无 | 可执行 |")
+        content = content.replace("| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |", "| 编号 | 优先级 | 来源 | 类别 | 功能 | 设计依据 | 前置依赖 | 完成定义 |")
+        content = content.replace("|------|--------|------|------|----------|----------|----------|", "|------|--------|------|------|------|----------|----------|----------|", 1)
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            row = "| WP-01 | P0 | 要求提取 | [设计](docs/design/missing.md#wp-01) | 无 | 完成定义 |"
-            result = self.run_validator(self.write_project(root, blueprint(row)))
+            blueprint, _ = self.write_project(Path(directory), content)
+            result = self.run_validator(blueprint)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("design document not found", result.stdout)
+            self.assertIn("pending work table headers must be", result.stdout)
+
+    def test_pending_dependency_must_exist_and_not_repeat(self) -> None:
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | 待澄清 | TASK-02、TASK-02 | 可执行 |"
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, _ = self.write_project(Path(directory), valid_blueprint(row))
+            result = self.run_validator(blueprint)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unknown pending work dependency", result.stdout)
+            self.assertIn("duplicate pending work dependency", result.stdout)
+
+    def test_pending_dependency_rejects_empty_list_items(self) -> None:
+        for dependency in ("TASK-02、", "、TASK-02", "TASK-02、、TASK-02"):
+            rows = "\n".join(
+                (
+                    f"| TASK-01 | P1 | 用户提出 | 功能 | 待澄清 | {dependency} | 可执行 |",
+                    "| TASK-02 | P1 | 用户提出 | 依赖项 | 待澄清 | 无 | 可执行 |",
+                )
+            )
+            with self.subTest(dependency=dependency), tempfile.TemporaryDirectory() as directory:
+                blueprint, _ = self.write_project(Path(directory), valid_blueprint(rows))
+                result = self.run_validator(blueprint)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("invalid pending work dependency", result.stdout)
+
+    def test_terminal_design_work_package_cannot_remain_pending(self) -> None:
+        design = valid_design(state="已实现", package_states=("已完成", "已完成"))
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
+            result = self.run_validator(blueprint)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pending work cannot reference terminal", result.stdout)
+
+    def test_unconfirmed_design_work_package_cannot_be_referenced(self) -> None:
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
+        for package_state in ("待澄清", "澄清中"):
+            design = valid_design(
+                state="澄清中",
+                package_states=(package_state, "待澄清"),
+                include_staging=True,
+            )
+            with self.subTest(package_state=package_state), tempfile.TemporaryDirectory() as directory:
+                blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
+                result = self.run_validator(blueprint)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("must reference a confirmed or in-development", result.stdout)
 
     def test_missing_design_anchor_fails(self) -> None:
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP](docs/design/epic.md#wp-99-missing) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            row = "| WP-01 | P0 | 要求提取 | [设计](docs/design/epic.md#wp-99-missing) | 无 | 完成定义 |"
-            result = self.run_validator(
-                self.write_project(root, blueprint(row), design_document())
-            )
+            blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), valid_design())
+            result = self.run_validator(blueprint)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("design anchor not found", result.stdout)
 
-    def test_duplicate_pending_work_id_fails(self) -> None:
+    def test_forbidden_redundant_blueprint_heading_fails(self) -> None:
+        content = valid_blueprint("").replace(
+            "## 6. 待开发功能", "### 架构红线\n\n- 不重复规则。\n\n## 6. 待开发功能"
+        )
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            rows = "\n".join(
-                (
-                    "| WP-01 | P0 | 要求提取 | 待澄清 | 无 | 完成定义一 |",
-                    "| WP-01 | P1 | 审核 | 待澄清 | 待澄清 | 完成定义二 |",
-                )
-            )
-            result = self.run_validator(self.write_project(root, blueprint(rows)))
+            blueprint, _ = self.write_project(Path(directory), content)
+            result = self.run_validator(blueprint)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("duplicate pending work id", result.stdout)
+            self.assertIn("redundant blueprint heading", result.stdout)
 
-    def test_pending_work_dependency_must_be_known_and_not_self_referential(self) -> None:
-        cases = {
-            "arbitrary text": "依赖数据库",
-            "unknown id": "WP-99",
-            "self dependency": "WP-01",
-        }
-        for label, dependency in cases.items():
-            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                row = f"| WP-01 | P0 | 要求提取 | 待澄清 | {dependency} | 完成定义 |"
-                result = self.run_validator(self.write_project(root, blueprint(row)))
+    def test_closed_hashes_do_not_hide_forbidden_blueprint_heading(self) -> None:
+        content = valid_blueprint("").replace(
+            "## 6. 待开发功能", "### 非目标 ###\n\n- 重复规则。\n\n## 6. 待开发功能"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, _ = self.write_project(Path(directory), content)
+            result = self.run_validator(blueprint)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("redundant blueprint heading", result.stdout)
+
+    def test_fence_with_trailing_text_does_not_close_block(self) -> None:
+        content = valid_blueprint("").replace(
+            "## 6. 待开发功能",
+            "```markdown\n### 非目标\n``` trailing text\n\n## 6. 待开发功能",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, _ = self.write_project(Path(directory), content)
+            result = self.run_validator(blueprint)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unclosed fenced code block", result.stdout)
+
+    def test_fenced_fake_blueprint_heading_does_not_satisfy_structure(self) -> None:
+        content = valid_blueprint("").replace("## 4. 模块架构", "```markdown\n## 4. 模块架构\n```")
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, _ = self.write_project(Path(directory), content)
+            result = self.run_validator(blueprint)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("level-2 sections must be exactly", result.stdout)
+
+    def test_documents_require_one_level_one_title(self) -> None:
+        documents = (
+            (valid_blueprint("| TASK-01 | P1 | 用户提出 | 功能 | 待澄清 | 无 | 可执行 |").replace("# 示例项目 — 项目蓝图", "示例项目 — 项目蓝图"), False, "blueprint"),
+            (valid_design().replace("# 示例史诗设计", "示例史诗设计"), True, "design"),
+        )
+        for content, is_design, document_type in documents:
+            with self.subTest(document_type=document_type), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / f"{document_type}.md"
+                path.write_text(content, encoding="utf-8")
+                result = self.run_validator(path, design=is_design)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("pending work", result.stdout)
+                self.assertIn("must contain exactly one level-1 title", result.stdout)
 
-    def test_duplicate_pending_work_dependency_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            rows = "\n".join(
-                (
-                    "| WP-01 | P0 | 要求提取 | 待澄清 | 无 | 完成定义一 |",
-                    "| WP-02 | P0 | 审核 | 待澄清 | WP-01、WP-01 | 完成定义二 |",
-                )
-            )
-            result = self.run_validator(self.write_project(root, blueprint(rows)))
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("duplicate pending work dependency", result.stdout)
-
-    def test_pending_work_dependency_accepts_supported_separators(self) -> None:
-        for separator in ("、", ",", "，"):
-            with self.subTest(separator=separator), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                rows = "\n".join(
-                    (
-                        "| WP-01 | P0 | 要求提取 | 待澄清 | 无 | 完成定义一 |",
-                        "| WP-02 | P0 | 审核 | 待澄清 | 无 | 完成定义二 |",
-                        f"| WP-03 | P1 | 发布 | 待澄清 | WP-01{separator}WP-02 | 完成定义三 |",
-                    )
-                )
-                result = self.run_validator(self.write_project(root, blueprint(rows)))
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_blueprint_rejects_reference_to_completed_work_package(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            content = design_document(state="已实现")
-            content = content.replace("| WP-01 | 已确认 |", "| WP-01 | 已完成 |")
-            content = content.replace("| WP-02 | 已确认 |", "| WP-02 | 已完成 |")
-            content = content.replace("- 状态：已确认", "- 状态：已完成")
-            row = (
-                "| WP-01 | P0 | 要求提取 | "
-                "[设计](docs/design/epic.md#wp-01-extract) | 无 | 完成定义 |"
-            )
-            result = self.run_validator(
-                self.write_project(root, blueprint(row), content)
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("terminal work package must be removed", result.stdout)
-
-    def test_fenced_code_cannot_supply_blueprint_structure(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            row = "| PEND-001 | P2 | 原有待办 | 待澄清 | 无 | 完成定义 |"
-            valid = blueprint(row)
-            first_line, remainder = valid.split("\n", 1)
-            content = f"{first_line}\n\n```markdown\n{remainder}\n```\n"
-            result = self.run_validator(self.write_project(root, content))
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("missing level-2 section", result.stdout)
-
-    def test_blueprint_section_titles_must_be_independent_exact_headings(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            row = "| PEND-001 | P2 | 原有待办 | 待澄清 | 无 | 完成定义 |"
-            content = blueprint(row).replace(
-                "## 1. 项目定位\n", "## 1. 项目定位与技术栈\n"
-            ).replace("## 2. 技术栈\n", "")
-            result = self.run_validator(self.write_project(root, content))
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("missing level-2 section: 项目定位", result.stdout)
-            self.assertIn("missing level-2 section: 技术栈", result.stdout)
-
-    def test_invalid_design_status_fails(self) -> None:
+    def test_valid_confirmed_design_passes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "design.md"
-            path.write_text(design_document(state="未知"), encoding="utf-8")
-            result = self.run_validator(path, design=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("design status must be one of", result.stdout)
+            path.write_text(valid_design(), encoding="utf-8")
+            self.assertEqual(self.run_validator(path, design=True).returncode, 0)
 
-    def test_work_package_map_status_must_match_section(self) -> None:
+    def test_commented_or_inline_anchor_does_not_satisfy_design_contract(self) -> None:
+        for replacement in (
+            '<!-- <a id="shared-context"></a> -->',
+            'prefix <a id="shared-context"></a>',
+        ):
+            design = valid_design().replace('<a id="shared-context"></a>', replacement)
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "design.md"
+                path.write_text(design, encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("missing explicit shared-context anchor", result.stdout)
+
+    def test_clarifying_design_requires_staging_and_unconfirmed_package(self) -> None:
+        design = valid_design(
+            state="澄清中", package_states=("澄清中", "待澄清"), include_staging=True
+        )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "design.md"
-            content = design_document().replace(
-                "| WP-02 | 已确认 | WP-01 |", "| WP-02 | 开发中 | WP-01 |"
-            )
-            path.write_text(content, encoding="utf-8")
-            result = self.run_validator(path, design=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("status mismatch between map and section", result.stdout)
-
-    def test_fenced_anchor_cannot_satisfy_work_package_anchor(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
-            content = design_document().replace(
-                '<a id="wp-01-extract"></a>',
-                '```html\n<a id="wp-01-extract"></a>\n```',
-            )
-            path.write_text(content, encoding="utf-8")
-            result = self.run_validator(path, design=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("needs a matching explicit anchor", result.stdout)
-
-    def test_duplicate_work_package_section_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
-            content = design_document()
-            duplicate = textwrap.dedent(
-                """\
-
-                <a id="wp-01-copy"></a>
-                ## WP-01 重复章节
-
-                ### 状态、范围与非目标
-                - 状态：已确认
-                ### 前置条件、输入与输出
-                - 输入与输出明确。
-                ### 正常行为、权限与状态
-                - 权限明确。
-                ### 边界、失败与恢复
-                - 失败可恢复。
-                ### 依赖与影响范围
-                - 无。
-                ### 验收标准
-                - 可执行验证。
-                """
-            )
-            path.write_text(content + duplicate, encoding="utf-8")
-            result = self.run_validator(path, design=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("duplicate work package section: WP-01", result.stdout)
-
-    def test_work_package_anchor_requires_exact_id_boundary(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
-            content = design_document().replace("wp-01-extract", "wp-010-extract")
-            path.write_text(content, encoding="utf-8")
-            result = self.run_validator(path, design=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("needs a matching explicit anchor", result.stdout)
-
-    def test_non_target_heading_does_not_satisfy_positive_target(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
-            content = design_document().replace("### 问题与目标", "### 问题背景")
-            path.write_text(content, encoding="utf-8")
-            result = self.run_validator(path, design=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("missing design semantic section: 目标", result.stdout)
-
-    def test_blueprint_template_materializes_to_valid_document(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            content = (SKILL_ROOT / "assets" / "PROJECT_BLUEPRINT.template.md").read_text(
-                encoding="utf-8"
-            )
-            replacements = {
-                "<项目名称>": "示例项目",
-                "<稳定编号>": "WP-01",
-                "<设计章节链接或待澄清>": "待澄清",
-                "<编号、无或待澄清>": "无",
-            }
-            for source, target in replacements.items():
-                content = content.replace(source, target)
-            content = re.sub(r"<(?!/?a\b)[^>\n]+>", "示例", content)
-            path = self.write_project(Path(directory), content)
-            result = self.run_validator(path)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_design_template_materializes_to_valid_document(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            content = (SKILL_ROOT / "assets" / "DESIGN.template.md").read_text(
-                encoding="utf-8"
-            )
-            replacements = {
-                "<史诗名称>": "示例史诗",
-                "<WP-01、WP-02>": "WP-01",
-                "<WP-01>": "WP-01",
-                "<待澄清>": "澄清中",
-                "<无>": "无",
-                "<关系>": "独立验收",
-                "<工作包名称>": "示例工作包",
-                "<待澄清/澄清中/已确认/开发中/已完成/已废弃>": "澄清中",
-            }
-            for source, target in replacements.items():
-                content = content.replace(source, target)
-            content = re.sub(r"<(?!/?a\b)[^>\n]+>", "示例", content)
-            path = Path(directory) / "design.md"
-            path.write_text(content, encoding="utf-8")
+            path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_clarifying_design_requires_unconfirmed_work_package(self) -> None:
+    def test_clarifying_design_without_staging_fails(self) -> None:
+        design = valid_design(state="澄清中", package_states=("澄清中", "待澄清"))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "design.md"
-            path.write_text(design_document(state="澄清中"), encoding="utf-8")
+            path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("must contain an unconfirmed work package", result.stdout)
+            self.assertIn("clarification staging", result.stdout)
 
-    def test_confirmed_design_with_only_completed_work_packages_requires_implemented(self) -> None:
+    def test_confirmed_design_must_not_keep_staging(self) -> None:
+        design = valid_design(include_staging=True)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "design.md"
-            content = design_document(state="已确认")
-            content = content.replace("| WP-01 | 已确认 |", "| WP-01 | 已完成 |")
-            content = content.replace("| WP-02 | 已确认 |", "| WP-02 | 已完成 |")
-            content = content.replace("- 状态：已确认", "- 状态：已完成")
-            path.write_text(content, encoding="utf-8")
+            path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("must be implemented", result.stdout)
+            self.assertIn("must not contain clarification staging", result.stdout)
+
+    def test_contract_dimensions_are_exact_and_not_repeated(self) -> None:
+        design = valid_design().replace(
+            "| WP-01-C06 | AI 决策边界 | WP-01 的AI 决策边界约束 |",
+            "| WP-01-C06 | 交付边界 | 重复维度 |",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("contract dimensions must be exactly", result.stdout)
+
+    def test_shared_and_work_package_contracts_require_confirmed_constraints(self) -> None:
+        invalid_designs = (
+            (
+                valid_design().replace("| S-01 | 两个工作包共享同一状态定义 |", "| S-01 | |"),
+                "empty confirmed constraint for shared contract S-01",
+            ),
+            (
+                valid_design().replace(
+                    "| WP-01-C01 | 交付边界 | WP-01 的交付边界约束 |",
+                    "| WP-01-C01 | 交付边界 | |",
+                ),
+                "empty confirmed constraint for contract WP-01-C01",
+            ),
+        )
+        for design, expected_error in invalid_designs:
+            with self.subTest(expected_error=expected_error), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "design.md"
+                path.write_text(design, encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stdout)
+
+    def test_unknown_acceptance_contract_fails(self) -> None:
+        design = valid_design().replace(
+            "S-01、WP-01-C01", "S-01、UNKNOWN-C01、WP-01-C01", 1
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("acceptance references unknown contract", result.stdout)
+
+    def test_acceptance_coverage_rejects_empty_list_items(self) -> None:
+        original = "S-01、WP-01-C01、WP-01-C02、WP-01-C03、WP-01-C04、WP-01-C05、WP-01-C06"
+        for coverage in (f"、{original}", f"{original}、", original.replace("、", "、、", 1)):
+            design = valid_design().replace(original, coverage, 1)
+            with self.subTest(coverage=coverage), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "design.md"
+                path.write_text(design, encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("empty acceptance coverage id", result.stdout)
+
+    def test_uncovered_contract_fails(self) -> None:
+        design = valid_design().replace("、WP-02-C06", "", 1)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("contract lacks acceptance coverage: WP-02-C06", result.stdout)
+
+    def test_design_metadata_must_match_map(self) -> None:
+        design = valid_design().replace("> 工作包：WP-01、WP-02", "> 工作包：WP-01")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("metadata work package ids must exactly match", result.stdout)
+
+    def test_design_metadata_rejects_empty_list_items(self) -> None:
+        for metadata in ("WP-01、WP-02、", "、WP-01、WP-02", "WP-01、、WP-02"):
+            design = valid_design().replace("> 工作包：WP-01、WP-02", f"> 工作包：{metadata}")
+            with self.subTest(metadata=metadata), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "design.md"
+                path.write_text(design, encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("invalid design metadata work package id", result.stdout)
+
+    def test_implemented_design_requires_terminal_packages(self) -> None:
+        design = valid_design(state="已实现")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("implemented design contains an unfinished", result.stdout)
+
+    def test_implemented_design_accepts_completed_and_deprecated_packages(self) -> None:
+        design = valid_design(state="已实现", package_states=("已完成", "已废弃"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_deprecated_design_requires_linked_replacement(self) -> None:
+        design = valid_design(state="已废弃", package_states=("已废弃", "已废弃"))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "design.md"
-            content = design_document(state="已废弃")
-            content = content.replace("| WP-01 | 已确认 |", "| WP-01 | 已废弃 |")
-            content = content.replace("| WP-02 | 已确认 |", "| WP-02 | 已废弃 |")
-            content = content.replace("- 状态：已确认", "- 状态：已废弃")
-            content += "\n不提供替代方案。\n"
-            path.write_text(content, encoding="utf-8")
+            path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linked replacement source", result.stdout)
+            self.assertIn("linked replacement", result.stdout)
 
-    def test_all_deprecated_work_packages_cannot_be_marked_implemented(self) -> None:
+    def test_deprecated_design_with_replacement_passes(self) -> None:
+        design = valid_design(
+            state="已废弃", package_states=("已废弃", "已废弃"), replacement=True
+        )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "design.md"
-            content = design_document(state="已实现")
-            content = content.replace("| WP-01 | 已确认 |", "| WP-01 | 已废弃 |")
-            content = content.replace("| WP-02 | 已确认 |", "| WP-02 | 已废弃 |")
-            content = content.replace("- 状态：已确认", "- 状态：已废弃")
-            path.write_text(content, encoding="utf-8")
+            path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("must be deprecated and provide a replacement", result.stdout)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_required_reading_rejects_whole_epic(self) -> None:
+    def test_validator_does_not_modify_input(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "design.md"
-            content = design_document().replace(
-                "> 必读范围：`PROJECT_BLUEPRINT.md`、本文件“公共上下文”、当前工作包章节及其直接依赖",
-                "> 必读范围：`PROJECT_BLUEPRINT.md` 和整份史诗设计文档",
-            )
-            path.write_text(content, encoding="utf-8")
-            result = self.run_validator(path, design=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("must not load the whole epic design", result.stdout)
+            path.write_text(valid_design(), encoding="utf-8")
+            before = hashlib.sha256(path.read_bytes()).hexdigest()
+            self.assertEqual(self.run_validator(path, design=True).returncode, 0)
+            after = hashlib.sha256(path.read_bytes()).hexdigest()
+            self.assertEqual(before, after)
+
+    def test_complete_example_project_passes(self) -> None:
+        design = EXAMPLE_ROOT / "docs" / "design" / "equipment-borrowing.md"
+        blueprint = EXAMPLE_ROOT / "PROJECT_BLUEPRINT.md"
+        design_result = self.run_validator(design, design=True)
+        blueprint_result = self.run_validator(blueprint)
+        self.assertEqual(design_result.returncode, 0, design_result.stdout + design_result.stderr)
+        self.assertEqual(blueprint_result.returncode, 0, blueprint_result.stdout + blueprint_result.stderr)
+
+    def test_templates_declare_version_three_and_required_contract_tables(self) -> None:
+        blueprint = (SKILL_ROOT / "assets" / "PROJECT_BLUEPRINT.template.md").read_text(encoding="utf-8")
+        design = (SKILL_ROOT / "assets" / "DESIGN.template.md").read_text(encoding="utf-8")
+        self.assertIn("> 蓝图规范版本：3", blueprint)
+        self.assertIn("| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |", blueprint)
+        self.assertIn("> 设计规范版本：3", design)
+        self.assertIn("| 契约 | 维度 | 已确认约束 |", design)
+        self.assertEqual(set(re.findall(r"\| ([^|]+) \| <", design)) & set(DIMENSIONS), set(DIMENSIONS))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a version-2 project blueprint or an epic design document."""
+"""Validate a version-3 project blueprint or epic design document."""
 
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-BLUEPRINT_VERSION = "2"
+BLUEPRINT_VERSION = "3"
+DESIGN_VERSION = "3"
 BLUEPRINT_SECTIONS = (
     "项目定位",
     "技术栈",
@@ -20,23 +21,53 @@ BLUEPRINT_SECTIONS = (
     "待开发功能",
     "系统架构",
 )
-BOUNDARY_PARTS = (
+FORBIDDEN_BLUEPRINT_HEADINGS = {"非目标", "架构红线", "项目级待确认事项"}
+BOUNDARY_VALUES = (
     "本期必须实现",
     "明确不做",
     "后续候选",
     "AI 可自行决定",
     "必须再次确认",
 )
-PENDING_HEADERS = ("编号", "优先级", "功能", "设计依据", "前置依赖", "完成定义")
-WORK_PACKAGE_HEADERS = ("工作包", "状态", "前置依赖", "设计章节", "组合验收关系")
+PENDING_HEADERS = ("编号", "优先级", "来源", "功能", "设计依据", "前置依赖", "完成定义")
+PENDING_SOURCES = {"用户提出", "Review-Defer", "问题诊断", "历史迁移"}
+CODE_PLACEMENT_HEADERS = ("代码区域", "职责", "代码落位规则")
+MODULE_HEADERS = ("模块", "职责", "对外边界")
+GLOBAL_CONTRACT_HEADERS = ("契约", "适用范围", "验证")
+BOUNDARY_HEADERS = ("边界", "内容")
+LAYER_HEADERS = ("层", "职责", "对应代码结构", "允许依赖")
+RESOURCE_HEADERS = ("适用范围", "不变量", "验证")
+RECOVERY_HEADERS = ("资源或失败点", "所有者", "恢复与清理")
+
+PROBLEM_HEADERS = ("问题", "成功结果")
+SHARED_CONTRACT_HEADERS = ("契约", "已确认约束")
+WORK_PACKAGE_HEADERS = ("工作包", "状态", "交付结果", "前置依赖", "设计章节")
+PACKAGE_CONTRACT_HEADERS = ("契约", "维度", "已确认约束")
+ACCEPTANCE_HEADERS = ("覆盖契约", "场景", "预期结果")
+CLARIFICATION_HEADERS = ("类型", "内容", "来源")
+CONTRACT_DIMENSIONS = (
+    "交付边界",
+    "参与者与权限",
+    "触发与输入",
+    "结果、状态与不变量",
+    "失败与恢复",
+    "AI 决策边界",
+)
+CLARIFICATION_TYPES = {"证据推断", "待确认"}
 DESIGN_STATES = {"澄清中", "已确认", "已实现", "已废弃"}
 WORK_PACKAGE_STATES = {"待澄清", "澄清中", "已确认", "开发中", "已完成", "已废弃"}
+TERMINAL_WORK_PACKAGE_STATES = {"已完成", "已废弃"}
+REFERENCED_WORK_PACKAGE_STATES = {"已确认", "开发中"}
+
 TASK_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 WORK_PACKAGE_ID_RE = re.compile(r"^WP-[A-Za-z0-9._-]+$")
+SHARED_CONTRACT_ID_RE = re.compile(r"^S-[A-Za-z0-9._-]+$")
+GLOBAL_CONTRACT_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 ANCHOR_RE = re.compile(r"<a\s+id=[\"']([A-Za-z0-9][A-Za-z0-9._-]*)[\"']\s*></a>", re.IGNORECASE)
 DESIGN_LINK_RE = re.compile(
     r"^\[[^]\n]+\]\((?:<)?([^\s>#]+\.md)#([A-Za-z0-9][A-Za-z0-9._-]*)(?:>)?\)$"
 )
+LOCAL_LINK_RE = re.compile(r"^\[[^]\n]+\]\(#([A-Za-z0-9][A-Za-z0-9._-]*)\)$")
 PLACEHOLDERS = (
     re.compile(r"<(?!/?a\b)[^>\n]+>", re.IGNORECASE),
     re.compile(r"\{\{[^}\n]+\}\}"),
@@ -46,17 +77,21 @@ PLACEHOLDERS = (
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 NUMBERED_HEADING_RE = re.compile(r"^\d+(?:\.\d+)*(?:[.、])?\s+")
-TERMINAL_WORK_PACKAGE_STATES = {"已完成", "已废弃"}
 
 
 @dataclass(frozen=True)
-class WorkPackage:
+class Heading:
+    index: int
+    level: int
+    title: str
+
+
+@dataclass(frozen=True)
+class WorkPackageSection:
     package_id: str
-    heading_index: int
-    end_index: int
+    start: int
+    end: int
     anchor: str | None
-    state: str | None
-    section: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,7 +111,7 @@ def read_document(path: Path) -> tuple[str | None, list[str]]:
 
 
 def markdown_structure_lines(text: str) -> tuple[list[str], bool]:
-    """Return same-length lines with fenced-code content blanked out."""
+    """Blank fenced-code content while preserving line numbers."""
     result: list[str] = []
     fence_character: str | None = None
     fence_length = 0
@@ -91,126 +126,120 @@ def markdown_structure_lines(text: str) -> tuple[list[str], bool]:
             else:
                 result.append(line)
             continue
-
-        closing = re.match(
-            rf"^ {{0,3}}{re.escape(fence_character)}{{{fence_length},}}\s*$",
-            line,
-        )
-        if closing:
-            fence_character = None
-            fence_length = 0
+        if match and not match.group(2).strip():
+            marker = match.group(1)
+            if marker[0] == fence_character and len(marker) >= fence_length:
+                fence_character = None
+                fence_length = 0
         result.append("")
-    return result, fence_character is not None
+    return result, fence_character is None
 
 
 def heading(line: str) -> tuple[int, str] | None:
     match = HEADING_RE.match(line)
     if not match:
         return None
-    title = re.sub(r"\s+#+\s*$", "", match.group(2)).strip()
-    return len(match.group(1)), title
+    return len(match.group(1)), match.group(2).strip()
 
 
 def normalized_heading(title: str) -> str:
-    return NUMBERED_HEADING_RE.sub("", title).strip()
+    without_closing = re.sub(r"[ \t]+#+[ \t]*$", "", title.strip())
+    return NUMBERED_HEADING_RE.sub("", without_closing).strip()
 
 
-def heading_entries(lines: list[str]) -> list[tuple[int, int, str]]:
-    entries: list[tuple[int, int, str]] = []
+def heading_entries(lines: list[str]) -> list[Heading]:
+    entries: list[Heading] = []
     for index, line in enumerate(lines):
         parsed = heading(line)
         if parsed:
-            level, title = parsed
-            entries.append((index, level, normalized_heading(title)))
+            entries.append(Heading(index, parsed[0], normalized_heading(parsed[1])))
     return entries
 
 
-def common_errors(text: str) -> list[str]:
+def common_errors(text: str) -> tuple[list[str], list[str]]:
+    lines, balanced = markdown_structure_lines(text)
     errors: list[str] = []
-    lines, unbalanced_fence = markdown_structure_lines(text)
-    if not text.strip():
-        return ["document is empty"]
-    first_heading = heading(lines[0]) if lines else None
-    if not first_heading or first_heading[0] != 1:
-        errors.append("first line must be a level-1 title")
-    if unbalanced_fence:
-        errors.append("unbalanced fenced code blocks")
+    if not balanced:
+        errors.append("unclosed fenced code block")
     structural_text = "\n".join(lines)
     for pattern in PLACEHOLDERS:
         match = pattern.search(structural_text)
         if match:
-            errors.append(f"unresolved placeholder: {match.group(0)}")
+            errors.append(f"unfinished placeholder found: {match.group(0)}")
             break
-    return errors
+    return lines, errors
 
 
 def markdown_cells(line: str) -> list[str]:
-    """Split a Markdown table row without treating escaped pipes as delimiters."""
-    source = line.strip()
-    if source.startswith("|"):
-        source = source[1:]
-    if source.endswith("|"):
-        slash_count = 0
-        index = len(source) - 2
-        while index >= 0 and source[index] == "\\":
-            slash_count += 1
-            index -= 1
-        if slash_count % 2 == 0:
-            source = source[:-1]
-
+    stripped = line.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return []
     cells: list[str] = []
-    buffer: list[str] = []
-    for character in source:
-        if character == "|":
-            slash_count = 0
-            index = len(buffer) - 1
-            while index >= 0 and buffer[index] == "\\":
-                slash_count += 1
-                index -= 1
-            if slash_count % 2:
-                buffer.pop()
-                buffer.append("|")
-                continue
-            cells.append("".join(buffer).strip())
-            buffer = []
-            continue
-        buffer.append(character)
-    cells.append("".join(buffer).strip())
+    current: list[str] = []
+    escaped = False
+    for char in stripped[1:-1]:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            current.append(char)
+            escaped = True
+        elif char == "|":
+            cells.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    cells.append("".join(current).strip())
     return cells
 
 
-def section_table(
-    lines: list[str], section_name: str, headers: tuple[str, ...], table_name: str
-) -> tuple[list[list[str]], list[str]]:
-    errors: list[str] = []
-    sections = [
-        index
-        for index, level, title in heading_entries(lines)
-        if level == 2 and title == section_name
-    ]
-    if not sections:
-        return [], [f"missing {table_name} section"]
-    if len(sections) > 1:
-        errors.append(f"duplicate {table_name} section")
-    start = sections[0]
-    end = next(
-        (
-            index
-            for index, level, _ in heading_entries(lines)
-            if index > start and level == 2
-        ),
-        len(lines),
-    )
-    table_lines = [line for line in lines[start + 1 : end] if line.strip().startswith("|")]
-    if len(table_lines) < 2:
-        return [], errors + [f"{table_name} table is missing"]
+def heading_block(entries: list[Heading], selected: Heading, line_count: int) -> tuple[int, int]:
+    end = line_count
+    for entry in entries:
+        if entry.index > selected.index and entry.level <= selected.level:
+            end = entry.index
+            break
+    return selected.index + 1, end
 
+
+def find_heading(
+    entries: list[Heading], title: str, start: int = 0, end: int | None = None
+) -> tuple[Heading | None, list[str]]:
+    limit = end if end is not None else 10**12
+    matches = [entry for entry in entries if start <= entry.index < limit and entry.title == title]
+    if not matches:
+        return None, [f"missing {title} section"]
+    if len(matches) > 1:
+        return matches[0], [f"duplicate {title} section"]
+    return matches[0], []
+
+
+def parse_table(
+    lines: list[str], start: int, end: int, headers: tuple[str, ...], table_name: str
+) -> tuple[list[list[str]], list[str]]:
+    table_start: int | None = None
+    for index in range(start, end):
+        if lines[index].strip().startswith("|"):
+            table_start = index
+            break
+    if table_start is None:
+        return [], [f"{table_name} table is missing"]
+
+    table_lines: list[str] = []
+    for index in range(table_start, end):
+        if not lines[index].strip().startswith("|"):
+            break
+        table_lines.append(lines[index])
+    if len(table_lines) < 2:
+        return [], [f"{table_name} table is incomplete"]
+
+    errors: list[str] = []
     parsed_headers = markdown_cells(table_lines[0])
     if tuple(parsed_headers) != headers:
         errors.append(f"{table_name} table headers must be: " + " | ".join(headers))
     separator = markdown_cells(table_lines[1])
     if len(separator) != len(headers) or not all(
-        re.fullmatch(r":?-{3,}:?", cell) for cell in separator
+        re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in separator
     ):
         errors.append(f"{table_name} table separator is invalid")
 
@@ -224,21 +253,60 @@ def section_table(
     return rows, errors
 
 
-def pending_table(lines: list[str]) -> tuple[list[list[str]], list[str]]:
-    return section_table(lines, "待开发功能", PENDING_HEADERS, "pending work")
+def table_under_heading(
+    lines: list[str],
+    entries: list[Heading],
+    heading_title: str,
+    headers: tuple[str, ...],
+    table_name: str,
+    start: int = 0,
+    end: int | None = None,
+) -> tuple[list[list[str]], list[str]]:
+    selected, errors = find_heading(entries, heading_title, start, end)
+    if selected is None:
+        return [], errors
+    block_start, block_end = heading_block(entries, selected, len(lines))
+    if end is not None:
+        block_end = min(block_end, end)
+    rows, table_errors = parse_table(lines, block_start, block_end, headers, table_name)
+    return rows, errors + table_errors
 
 
-def work_package_map_table(lines: list[str]) -> tuple[list[list[str]], list[str]]:
-    return section_table(lines, "工作包地图", WORK_PACKAGE_HEADERS, "work package map")
+def duplicate_values(values: list[str]) -> set[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    return duplicates
 
 
-def within_design_root(blueprint: Path, target: Path) -> bool:
-    design_root = (blueprint.parent / "docs" / "design").resolve()
-    try:
-        target.relative_to(design_root)
-        return True
-    except ValueError:
-        return False
+def split_ids(value: str) -> list[str]:
+    return [part.strip() for part in re.split(r"[、,，]", value)]
+
+
+def validate_dependency(
+    owner_id: str, value: str, valid_ids: set[str], id_pattern: re.Pattern[str], context: str
+) -> list[str]:
+    if value in {"无", "待澄清"}:
+        return []
+    dependencies = split_ids(value)
+    if not dependencies:
+        return [f"invalid {context} dependency for {owner_id}: {value}"]
+    errors: list[str] = []
+    seen: set[str] = set()
+    for dependency in dependencies:
+        if dependency in seen:
+            errors.append(f"duplicate {context} dependency for {owner_id}: {dependency}")
+        if not id_pattern.fullmatch(dependency):
+            errors.append(f"invalid {context} dependency for {owner_id}: {dependency}")
+        elif dependency == owner_id:
+            errors.append(f"self dependency for {owner_id}")
+        elif dependency not in valid_ids:
+            errors.append(f"unknown {context} dependency for {owner_id}: {dependency}")
+        seen.add(dependency)
+    return errors
 
 
 def explicit_anchors(lines: list[str]) -> list[str]:
@@ -253,81 +321,42 @@ def explicit_anchors(lines: list[str]) -> list[str]:
 def anchor_matches_package_id(anchor: str, package_id: str) -> bool:
     anchor_lower = anchor.lower()
     package_lower = package_id.lower()
-    if anchor_lower == package_lower:
-        return True
-    return (
+    return anchor_lower == package_lower or (
         anchor_lower.startswith(package_lower)
         and len(anchor_lower) > len(package_lower)
         and anchor_lower[len(package_lower)] in "-._"
     )
 
 
-def design_work_packages(lines: list[str]) -> list[WorkPackage]:
-    starts: list[tuple[int, str]] = []
-    entries = heading_entries(lines)
-    for index, level, title in entries:
-        match = re.fullmatch(r"(WP-[A-Za-z0-9._-]+)\s+\S.*", title)
-        if level == 2 and match:
-            starts.append((index, match.group(1)))
-
-    packages: list[WorkPackage] = []
-    for start, package_id in starts:
-        end = next(
-            (index for index, level, _ in entries if index > start and level == 2),
-            len(lines),
-        )
-        previous_index = start - 1
-        while previous_index >= 0 and not lines[previous_index].strip():
-            previous_index -= 1
-        anchor_match = (
-            ANCHOR_RE.fullmatch(lines[previous_index].strip())
-            if previous_index >= 0
-            else None
-        )
-        anchor = anchor_match.group(1) if anchor_match else None
-        section = "\n".join(lines[start:end])
-        state_match = re.search(r"^-\s*状态[：:]\s*(\S+)\s*$", section, re.MULTILINE)
-        state = state_match.group(1) if state_match else None
-        packages.append(WorkPackage(package_id, start, end, anchor, state, section))
+def work_package_sections(lines: list[str], entries: list[Heading]) -> list[WorkPackageSection]:
+    packages: list[WorkPackageSection] = []
+    for entry in entries:
+        if entry.level != 2:
+            continue
+        match = re.match(r"^(WP-[A-Za-z0-9._-]+)(?:\s+|$)", entry.title)
+        if not match:
+            continue
+        package_id = match.group(1)
+        _, end = heading_block(entries, entry, len(lines))
+        anchor = None
+        index = entry.index - 1
+        while index >= 0 and not lines[index].strip():
+            index -= 1
+        if index >= 0:
+            anchor_match = ANCHOR_RE.fullmatch(lines[index].strip())
+            if anchor_match:
+                anchor = anchor_match.group(1)
+        packages.append(WorkPackageSection(package_id, entry.index, end, anchor))
     return packages
 
 
-def duplicate_values(values: list[str]) -> set[str]:
-    seen: set[str] = set()
-    duplicates: set[str] = set()
-    for value in values:
-        if value in seen:
-            duplicates.add(value)
-        seen.add(value)
-    return duplicates
-
-
-def validate_dependency(
-    owner_id: str,
-    value: str,
-    valid_ids: set[str],
-    id_pattern: re.Pattern[str],
-    context: str,
-) -> list[str]:
-    if value in {"无", "待澄清"}:
-        return []
-    dependencies = re.split(r"\s*[、,，]\s*", value)
-    if not dependencies or any(not dependency for dependency in dependencies):
-        return [f"invalid {context} dependency for {owner_id}: {value}"]
-
-    errors: list[str] = []
-    seen: set[str] = set()
-    for dependency in dependencies:
-        if not id_pattern.fullmatch(dependency):
-            errors.append(f"invalid {context} dependency for {owner_id}: {dependency}")
-        elif dependency == owner_id:
-            errors.append(f"{context} {owner_id} must not depend on itself")
-        elif dependency not in valid_ids:
-            errors.append(f"unknown {context} dependency for {owner_id}: {dependency}")
-        elif dependency in seen:
-            errors.append(f"duplicate {context} dependency for {owner_id}: {dependency}")
-        seen.add(dependency)
-    return errors
+def within_design_root(blueprint: Path, target: Path) -> bool:
+    design_root = (blueprint.parent / "docs" / "design").resolve()
+    try:
+        target.relative_to(design_root)
+    except ValueError:
+        return False
+    return True
 
 
 def validate_design_reference(blueprint: Path, value: str) -> list[str]:
@@ -336,311 +365,324 @@ def validate_design_reference(blueprint: Path, value: str) -> list[str]:
     match = DESIGN_LINK_RE.fullmatch(value)
     if not match:
         return [f"design basis must be 待澄清 or one markdown file anchor link: {value}"]
-
     relative_path, anchor = match.groups()
     target = (blueprint.parent / relative_path).resolve()
     if not within_design_root(blueprint, target):
-        return [f"design document must be under docs/design: {relative_path}"]
-    if not target.is_file():
-        return [f"design document not found: {relative_path}"]
-    try:
-        target_text = target.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        return [f"cannot read design document {relative_path}: {exc}"]
-    lines, _ = markdown_structure_lines(target_text)
+        return [f"design basis must stay under docs/design: {relative_path}"]
+    design_errors, _ = validate_design(target)
+    if design_errors:
+        return [f"invalid design document {relative_path}: {error}" for error in design_errors]
+    text, errors = read_document(target)
+    if text is None:
+        return errors
+    lines, _ = common_errors(text)
     anchors = explicit_anchors(lines)
     if anchor not in anchors:
         return [f"design anchor not found: {relative_path}#{anchor}"]
-
-    packages = design_work_packages(lines)
-    duplicate_package_ids = duplicate_values([package.package_id for package in packages])
-    if duplicate_package_ids:
-        return [
-            "design document contains duplicate work package section: "
-            + ", ".join(sorted(duplicate_package_ids))
-        ]
-    matching_packages = [package for package in packages if package.anchor == anchor]
-    if len(matching_packages) != 1:
+    entries = heading_entries(lines)
+    packages = work_package_sections(lines, entries)
+    matching = [package for package in packages if package.anchor == anchor]
+    if len(matching) != 1:
         return [f"design anchor must identify one work package: {relative_path}#{anchor}"]
-    package = matching_packages[0]
+    package = matching[0]
     if not anchor_matches_package_id(anchor, package.package_id):
+        return [f"design anchor does not match work package {package.package_id}: {anchor}"]
+    rows, table_errors = table_under_heading(
+        lines, entries, "工作包地图", WORK_PACKAGE_HEADERS, "work package map"
+    )
+    if table_errors:
+        return [f"invalid design document {relative_path}: {error}" for error in table_errors]
+    state_by_id = {row[0]: row[1] for row in rows}
+    state = state_by_id.get(package.package_id)
+    if state is None:
+        return [f"design work package missing from map: {relative_path}#{anchor}"]
+    if state in TERMINAL_WORK_PACKAGE_STATES:
+        return [f"pending work cannot reference terminal design work package: {relative_path}#{anchor} ({state})"]
+    if state not in REFERENCED_WORK_PACKAGE_STATES:
         return [
-            f"design anchor does not match work package {package.package_id}: "
-            f"{relative_path}#{anchor}"
-        ]
-    if package.state not in WORK_PACKAGE_STATES:
-        return [f"design work package has invalid status: {package.package_id}"]
-    if package.state in TERMINAL_WORK_PACKAGE_STATES:
-        return [
-            f"terminal work package must be removed from pending work: "
-            f"{relative_path}#{anchor} ({package.state})"
+            "pending work must reference a confirmed or in-development design work package: "
+            f"{relative_path}#{anchor} ({state})"
         ]
     return []
 
 
 def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
-    text, errors = read_document(path)
-    warnings: list[str] = []
+    text, read_errors = read_document(path)
     if text is None:
-        return errors, warnings
-    errors.extend(common_errors(text))
-    lines, _ = markdown_structure_lines(text)
+        return read_errors, []
+    lines, errors = common_errors(text)
+    warnings: list[str] = []
+    entries = heading_entries(lines)
     structural_text = "\n".join(lines)
 
-    version_match = re.search(
-        r"^>\s*蓝图规范版本[：:]\s*([^\s]+)\s*$",
-        structural_text,
-        re.MULTILINE,
-    )
+    if len([entry for entry in entries if entry.level == 1]) != 1:
+        errors.append("blueprint must contain exactly one level-1 title")
+
+    version_match = re.search(r"^>\s*蓝图规范版本[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
     if not version_match or version_match.group(1) != BLUEPRINT_VERSION:
         found = version_match.group(1) if version_match else "missing"
-        errors.append(
-            f"blueprint format upgrade required: expected version {BLUEPRINT_VERSION}, found {found}"
-        )
+        errors.append(f"blueprint format upgrade required: expected version {BLUEPRINT_VERSION}, found {found}")
 
-    entries = heading_entries(lines)
-    positions: list[int] = []
-    for required in BLUEPRINT_SECTIONS:
-        matches = [
-            index
-            for index, level, title in entries
-            if level == 2 and title == required
-        ]
-        if not matches:
-            errors.append(f"missing level-2 section: {required}")
-        else:
-            positions.append(matches[0])
-            if len(matches) > 1:
-                errors.append(f"duplicate level-2 section: {required}")
-    if len(positions) == len(BLUEPRINT_SECTIONS) and positions != sorted(positions):
-        errors.append("level-2 blueprint sections are out of required order")
+    level_two = [entry.title for entry in entries if entry.level == 2]
+    if tuple(level_two) != BLUEPRINT_SECTIONS:
+        errors.append("blueprint level-2 sections must be exactly: " + " | ".join(BLUEPRINT_SECTIONS))
+    for entry in entries:
+        if entry.title in FORBIDDEN_BLUEPRINT_HEADINGS:
+            errors.append(f"redundant blueprint heading is forbidden in version 3: {entry.title}")
 
-    for boundary in BOUNDARY_PARTS:
-        if not any(level >= 3 and title == boundary for _, level, title in entries):
-            errors.append(f"missing project development boundary category: {boundary}")
+    required_tables = (
+        ("代码落位规则", CODE_PLACEMENT_HEADERS, "code placement"),
+        ("模块职责", MODULE_HEADERS, "module responsibility"),
+        ("全局契约", GLOBAL_CONTRACT_HEADERS, "global contract"),
+        ("开发决策边界", BOUNDARY_HEADERS, "development boundary"),
+        ("待开发功能", PENDING_HEADERS, "pending work"),
+        ("分层与代码映射", LAYER_HEADERS, "layer mapping"),
+        ("数据与资源安全", RESOURCE_HEADERS, "data and resource safety"),
+        ("运行与恢复", RECOVERY_HEADERS, "runtime recovery"),
+    )
+    parsed_tables: dict[str, list[list[str]]] = {}
+    for section, headers, name in required_tables:
+        rows, table_errors = table_under_heading(lines, entries, section, headers, name)
+        errors.extend(table_errors)
+        parsed_tables[section] = rows
+        if section != "待开发功能" and not rows:
+            errors.append(f"{name} table must contain at least one row")
 
-    rows, table_errors = pending_table(lines)
-    errors.extend(table_errors)
-    seen_ids: set[str] = set()
-    for cells in rows:
-        task_id, priority, feature, design_basis, dependency, completion = cells
+    contract_ids = [row[0] for row in parsed_tables.get("全局契约", [])]
+    for contract_id in contract_ids:
+        if not GLOBAL_CONTRACT_ID_RE.fullmatch(contract_id):
+            errors.append(f"invalid global contract id: {contract_id}")
+    for duplicate in sorted(duplicate_values(contract_ids)):
+        errors.append(f"duplicate global contract id: {duplicate}")
+
+    boundary_rows = parsed_tables.get("开发决策边界", [])
+    boundary_names = [row[0] for row in boundary_rows]
+    if tuple(boundary_names) != BOUNDARY_VALUES:
+        errors.append("development boundary rows must be exactly: " + " | ".join(BOUNDARY_VALUES))
+
+    pending_rows = parsed_tables.get("待开发功能", [])
+    pending_ids = [row[0] for row in pending_rows]
+    valid_pending_ids = set(pending_ids)
+    for duplicate in sorted(duplicate_values(pending_ids)):
+        errors.append(f"duplicate pending work id: {duplicate}")
+    for cells in pending_rows:
+        task_id, priority, source, feature, design_basis, dependency, completion = cells
         if not TASK_ID_RE.fullmatch(task_id):
             errors.append(f"invalid pending work id: {task_id}")
-        elif task_id in seen_ids:
-            errors.append(f"duplicate pending work id: {task_id}")
-        seen_ids.add(task_id)
-        for label, value in (
+        if source not in PENDING_SOURCES:
+            errors.append(f"invalid pending work source for {task_id}: {source}")
+        for field_name, value in (
             ("priority", priority),
             ("feature", feature),
+            ("design basis", design_basis),
             ("dependency", dependency),
-            ("completion definition", completion),
+            ("completion", completion),
         ):
             if not value:
-                errors.append(f"pending work {task_id or '<empty>'} has empty {label}")
+                errors.append(f"empty {field_name} for pending work {task_id}")
         errors.extend(validate_design_reference(path, design_basis))
-    valid_task_ids = {
-        cells[0] for cells in rows if TASK_ID_RE.fullmatch(cells[0])
-    }
-    for task_id, _, _, _, dependency, _ in rows:
-        if task_id:
-            errors.extend(
-                validate_dependency(
-                    task_id,
-                    dependency,
-                    valid_task_ids,
-                    TASK_ID_RE,
-                    "pending work",
-                )
-            )
-
-    if not re.search(r"必须|不得|shall|must", structural_text, re.IGNORECASE):
-        warnings.append("no explicit mandatory project requirement found")
-    if not re.search(
-        r"失败|错误|超时|取消|恢复|failure|error|timeout|cancel|recovery",
-        structural_text,
-        re.IGNORECASE,
-    ):
-        warnings.append("project-level failure or recovery semantics may be missing")
+    for cells in pending_rows:
+        errors.extend(
+            validate_dependency(cells[0], cells[5], valid_pending_ids, TASK_ID_RE, "pending work")
+        )
     return errors, warnings
 
 
 def validate_design(path: Path) -> tuple[list[str], list[str]]:
-    text, errors = read_document(path)
-    warnings: list[str] = []
+    text, read_errors = read_document(path)
     if text is None:
-        return errors, warnings
-    errors.extend(common_errors(text))
-    lines, _ = markdown_structure_lines(text)
+        return read_errors, []
+    lines, errors = common_errors(text)
+    warnings: list[str] = []
+    entries = heading_entries(lines)
     structural_text = "\n".join(lines)
 
-    state_match = re.search(
-        r"^>\s*设计状态[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE
-    )
+    if len([entry for entry in entries if entry.level == 1]) != 1:
+        errors.append("design must contain exactly one level-1 title")
+
+    version_match = re.search(r"^>\s*设计规范版本[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
+    if not version_match or version_match.group(1) != DESIGN_VERSION:
+        found = version_match.group(1) if version_match else "missing"
+        errors.append(f"design format upgrade required: expected version {DESIGN_VERSION}, found {found}")
+
+    state_match = re.search(r"^>\s*设计状态[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
     state = state_match.group(1) if state_match else None
     if state not in DESIGN_STATES:
-        errors.append(
-            "design status must be one of: " + ", ".join(sorted(DESIGN_STATES))
-        )
-    if not re.search(r"^>\s*关联待办[：:]\s*\S+", structural_text, re.MULTILINE):
-        errors.append("missing related pending work metadata")
-    reading_match = re.search(
-        r"^>\s*必读范围[：:]\s*(.+)$", structural_text, re.MULTILINE
-    )
-    if not reading_match:
-        errors.append("missing required reading metadata")
-    else:
-        reading_scope = reading_match.group(1)
-        for required_term in ("PROJECT_BLUEPRINT.md", "公共上下文", "当前工作包", "直接依赖"):
-            if required_term not in reading_scope:
-                errors.append(f"required reading metadata missing scope: {required_term}")
-        if re.search(r"整份|全文|全部工作包|所有工作包", reading_scope):
-            errors.append("required reading metadata must not load the whole epic design")
+        errors.append("design status must be one of: " + ", ".join(sorted(DESIGN_STATES)))
 
-    entries = heading_entries(lines)
-    level_two_requirements = ("公共上下文", "工作包地图", "证据推断", "待确认事项")
-    for required in level_two_requirements:
-        matches = [
-            index
-            for index, level, title in entries
-            if level == 2 and title == required
-        ]
-        if not matches:
-            errors.append(f"missing design semantic section: {required}")
-        elif len(matches) > 1:
-            errors.append(f"duplicate design semantic section: {required}")
+    metadata_match = re.search(r"^>\s*工作包[：:]\s*(.+?)\s*$", structural_text, re.MULTILINE)
+    metadata_ids = split_ids(metadata_match.group(1)) if metadata_match else []
+    if not metadata_match:
+        errors.append("missing design work package metadata")
+    for package_id in metadata_ids:
+        if not WORK_PACKAGE_ID_RE.fullmatch(package_id):
+            errors.append(f"invalid design metadata work package id: {package_id}")
+    for duplicate in sorted(duplicate_values(metadata_ids)):
+        errors.append(f"duplicate design metadata work package id: {duplicate}")
 
-    public_sections = [
-        index
-        for index, level, title in entries
-        if level == 2 and title == "公共上下文"
-    ]
-    if public_sections:
-        public_start = public_sections[0]
-        public_end = next(
-            (
-                index
-                for index, level, _ in entries
-                if index > public_start and level == 2
-            ),
-            len(lines),
-        )
-        public_titles = {
-            title
-            for index, level, title in entries
-            if public_start < index < public_end and level >= 3
-        }
-        for label, accepted_titles in (
-            ("目标", {"目标", "问题与目标"}),
-            ("非目标", {"非目标", "明确非目标"}),
-            (
-                "共享模型或不变量",
-                {
-                    "共享模型",
-                    "共享领域模型",
-                    "共享不变量",
-                    "模型与不变量",
-                    "共享模型与不变量",
-                    "共享领域模型与不变量",
-                },
-            ),
-        ):
-            if not public_titles.intersection(accepted_titles):
-                errors.append(f"missing design semantic section: {label}")
+    level_two = [entry.title for entry in entries if entry.level == 2]
+    if not level_two or level_two[0:2] != ["共享约束", "工作包地图"]:
+        errors.append("design must start with level-2 sections: 共享约束 | 工作包地图")
+    allowed_fixed = {"共享约束", "工作包地图", "澄清暂存"}
+    for title in level_two:
+        if title in allowed_fixed or WORK_PACKAGE_ID_RE.match(title.split()[0] if title else ""):
+            continue
+        errors.append(f"unexpected design level-2 section: {title}")
+    if level_two.count("共享约束") != 1:
+        errors.append("design must contain exactly one shared constraints section")
+    if level_two.count("工作包地图") != 1:
+        errors.append("design must contain exactly one work package map section")
 
     anchors = explicit_anchors(lines)
-    if len(anchors) != len(set(anchors)):
-        errors.append("duplicate explicit anchors found")
+    for duplicate in sorted(duplicate_values(anchors)):
+        errors.append(f"duplicate explicit anchor: {duplicate}")
     if "shared-context" not in anchors:
         errors.append("missing explicit shared-context anchor")
 
-    packages = design_work_packages(lines)
-    if not packages:
-        errors.append("design document must contain at least one WP-* section")
-    package_ids = [package.package_id for package in packages]
-    duplicate_package_ids = duplicate_values(package_ids)
-    for package_id in sorted(duplicate_package_ids):
-        errors.append(f"duplicate work package section: {package_id}")
-
-    section_statuses: dict[str, str | None] = {}
-    package_anchors: dict[str, str] = {}
-    required_package_sections = (
-        "状态、范围与非目标",
-        "前置条件、输入与输出",
-        "正常行为、权限与状态",
-        "边界、失败与恢复",
-        "依赖与影响范围",
-        "验收标准",
+    problem_rows, table_errors = table_under_heading(
+        lines, entries, "问题与成功结果", PROBLEM_HEADERS, "problem and result"
     )
-    for package in packages:
-        package_id = package.package_id
-        if package.anchor is None or not anchor_matches_package_id(package.anchor, package_id):
-            errors.append(f"work package {package_id} needs a matching explicit anchor")
-        elif package_id not in package_anchors:
-            package_anchors[package_id] = package.anchor
+    errors.extend(table_errors)
+    if not problem_rows:
+        errors.append("problem and result table must contain at least one row")
 
-        package_titles = {
-            title
-            for _, level, title in heading_entries(package.section.splitlines())
-            if level == 3
-        }
-        for required in required_package_sections:
-            if required not in package_titles:
-                errors.append(f"work package {package_id} missing section: {required}")
-        if package_id not in section_statuses:
-            section_statuses[package_id] = package.state
-        if package.state not in WORK_PACKAGE_STATES:
-            errors.append(
-                f"work package {package_id} status must be one of: "
-                + ", ".join(sorted(WORK_PACKAGE_STATES))
-            )
+    shared_rows, table_errors = table_under_heading(
+        lines, entries, "共享契约", SHARED_CONTRACT_HEADERS, "shared contract"
+    )
+    errors.extend(table_errors)
+    if not shared_rows:
+        errors.append("shared contract table must contain at least one row")
+    shared_ids = [row[0] for row in shared_rows]
+    for contract_id, constraint in shared_rows:
+        if not SHARED_CONTRACT_ID_RE.fullmatch(contract_id):
+            errors.append(f"invalid shared contract id: {contract_id}")
+        if not constraint:
+            errors.append(f"empty confirmed constraint for shared contract {contract_id}")
 
-    map_rows, map_errors = work_package_map_table(lines)
+    map_rows, map_errors = table_under_heading(
+        lines, entries, "工作包地图", WORK_PACKAGE_HEADERS, "work package map"
+    )
     errors.extend(map_errors)
-    map_statuses: dict[str, str] = {}
-    valid_package_ids = set(package_ids)
-    for package_id, package_state, dependency, section_link, combination in map_rows:
+    if not map_rows:
+        errors.append("work package map must contain at least one row")
+
+    package_sections = work_package_sections(lines, entries)
+    section_ids = [package.package_id for package in package_sections]
+    for duplicate in sorted(duplicate_values(section_ids)):
+        errors.append(f"duplicate work package section: {duplicate}")
+    for package in package_sections:
+        if package.anchor is None or not anchor_matches_package_id(package.anchor, package.package_id):
+            errors.append(f"work package {package.package_id} needs a matching explicit anchor")
+
+    map_ids = [row[0] for row in map_rows]
+    for duplicate in sorted(duplicate_values(map_ids)):
+        errors.append(f"duplicate work package map id: {duplicate}")
+    valid_package_ids = set(map_ids)
+    state_by_id: dict[str, str] = {}
+    anchor_by_id = {package.package_id: package.anchor for package in package_sections}
+    for package_id, package_state, deliverable, dependency, section_link in map_rows:
         if not WORK_PACKAGE_ID_RE.fullmatch(package_id):
-            errors.append(f"invalid work package map id: {package_id}")
-        elif package_id in map_statuses:
-            errors.append(f"duplicate work package map id: {package_id}")
+            errors.append(f"invalid work package id: {package_id}")
         if package_state not in WORK_PACKAGE_STATES:
-            errors.append(f"invalid work package map status for {package_id}: {package_state}")
+            errors.append(f"invalid work package state for {package_id}: {package_state}")
+        if not deliverable:
+            errors.append(f"empty deliverable for work package {package_id}")
         errors.extend(
-            validate_dependency(
-                package_id,
-                dependency,
-                valid_package_ids,
-                WORK_PACKAGE_ID_RE,
-                "work package map",
-            )
+            validate_dependency(package_id, dependency, valid_package_ids, WORK_PACKAGE_ID_RE, "work package")
         )
-        if not combination:
-            errors.append(f"work package map combination acceptance is empty: {package_id}")
-        link_match = re.fullmatch(
-            r"\[[^]\n]+\]\(#([A-Za-z0-9][A-Za-z0-9._-]*)\)", section_link
-        )
+        link_match = LOCAL_LINK_RE.fullmatch(section_link)
         if not link_match:
             errors.append(f"invalid work package map section link: {package_id}")
-        elif link_match.group(1) not in anchors:
-            errors.append(f"work package map anchor not found: {package_id}#{link_match.group(1)}")
-        elif package_anchors.get(package_id) != link_match.group(1):
+        elif link_match.group(1) != anchor_by_id.get(package_id):
             errors.append(f"work package map link must target {package_id} section anchor")
-        if package_id not in map_statuses:
-            map_statuses[package_id] = package_state
-    if set(map_statuses) != set(section_statuses):
-        errors.append("work package map ids must exactly match WP-* sections")
-    for package_id in set(map_statuses) & set(section_statuses):
-        if map_statuses[package_id] != section_statuses[package_id]:
-            errors.append(f"work package status mismatch between map and section: {package_id}")
+        state_by_id[package_id] = package_state
 
-    package_states = [value for value in section_statuses.values() if value is not None]
+    if set(map_ids) != set(section_ids):
+        errors.append("work package map ids must exactly match WP-* sections")
+    if set(metadata_ids) != set(map_ids):
+        errors.append("design metadata work package ids must exactly match work package map")
+
+    all_contract_ids = list(shared_ids)
+    acceptance_coverage: set[str] = set()
+    for package in package_sections:
+        contract_rows, contract_errors = table_under_heading(
+            lines,
+            entries,
+            "契约",
+            PACKAGE_CONTRACT_HEADERS,
+            f"{package.package_id} contract",
+            package.start,
+            package.end,
+        )
+        errors.extend(contract_errors)
+        contract_ids = [row[0] for row in contract_rows]
+        dimensions = [row[1] for row in contract_rows]
+        expected_contract = re.compile(rf"^{re.escape(package.package_id)}-C[0-9]+$")
+        for contract_id, _, constraint in contract_rows:
+            if not expected_contract.fullmatch(contract_id):
+                errors.append(f"invalid contract id for {package.package_id}: {contract_id}")
+            if not constraint:
+                errors.append(f"empty confirmed constraint for contract {contract_id}")
+        for duplicate in sorted(duplicate_values(contract_ids)):
+            errors.append(f"duplicate contract id: {duplicate}")
+        if tuple(dimensions) != CONTRACT_DIMENSIONS:
+            errors.append(
+                f"{package.package_id} contract dimensions must be exactly: "
+                + " | ".join(CONTRACT_DIMENSIONS)
+            )
+        all_contract_ids.extend(contract_ids)
+
+        acceptance_rows, acceptance_errors = table_under_heading(
+            lines,
+            entries,
+            "验收",
+            ACCEPTANCE_HEADERS,
+            f"{package.package_id} acceptance",
+            package.start,
+            package.end,
+        )
+        errors.extend(acceptance_errors)
+        if not acceptance_rows:
+            errors.append(f"{package.package_id} acceptance table must contain at least one row")
+        for coverage, scenario, expected in acceptance_rows:
+            if not scenario or not expected:
+                errors.append(f"empty acceptance scenario or result for {package.package_id}")
+            for contract_id in split_ids(coverage):
+                if not contract_id:
+                    errors.append(f"empty acceptance coverage id for {package.package_id}")
+                else:
+                    acceptance_coverage.add(contract_id)
+
+    for duplicate in sorted(duplicate_values(all_contract_ids)):
+        errors.append(f"duplicate contract id across design: {duplicate}")
+    known_contract_ids = set(all_contract_ids)
+    for contract_id in sorted(acceptance_coverage - known_contract_ids):
+        errors.append(f"acceptance references unknown contract: {contract_id}")
+    for contract_id in sorted(known_contract_ids - acceptance_coverage):
+        errors.append(f"contract lacks acceptance coverage: {contract_id}")
+
+    clarification_headings = [entry for entry in entries if entry.title == "澄清暂存"]
+    if state == "澄清中":
+        clarification_rows, clarification_errors = table_under_heading(
+            lines, entries, "澄清暂存", CLARIFICATION_HEADERS, "clarification staging"
+        )
+        errors.extend(clarification_errors)
+        if not clarification_rows:
+            errors.append("clarifying design must contain clarification staging rows")
+        if not any(row[0] == "待确认" for row in clarification_rows):
+            errors.append("clarifying design must contain at least one pending clarification")
+        for row in clarification_rows:
+            if row[0] not in CLARIFICATION_TYPES:
+                errors.append(f"invalid clarification type: {row[0]}")
+    elif clarification_headings:
+        errors.append("non-clarifying design must not contain clarification staging")
+
+    package_states = list(state_by_id.values())
     has_unconfirmed = any(value in {"待澄清", "澄清中"} for value in package_states)
     all_terminal = bool(package_states) and all(
         value in TERMINAL_WORK_PACKAGE_STATES for value in package_states
     )
-    all_deprecated = bool(package_states) and all(
-        value == "已废弃" for value in package_states
-    )
+    all_deprecated = bool(package_states) and all(value == "已废弃" for value in package_states)
     if state == "澄清中" and package_states and not has_unconfirmed:
         errors.append("clarifying design must contain an unconfirmed work package")
     elif state == "已确认":
@@ -652,10 +694,7 @@ def validate_design(path: Path) -> tuple[list[str], list[str]]:
         if not all_terminal:
             errors.append("implemented design contains an unfinished work package")
         elif all_deprecated:
-            errors.append(
-                "implemented design with only deprecated work packages must be deprecated "
-                "and provide a replacement"
-            )
+            errors.append("implemented design with only deprecated work packages must be deprecated")
     elif state == "已废弃":
         if package_states and any(value != "已废弃" for value in package_states):
             errors.append("deprecated design must deprecate every work package")
