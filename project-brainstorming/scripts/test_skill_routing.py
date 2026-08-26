@@ -35,13 +35,21 @@ class SkillRoutingContractTests(unittest.TestCase):
 
     def test_session_cache_requires_same_project_path_and_fingerprint(self) -> None:
         self.assertIn("蓝图 SHA-256", SKILL)
+        self.assertIn("访谈 SOP SHA-256", SKILL)
         self.assertIn("同一份稳定快照", SKILL)
         self.assertIn("在读取前后分别计算 SHA-256", SKILL)
         self.assertIn("两次不一致时丢弃正文并重新读取", SKILL)
-        self.assertIn("项目、路径和指纹均未变化时", SKILL)
+        self.assertIn("每次继续访谈前", SKILL)
+        self.assertIn("项目、路径、蓝图指纹和 SOP 指纹均未变化时", SKILL)
         self.assertIn("不要重读完整蓝图或访谈 SOP", SKILL)
-        self.assertIn("指纹变化时立即废弃旧理解并完整重读", SKILL)
+        self.assertIn("SOP 指纹未记录或发生变化时只完整重读访谈 SOP", SKILL)
+        self.assertIn("保留已确认的项目理解", SKILL)
+        self.assertIn("连续变化则停止并报告", SKILL)
         self.assertIn("不得跨会话或跨项目复用缓存", SKILL)
+        self.assertIn("本会话首次提问，或 SOP 指纹未记录/变化", SKILL)
+        self.assertIn("会话未记录 SOP SHA-256、当前指纹与记录不同时完整读取", CONVERSATION_SOP)
+        self.assertIn("SOP 指纹未变化时才复用", CONVERSATION_SOP)
+        self.assertNotIn("蓝图指纹未变化时复用，不重复加载", CONVERSATION_SOP)
 
     def test_v3_skips_migration_but_legacy_and_audit_load_it(self) -> None:
         existence_check = SKILL.index("检查精确蓝图路径是否存在")
@@ -113,6 +121,9 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("立即调用下一次原生工具", CONVERSATION_SOP)
         self.assertIn("每次仍只呈现一个问题", CONVERSATION_SOP)
         self.assertIn("改用一个普通文本问题并等待", CONVERSATION_SOP)
+        self.assertIn("选择项及其备注或自由补充作为同一答案", CONVERSATION_SOP)
+        self.assertIn("最新明确补充覆盖选项的默认含义", CONVERSATION_SOP)
+        self.assertIn("处理补充说明或输出确认都不是暂停或结束信号", CONVERSATION_SOP)
 
     def test_structured_answer_stops_only_at_explicit_boundaries(self) -> None:
         self.assertIn("话题闭环、用户要求暂停", CONVERSATION_SOP)
