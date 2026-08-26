@@ -32,6 +32,7 @@ def valid_design(
     package_states: tuple[str, str] = ("已确认", "已确认"),
     include_staging: bool = False,
     replacement: bool = False,
+    evolution: str = "无",
 ) -> str:
     package_sections: list[str] = []
     for index, package_id in enumerate(("WP-01", "WP-02"), start=1):
@@ -80,6 +81,7 @@ def valid_design(
 
         > 设计规范版本：3
         > 设计状态：{state}
+        > 演进来源：{evolution}
         > 工作包：WP-01、WP-02
         {replacement_line}
         <a id="shared-context"></a>
@@ -217,7 +219,7 @@ class ValidatorTests(unittest.TestCase):
         blueprint_path.write_text(blueprint, encoding="utf-8")
         design_path = None
         if design is not None:
-            design_path = root / "docs" / "design" / "epic.md"
+            design_path = root / "docs" / "design" / "2026-08-26_epic.md"
             design_path.parent.mkdir(parents=True, exist_ok=True)
             design_path.write_text(design, encoding="utf-8")
         return blueprint_path, design_path
@@ -225,8 +227,8 @@ class ValidatorTests(unittest.TestCase):
     def test_two_pending_items_reference_different_work_packages_in_one_design(self) -> None:
         rows = "\n".join(
             (
-                "| TASK-01 | P1 | 用户提出 | 第一项 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 第一项可验收 |",
-                "| TASK-02 | P1 | 问题诊断 | 第二项 | [WP-02](docs/design/epic.md#wp-02-example) | TASK-01 | 第二项可验收 |",
+                "| TASK-01 | P1 | 用户提出 | 第一项 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 第一项可验收 |",
+                "| TASK-02 | P1 | 问题诊断 | 第二项 | [WP-02](docs/design/2026-08-26_epic.md#wp-02-example) | TASK-01 | 第二项可验收 |",
             )
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -237,12 +239,12 @@ class ValidatorTests(unittest.TestCase):
 
     def test_pending_item_rejects_design_document_from_older_format(self) -> None:
         design = valid_design().replace("设计规范版本：3", "设计规范版本：2")
-        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
             blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
             result = self.run_validator(blueprint)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("invalid design document docs/design/epic.md", result.stdout)
+            self.assertIn("invalid design document docs/design/2026-08-26_epic.md", result.stdout)
             self.assertIn("design format upgrade required: expected version 3, found 2", result.stdout)
 
     def test_pending_item_rejects_fenced_fake_design_version(self) -> None:
@@ -250,7 +252,7 @@ class ValidatorTests(unittest.TestCase):
             "> 设计规范版本：3",
             "> 设计规范版本：2\n\n```text\n> 设计规范版本：3\n```",
         )
-        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
             blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
             result = self.run_validator(blueprint)
@@ -271,13 +273,13 @@ class ValidatorTests(unittest.TestCase):
                 "invalid work package state",
             ),
         )
-        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
         for design, expected_error in invalid_designs:
             with self.subTest(expected_error=expected_error), tempfile.TemporaryDirectory() as directory:
                 blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
                 result = self.run_validator(blueprint)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("invalid design document docs/design/epic.md", result.stdout)
+                self.assertIn("invalid design document docs/design/2026-08-26_epic.md", result.stdout)
                 self.assertIn(expected_error, result.stdout)
 
     def test_direct_migration_accepts_historical_source_and_pending_design(self) -> None:
@@ -341,7 +343,7 @@ class ValidatorTests(unittest.TestCase):
 
     def test_terminal_design_work_package_cannot_remain_pending(self) -> None:
         design = valid_design(state="已实现", package_states=("已完成", "已完成"))
-        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
             blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
             result = self.run_validator(blueprint)
@@ -349,7 +351,7 @@ class ValidatorTests(unittest.TestCase):
             self.assertIn("pending work cannot reference terminal", result.stdout)
 
     def test_unconfirmed_design_work_package_cannot_be_referenced(self) -> None:
-        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/epic.md#wp-01-example) | 无 | 可执行 |"
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
         for package_state in ("待澄清", "澄清中"):
             design = valid_design(
                 state="澄清中",
@@ -363,7 +365,7 @@ class ValidatorTests(unittest.TestCase):
                 self.assertIn("must reference a confirmed or in-development", result.stdout)
 
     def test_missing_design_anchor_fails(self) -> None:
-        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP](docs/design/epic.md#wp-99-missing) | 无 | 可执行 |"
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP](docs/design/2026-08-26_epic.md#wp-99-missing) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
             blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), valid_design())
             result = self.run_validator(blueprint)
@@ -424,9 +426,110 @@ class ValidatorTests(unittest.TestCase):
 
     def test_valid_confirmed_design_passes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(valid_design(), encoding="utf-8")
             self.assertEqual(self.run_validator(path, design=True).returncode, 0)
+
+    def test_design_filename_requires_valid_creation_date_and_specific_name(self) -> None:
+        invalid_names = (
+            "design.md",
+            "2026-8-26_design.md",
+            "2026-02-30_design.md",
+            "2026-08-26_.md",
+            "2026-08-26_design name.md",
+        )
+        for name in invalid_names:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / name
+                path.write_text(valid_design(), encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("design filename", result.stdout)
+
+    def test_design_filename_accepts_chinese_specific_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-26_设计文档命名.md"
+            path.write_text(valid_design(), encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_evolution_source_requires_same_directory_terminal_design(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old_design = root / "2026-08-25_原功能.md"
+            old_design.write_text(
+                valid_design(state="已实现", package_states=("已完成", "已完成")),
+                encoding="utf-8",
+            )
+            new_design = root / "2026-08-26_功能演进.md"
+            new_design.write_text(
+                valid_design(evolution="[原功能](./2026-08-25_原功能.md)"), encoding="utf-8"
+            )
+            result = self.run_validator(new_design, design=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_evolution_source_rejects_self_missing_and_nonterminal_targets(self) -> None:
+        cases = (
+            ("[自己](2026-08-26_功能演进.md)", None, "must not reference itself"),
+            ("[缺失](2026-08-25_缺失.md)", None, "file not found"),
+            (
+                "[未完成](2026-08-25_未完成功能.md)",
+                valid_design(),
+                "must be terminal",
+            ),
+        )
+        for evolution, target_content, expected in cases:
+            with self.subTest(evolution=evolution), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                if target_content is not None:
+                    (root / "2026-08-25_未完成功能.md").write_text(
+                        target_content, encoding="utf-8"
+                    )
+                path = root / "2026-08-26_功能演进.md"
+                path.write_text(valid_design(evolution=evolution), encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stdout)
+
+    def test_evolution_source_rejects_outside_nested_and_legacy_paths(self) -> None:
+        cases = (
+            ("[上级](../2026-08-25_原功能.md)", "must stay in the same"),
+            ("[子目录](nested/2026-08-25_原功能.md)", "must stay in the same"),
+            ("[旧式名称](epic.md)", "filename must match"),
+        )
+        for evolution, expected in cases:
+            with self.subTest(evolution=evolution), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "2026-08-26_功能演进.md"
+                path.write_text(valid_design(evolution=evolution), encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stdout)
+
+    def test_evolution_source_rejects_inconsistent_terminal_design(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old_design = root / "2026-08-25_原功能.md"
+            old_design.write_text(valid_design(state="已实现"), encoding="utf-8")
+            new_design = root / "2026-08-26_功能演进.md"
+            new_design.write_text(
+                valid_design(evolution="[原功能](2026-08-25_原功能.md)"), encoding="utf-8"
+            )
+            result = self.run_validator(new_design, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("implemented design contains an unfinished work package", result.stdout)
+
+    def test_design_requires_exactly_one_evolution_source_metadata(self) -> None:
+        designs = (
+            valid_design().replace("> 演进来源：无\n", ""),
+            valid_design().replace("> 演进来源：无", "> 演进来源：无\n> 演进来源：无"),
+        )
+        for design in designs:
+            with self.subTest(), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "2026-08-26_design.md"
+                path.write_text(design, encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("exactly one evolution source", result.stdout)
 
     def test_commented_or_inline_anchor_does_not_satisfy_design_contract(self) -> None:
         for replacement in (
@@ -435,7 +538,7 @@ class ValidatorTests(unittest.TestCase):
         ):
             design = valid_design().replace('<a id="shared-context"></a>', replacement)
             with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "design.md"
+                path = Path(directory) / "2026-08-26_design.md"
                 path.write_text(design, encoding="utf-8")
                 result = self.run_validator(path, design=True)
                 self.assertNotEqual(result.returncode, 0)
@@ -446,7 +549,7 @@ class ValidatorTests(unittest.TestCase):
             state="澄清中", package_states=("澄清中", "待澄清"), include_staging=True
         )
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -454,7 +557,7 @@ class ValidatorTests(unittest.TestCase):
     def test_clarifying_design_without_staging_fails(self) -> None:
         design = valid_design(state="澄清中", package_states=("澄清中", "待澄清"))
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
@@ -463,7 +566,7 @@ class ValidatorTests(unittest.TestCase):
     def test_confirmed_design_must_not_keep_staging(self) -> None:
         design = valid_design(include_staging=True)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
@@ -475,7 +578,7 @@ class ValidatorTests(unittest.TestCase):
             "| WP-01-C06 | 交付边界 | 重复维度 |",
         )
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
@@ -497,7 +600,7 @@ class ValidatorTests(unittest.TestCase):
         )
         for design, expected_error in invalid_designs:
             with self.subTest(expected_error=expected_error), tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "design.md"
+                path = Path(directory) / "2026-08-26_design.md"
                 path.write_text(design, encoding="utf-8")
                 result = self.run_validator(path, design=True)
                 self.assertNotEqual(result.returncode, 0)
@@ -508,7 +611,7 @@ class ValidatorTests(unittest.TestCase):
             "S-01、WP-01-C01", "S-01、UNKNOWN-C01、WP-01-C01", 1
         )
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
@@ -519,7 +622,7 @@ class ValidatorTests(unittest.TestCase):
         for coverage in (f"、{original}", f"{original}、", original.replace("、", "、、", 1)):
             design = valid_design().replace(original, coverage, 1)
             with self.subTest(coverage=coverage), tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "design.md"
+                path = Path(directory) / "2026-08-26_design.md"
                 path.write_text(design, encoding="utf-8")
                 result = self.run_validator(path, design=True)
                 self.assertNotEqual(result.returncode, 0)
@@ -528,7 +631,7 @@ class ValidatorTests(unittest.TestCase):
     def test_uncovered_contract_fails(self) -> None:
         design = valid_design().replace("、WP-02-C06", "", 1)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
@@ -537,7 +640,7 @@ class ValidatorTests(unittest.TestCase):
     def test_design_metadata_must_match_map(self) -> None:
         design = valid_design().replace("> 工作包：WP-01、WP-02", "> 工作包：WP-01")
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
@@ -547,7 +650,7 @@ class ValidatorTests(unittest.TestCase):
         for metadata in ("WP-01、WP-02、", "、WP-01、WP-02", "WP-01、、WP-02"):
             design = valid_design().replace("> 工作包：WP-01、WP-02", f"> 工作包：{metadata}")
             with self.subTest(metadata=metadata), tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "design.md"
+                path = Path(directory) / "2026-08-26_design.md"
                 path.write_text(design, encoding="utf-8")
                 result = self.run_validator(path, design=True)
                 self.assertNotEqual(result.returncode, 0)
@@ -556,7 +659,7 @@ class ValidatorTests(unittest.TestCase):
     def test_implemented_design_requires_terminal_packages(self) -> None:
         design = valid_design(state="已实现")
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
@@ -565,7 +668,7 @@ class ValidatorTests(unittest.TestCase):
     def test_implemented_design_accepts_completed_and_deprecated_packages(self) -> None:
         design = valid_design(state="已实现", package_states=("已完成", "已废弃"))
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -573,7 +676,7 @@ class ValidatorTests(unittest.TestCase):
     def test_deprecated_design_requires_linked_replacement(self) -> None:
         design = valid_design(state="已废弃", package_states=("已废弃", "已废弃"))
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
@@ -584,14 +687,14 @@ class ValidatorTests(unittest.TestCase):
             state="已废弃", package_states=("已废弃", "已废弃"), replacement=True
         )
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_validator_does_not_modify_input(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "design.md"
+            path = Path(directory) / "2026-08-26_design.md"
             path.write_text(valid_design(), encoding="utf-8")
             before = hashlib.sha256(path.read_bytes()).hexdigest()
             self.assertEqual(self.run_validator(path, design=True).returncode, 0)
@@ -599,7 +702,7 @@ class ValidatorTests(unittest.TestCase):
             self.assertEqual(before, after)
 
     def test_complete_example_project_passes(self) -> None:
-        design = EXAMPLE_ROOT / "docs" / "design" / "equipment-borrowing.md"
+        design = EXAMPLE_ROOT / "docs" / "design" / "2026-08-25_设备借用闭环.md"
         blueprint = EXAMPLE_ROOT / "PROJECT_BLUEPRINT.md"
         design_result = self.run_validator(design, design=True)
         blueprint_result = self.run_validator(blueprint)
@@ -612,6 +715,7 @@ class ValidatorTests(unittest.TestCase):
         self.assertIn("> 蓝图规范版本：3", blueprint)
         self.assertIn("| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |", blueprint)
         self.assertIn("> 设计规范版本：3", design)
+        self.assertIn("> 演进来源：", design)
         self.assertIn("| 契约 | 维度 | 已确认约束 |", design)
         self.assertEqual(set(re.findall(r"\| ([^|]+) \| <", design)) & set(DIMENSIONS), set(DIMENSIONS))
 

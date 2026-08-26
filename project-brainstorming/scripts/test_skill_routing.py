@@ -15,6 +15,9 @@ CONVERSATION_SOP = (SKILL_ROOT / "references" / "conversation-sop.md").read_text
 MIGRATION_SOP = (SKILL_ROOT / "references" / "blueprint-migration-sop.md").read_text(
     encoding="utf-8"
 )
+DESIGN_STANDARD = (SKILL_ROOT / "references" / "design-document-standard.md").read_text(
+    encoding="utf-8"
+)
 
 
 class SkillRoutingContractTests(unittest.TestCase):
@@ -58,6 +61,14 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("不存在蓝图的新项目不属于迁移", MIGRATION_SOP)
         self.assertIn("显式迁移审计是唯一例外", MIGRATION_SOP)
 
+    def test_v3_legacy_design_name_routes_to_deterministic_path_migration(self) -> None:
+        self.assertIn("出现旧式设计文件名时，只读取设计规范", SKILL)
+        self.assertIn("不进入七章蓝图迁移决策门", SKILL)
+        self.assertIn("当前文件连续版本控制谱系的首次加入日期", DESIGN_STANDARD)
+        self.assertIn("无法证明、没有版本历史或不同证据冲突时停止迁移", DESIGN_STANDARD)
+        self.assertIn("不得使用迁移当天日期", DESIGN_STANDARD)
+        self.assertIn("旧式文件名迁移", MIGRATION_SOP)
+
     def test_legacy_migration_choice_blocks_feature_clarification(self) -> None:
         self.assertIn("进入迁移决策门", SKILL)
         self.assertIn("逐项列明新版七章职责", SKILL)
@@ -72,6 +83,12 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("创建、修改或迁移蓝图/设计", SKILL)
         self.assertIn("改变待办引用、工作包状态或文档生命周期", SKILL)
         self.assertIn("纯头脑风暴、继续提问、解释规则、读取项目和只读分析不运行校验器", SKILL)
+
+    def test_terminal_design_requires_new_dated_evolution_document(self) -> None:
+        self.assertIn("YYYY-MM-DD_具体名称.md", SKILL)
+        self.assertIn("`已实现`、`已废弃`设计是终态历史快照", SKILL)
+        self.assertIn("不得向终态文档追加工作包或改回非终态", SKILL)
+        self.assertIn("通过“演进来源”链接旧设计", SKILL)
 
     def test_conversation_sop_preserves_frontstage_gates(self) -> None:
         self.assertLessEqual(len(CONVERSATION_SOP.splitlines()), 140)

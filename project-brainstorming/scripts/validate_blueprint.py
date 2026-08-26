@@ -7,6 +7,7 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 
@@ -67,6 +68,10 @@ ANCHOR_RE = re.compile(r"<a\s+id=[\"']([A-Za-z0-9][A-Za-z0-9._-]*)[\"']\s*></a>"
 DESIGN_LINK_RE = re.compile(
     r"^\[[^]\n]+\]\((?:<)?([^\s>#]+\.md)#([A-Za-z0-9][A-Za-z0-9._-]*)(?:>)?\)$"
 )
+DESIGN_FILENAME_RE = re.compile(
+    r"^(?P<created>\d{4}-\d{2}-\d{2})_(?P<name>[^\s/\\]+)\.md$"
+)
+EVOLUTION_LINK_RE = re.compile(r"^\[[^]\n]+\]\((?:<)?([^\s\\>#]+\.md)(?:>)?\)$")
 LOCAL_LINK_RE = re.compile(r"^\[[^]\n]+\]\(#([A-Za-z0-9][A-Za-z0-9._-]*)\)$")
 PLACEHOLDERS = (
     re.compile(r"<(?!/?a\b)[^>\n]+>", re.IGNORECASE),
@@ -108,6 +113,51 @@ def read_document(path: Path) -> tuple[str | None, list[str]]:
         return path.read_text(encoding="utf-8"), []
     except (OSError, UnicodeError) as exc:
         return None, [f"cannot read document: {exc}"]
+
+
+def validate_design_filename(path: Path) -> list[str]:
+    match = DESIGN_FILENAME_RE.fullmatch(path.name)
+    if not match:
+        return [f"design filename must match YYYY-MM-DD_具体名称.md: {path.name}"]
+    try:
+        date.fromisoformat(match.group("created"))
+    except ValueError:
+        return [f"design filename date must be a valid calendar date: {match.group('created')}"]
+    return []
+
+
+def validate_evolution_source(
+    path: Path, value: str, evolution_stack: frozenset[Path]
+) -> list[str]:
+    if value == "无":
+        return []
+    match = EVOLUTION_LINK_RE.fullmatch(value)
+    if not match:
+        return ["design evolution source must be 无 or one same-directory markdown link"]
+    source_path = Path(match.group(1))
+    if source_path.is_absolute():
+        return ["design evolution source must stay in the same docs/design directory"]
+    target = (path.parent / source_path).resolve()
+    if target.parent != path.parent.resolve():
+        return ["design evolution source must stay in the same docs/design directory"]
+    if target == path.resolve():
+        return ["design evolution source must not reference itself"]
+    filename_errors = validate_design_filename(target)
+    if filename_errors:
+        return [f"invalid design evolution source: {error}" for error in filename_errors]
+    target_errors, _ = validate_design(target, evolution_stack)
+    if target_errors:
+        return [f"invalid design evolution source: {error}" for error in target_errors]
+    text, read_errors = read_document(target)
+    if text is None:
+        return [f"invalid design evolution source: {error}" for error in read_errors]
+    lines, _ = markdown_structure_lines(text)
+    structural_text = "\n".join(lines)
+    state_match = re.search(r"^>\s*设计状态[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
+    state = state_match.group(1) if state_match else "missing"
+    if state not in {"已实现", "已废弃"}:
+        return [f"design evolution source must be terminal, found: {state}"]
+    return []
 
 
 def markdown_structure_lines(text: str) -> tuple[list[str], bool]:
@@ -488,11 +538,19 @@ def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
-def validate_design(path: Path) -> tuple[list[str], list[str]]:
+def validate_design(
+    path: Path, evolution_stack: frozenset[Path] | None = None
+) -> tuple[list[str], list[str]]:
+    resolved_path = path.resolve()
+    stack = frozenset() if evolution_stack is None else evolution_stack
+    if resolved_path in stack:
+        return [f"design evolution source cycle detected: {path.name}"], []
+    next_stack = stack | {resolved_path}
     text, read_errors = read_document(path)
     if text is None:
         return read_errors, []
     lines, errors = common_errors(text)
+    errors.extend(validate_design_filename(path))
     warnings: list[str] = []
     entries = heading_entries(lines)
     structural_text = "\n".join(lines)
@@ -509,6 +567,14 @@ def validate_design(path: Path) -> tuple[list[str], list[str]]:
     state = state_match.group(1) if state_match else None
     if state not in DESIGN_STATES:
         errors.append("design status must be one of: " + ", ".join(sorted(DESIGN_STATES)))
+
+    evolution_matches = re.findall(
+        r"^>\s*演进来源[：:]\s*(.+?)\s*$", structural_text, re.MULTILINE
+    )
+    if len(evolution_matches) != 1:
+        errors.append("design must contain exactly one evolution source metadata line")
+    else:
+        errors.extend(validate_evolution_source(path, evolution_matches[0], next_stack))
 
     metadata_match = re.search(r"^>\s*工作包[：:]\s*(.+?)\s*$", structural_text, re.MULTILINE)
     metadata_ids = split_ids(metadata_match.group(1)) if metadata_match else []

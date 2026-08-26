@@ -44,7 +44,7 @@ description: 通过单问题自然对话、本地代码与外部参考研究，�
 首次进入或缓存失效时，必须先完成上一节的文件存在性检查；蓝图存在时再完成稳定快照全文读取并按已读版本分流，不得用单独读取版本标记替代首次完整读取。同会话缓存有效时使用已记录版本：
 
 - 不存在蓝图：按新项目推进，不加载迁移 SOP。
-- 明确为版本 3：正常澄清和只读分析不加载迁移 SOP；用户明确要求迁移审计时例外。
+- 明确为版本 3：正常澄清和只读分析不加载迁移 SOP；用户明确要求迁移审计时例外。当前待办、当前设计或校验结果出现旧式设计文件名时，只读取设计规范并执行其中的“旧式文件名迁移”，不进入七章蓝图迁移决策门。
 - 已存在蓝图但版本标记缺失、版本不是 3，或用户明确要求迁移审计：完整读取 [迁移 SOP](references/blueprint-migration-sop.md)，进入迁移决策门。
 
 旧版蓝图不得套模板覆盖。迁移决策门必须先完成迁移报告：逐项列明新版七章职责，并按原标题或摘要列出每段待归档局部内容，不得用概括句替代证据清单；然后只询问“先澄清后升级、立即升级、暂不升级”这个三选一决定。用户明确选择前，禁止追问待办功能、加载蓝图规范、创建或修改文档、运行校验器；不得替用户决定“本轮不迁移”。选择后的处理严格按迁移 SOP，且每轮仍只询问一个差量。
@@ -63,7 +63,9 @@ description: 通过单问题自然对话、本地代码与外部参考研究，�
 
 讨论结论满足任一条件时，提炼后写入蓝图：影响多个模块、模块职责或依赖方向、全局权限/安全/数据生命周期、公共外部契约、项目级非功能指标，或所有后续功能必须遵守。其余局部交互、流程、状态、失败恢复和验收只进入设计。
 
-创建或升级蓝图前，读取 [蓝图规范](references/blueprint-standard.md)；新建时使用 [蓝图模板](assets/PROJECT_BLUEPRINT.template.md)。创建或更新设计前，读取 [设计规范](references/design-document-standard.md)；新建时使用 [设计模板](assets/DESIGN.template.md)。首次创建相应文档类型时，再读取 [完整示例](references/examples/equipment-borrowing/PROJECT_BLUEPRINT.md) 及其关联设计；模板不替代示例。
+创建或升级蓝图前，读取 [蓝图规范](references/blueprint-standard.md)；新建时使用 [蓝图模板](assets/PROJECT_BLUEPRINT.template.md)。创建或更新设计前，读取 [设计规范](references/design-document-standard.md)；新建时使用 [设计模板](assets/DESIGN.template.md)，文件必须命名为 `YYYY-MM-DD_具体名称.md`。首次创建相应文档类型时，再读取 [完整示例](references/examples/equipment-borrowing/PROJECT_BLUEPRINT.md) 及其关联设计；模板不替代示例。
+
+`已实现`、`已废弃`设计是终态历史快照。新需求即使基于原功能，也不得向终态文档追加工作包或改回非终态；必须用创建当天日期新建设计，并通过“演进来源”链接旧设计。只有同一史诗尚未终态时，关联工作包才可继续共用原文档。
 
 一个工作包只有完成澄清后才能成为蓝图中的有效设计链接。中断时可保留“澄清中”设计，但蓝图仍写“待澄清”。写文件前展示自然语言摘要、目标文件和待办引用变化，取得用户确认后再写。
 
@@ -75,7 +77,7 @@ description: 通过单问题自然对话、本地代码与外部参考研究，�
 
 ```bash
 python3 scripts/validate_blueprint.py /absolute/path/to/PROJECT_BLUEPRINT.md
-python3 scripts/validate_blueprint.py --design /absolute/path/to/docs/design/example.md
+python3 scripts/validate_blueprint.py --design /absolute/path/to/docs/design/2026-08-26_example.md
 ```
 
 纯头脑风暴、继续提问、解释规则、读取项目和只读分析不运行校验器。校验不代替项目要求的测试、Review 或提交门禁。
@@ -89,6 +91,7 @@ python3 scripts/validate_blueprint.py --design /absolute/path/to/docs/design/exa
 | 用户指定外部参考 | `references/reference-research-sop.md` |
 | 创建或升级蓝图 | `references/blueprint-standard.md` |
 | 创建或更新设计 | `references/design-document-standard.md` |
+| 版本 3 项目出现旧式设计文件名 | `references/design-document-standard.md` 的“旧式文件名迁移” |
 | 首次创建某类文档 | 对应模板和 `references/examples/equipment-borrowing/` 完整示例 |
 
 `scripts/validate_blueprint.py` 是蓝图和设计的确定性只读校验器。
