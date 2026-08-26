@@ -90,6 +90,21 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("不得向终态文档追加工作包或改回非终态", SKILL)
         self.assertIn("通过“演进来源”链接旧设计", SKILL)
 
+    def test_structured_question_route_is_capability_driven_and_cross_host(self) -> None:
+        summary = CONVERSATION_SOP.index("### 阶段总结与交互载体")
+        native_tool = CONVERSATION_SOP.index("宿主实际暴露原生结构化提问工具")
+        self.assertLess(summary, native_tool)
+        self.assertIn("`request_user_input`", CONVERSATION_SOP)
+        self.assertIn("`AskUserQuestion`", CONVERSATION_SOP)
+        self.assertIn("2–3 个真实、互斥且可解释取舍的方案", CONVERSATION_SOP)
+        self.assertIn("推荐项排第一", CONVERSATION_SOP)
+        self.assertIn("不根据宿主名称、模式名称或配置文件猜测", CONVERSATION_SOP)
+        self.assertIn("不得为了显示选项自行切换 Plan mode", CONVERSATION_SOP)
+        self.assertIn("不得修改宿主全局配置", CONVERSATION_SOP)
+        self.assertIn("继续使用普通文本提出一个问题", CONVERSATION_SOP)
+        self.assertIn("普通回复不得重复同一问题", CONVERSATION_SOP)
+        self.assertIn("工具是否已呈现无法确认时停止", CONVERSATION_SOP)
+
     def test_conversation_sop_preserves_frontstage_gates(self) -> None:
         self.assertLessEqual(len(CONVERSATION_SOP.splitlines()), 140)
         self.assertIn("### 单问题闸门", CONVERSATION_SOP)
