@@ -105,6 +105,22 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("普通回复不得重复同一问题", CONVERSATION_SOP)
         self.assertIn("工具是否已呈现无法确认时停止", CONVERSATION_SOP)
 
+    def test_structured_answer_continues_with_one_next_delta(self) -> None:
+        continuation = CONVERSATION_SOP.index("### 结构化答案后的推进")
+        self.assertGreater(continuation, CONVERSATION_SOP.index("### 阶段总结与交互载体"))
+        self.assertIn("每个交互步", CONVERSATION_SOP)
+        self.assertIn("不是整个 AI 执行周期只能调用一次提问工具", CONVERSATION_SOP)
+        self.assertIn("立即调用下一次原生工具", CONVERSATION_SOP)
+        self.assertIn("每次仍只呈现一个问题", CONVERSATION_SOP)
+        self.assertIn("改用一个普通文本问题并等待", CONVERSATION_SOP)
+
+    def test_structured_answer_stops_only_at_explicit_boundaries(self) -> None:
+        self.assertIn("话题闭环、用户要求暂停", CONVERSATION_SOP)
+        self.assertIn("继续前必须研究或写入", CONVERSATION_SOP)
+        self.assertIn("工具失败或呈现状态不明", CONVERSATION_SOP)
+        self.assertIn("必须等待本次答案返回后再决定下一问", CONVERSATION_SOP)
+        self.assertIn("不得预先提交、并发提问或重复刚回答的问题", CONVERSATION_SOP)
+
     def test_conversation_sop_preserves_frontstage_gates(self) -> None:
         self.assertLessEqual(len(CONVERSATION_SOP.splitlines()), 140)
         self.assertIn("### 单问题闸门", CONVERSATION_SOP)
