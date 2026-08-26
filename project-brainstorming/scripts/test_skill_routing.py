@@ -132,8 +132,16 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("必须等待本次答案返回后再决定下一问", CONVERSATION_SOP)
         self.assertIn("不得预先提交、并发提问或重复刚回答的问题", CONVERSATION_SOP)
 
+    def test_unanswered_structured_question_is_resumable(self) -> None:
+        self.assertIn("工具返回空答案或 `0/1 answered` 时视为未回答", CONVERSATION_SOP)
+        self.assertIn("不合并、不推进、不自动重试", CONVERSATION_SOP)
+        self.assertIn("原样保留问题原文、选项顺序、标签和说明", CONVERSATION_SOP)
+        self.assertIn("用原生工具原样重放该问题", CONVERSATION_SOP)
+        self.assertIn("工具不可用时用普通文本完整列出原选项", CONVERSATION_SOP)
+        self.assertIn("不得用缺少标签的 A/B/C 代替选项", CONVERSATION_SOP)
+
     def test_conversation_sop_preserves_frontstage_gates(self) -> None:
-        self.assertLessEqual(len(CONVERSATION_SOP.splitlines()), 140)
+        self.assertLessEqual(len(CONVERSATION_SOP.splitlines()), 145)
         self.assertIn("### 单问题闸门", CONVERSATION_SOP)
         self.assertIn("只有一个需要用户回答的句子", CONVERSATION_SOP)
         self.assertIn("用用户可感知结果解释取舍并明确推荐", CONVERSATION_SOP)
