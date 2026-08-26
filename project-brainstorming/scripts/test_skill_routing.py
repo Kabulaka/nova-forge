@@ -18,6 +18,9 @@ MIGRATION_SOP = (SKILL_ROOT / "references" / "blueprint-migration-sop.md").read_
 DESIGN_STANDARD = (SKILL_ROOT / "references" / "design-document-standard.md").read_text(
     encoding="utf-8"
 )
+CONVERGENCE_DESIGN = (
+    SKILL_ROOT.parent / "docs" / "design" / "2026-08-26_访谈收敛判定与连续推进.md"
+).read_text(encoding="utf-8")
 
 
 class SkillRoutingContractTests(unittest.TestCase):
@@ -113,35 +116,58 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("普通回复不得重复同一问题", CONVERSATION_SOP)
         self.assertIn("工具是否已呈现无法确认时停止", CONVERSATION_SOP)
 
-    def test_structured_answer_continues_with_one_next_delta(self) -> None:
-        continuation = CONVERSATION_SOP.index("### 结构化答案后的推进")
+    def test_text_and_structured_answers_share_one_progression_contract(self) -> None:
+        continuation = CONVERSATION_SOP.index("### 答案后的统一推进")
         self.assertGreater(continuation, CONVERSATION_SOP.index("### 阶段总结与交互载体"))
+        self.assertIn("普通文本回复与原生工具返回的有效答案共用以下状态机", CONVERSATION_SOP)
+        self.assertIn("载体只决定问题如何呈现，不改变确认、继续或收敛语义", CONVERSATION_SOP)
         self.assertIn("每个交互步", CONVERSATION_SOP)
-        self.assertIn("不是整个 AI 执行周期只能调用一次提问工具", CONVERSATION_SOP)
-        self.assertIn("立即调用下一次原生工具", CONVERSATION_SOP)
-        self.assertIn("每次仍只呈现一个问题", CONVERSATION_SOP)
-        self.assertIn("改用一个普通文本问题并等待", CONVERSATION_SOP)
-        self.assertIn("选择项及其备注或自由补充作为同一答案", CONVERSATION_SOP)
-        self.assertIn("最新明确补充覆盖选项的默认含义", CONVERSATION_SOP)
-        self.assertIn("处理补充说明或输出确认都不是暂停或结束信号", CONVERSATION_SOP)
+        self.assertIn("不是整个 AI 执行周期只能提问一次", CONVERSATION_SOP)
+        self.assertIn("每次合并后重新计算当前话题的待确认差量和研究任务", CONVERSATION_SOP)
+        self.assertIn("按上一节载体规则立即提出一个问题", CONVERSATION_SOP)
+        self.assertNotIn("### 结构化答案后的推进", CONVERSATION_SOP)
 
-    def test_structured_answer_stops_only_at_explicit_boundaries(self) -> None:
-        self.assertIn("话题闭环、用户要求暂停", CONVERSATION_SOP)
-        self.assertIn("继续前必须研究或写入", CONVERSATION_SOP)
+    def test_progression_blocks_premature_closure_and_idle_next_steps(self) -> None:
+        self.assertIn("待确认差量和研究任务均为空", CONVERSATION_SOP)
+        self.assertIn(
+            "目标、参与者、触发、正常结果、状态变化、权限、关键边界、失败恢复、明确不做与验收证据均已确认",
+            CONVERSATION_SOP,
+        )
+        self.assertIn("局部流程明确但条件未满足时只能称“阶段结论”", CONVERSATION_SOP)
+        self.assertIn("不得只列出待办、只说“建议下一步”", CONVERSATION_SOP)
+        self.assertIn("不把研究任务改问用户", CONVERSATION_SOP)
+        self.assertIn("标记为“证据不足”并说明原因", CONVERSATION_SOP)
+        self.assertIn("还有要讨论的吗", CONVERSATION_SOP)
+        self.assertIn("当前话题已按第 5 条收敛", CONVERSATION_SOP)
+        self.assertIn("用户要求暂停、继续前必须写入", CONVERSATION_SOP)
+        self.assertIn("研究暂时无法完成", CONVERSATION_SOP)
         self.assertIn("工具失败或呈现状态不明", CONVERSATION_SOP)
         self.assertIn("必须等待本次答案返回后再决定下一问", CONVERSATION_SOP)
         self.assertIn("不得预先提交、并发提问或重复刚回答的问题", CONVERSATION_SOP)
 
     def test_unanswered_structured_question_is_resumable(self) -> None:
-        self.assertIn("工具返回空答案或 `0/1 answered` 时视为未回答", CONVERSATION_SOP)
+        self.assertIn("### 结构化问题的中断与恢复", CONVERSATION_SOP)
+        self.assertIn("宿主超时、用户取消或其他未提交状态", CONVERSATION_SOP)
+        self.assertIn("当前问题未回答的非终态", CONVERSATION_SOP)
         self.assertIn("不合并、不推进、不自动重试", CONVERSATION_SOP)
         self.assertIn("原样保留问题原文、选项顺序、标签和说明", CONVERSATION_SOP)
+        self.assertIn("超时长度由宿主决定", CONVERSATION_SOP)
+        self.assertIn("不写死、不延长也不轮询工具", CONVERSATION_SOP)
+        self.assertNotIn("120 秒", CONVERSATION_SOP)
         self.assertIn("用原生工具原样重放该问题", CONVERSATION_SOP)
         self.assertIn("工具不可用时用普通文本完整列出原选项", CONVERSATION_SOP)
         self.assertIn("不得用缺少标签的 A/B/C 代替选项", CONVERSATION_SOP)
 
+    def test_convergence_design_preserves_tool_timeout_contract(self) -> None:
+        self.assertIn("设计状态：已实现", CONVERGENCE_DESIGN)
+        self.assertIn("演进来源：[结构化问题取消与恢复]", CONVERGENCE_DESIGN)
+        self.assertIn("文本与原生结构化工具共用同一推进状态机", CONVERGENCE_DESIGN)
+        self.assertIn("不改变原生工具选择、超时、中断或恢复语义", CONVERGENCE_DESIGN)
+        self.assertIn("超时长度由宿主决定", CONVERGENCE_DESIGN)
+        self.assertIn("`0/1 answered`", CONVERGENCE_DESIGN)
+
     def test_conversation_sop_preserves_frontstage_gates(self) -> None:
-        self.assertLessEqual(len(CONVERSATION_SOP.splitlines()), 145)
+        self.assertLessEqual(len(CONVERSATION_SOP.splitlines()), 160)
         self.assertIn("### 单问题闸门", CONVERSATION_SOP)
         self.assertIn("只有一个需要用户回答的句子", CONVERSATION_SOP)
         self.assertIn("用用户可感知结果解释取舍并明确推荐", CONVERSATION_SOP)
