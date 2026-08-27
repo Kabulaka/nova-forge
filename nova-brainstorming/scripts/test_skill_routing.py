@@ -21,6 +21,16 @@ DESIGN_STANDARD = (SKILL_ROOT / "references" / "design-document-standard.md").re
 CONVERGENCE_DESIGN = (
     SKILL_ROOT.parent / "docs" / "design" / "2026-08-26_访谈收敛判定与连续推进.md"
 ).read_text(encoding="utf-8")
+BLUEPRINT_EXAMPLE = SKILL_ROOT / "references" / "examples" / "equipment-borrowing" / "PROJECT_BLUEPRINT.md"
+DESIGN_EXAMPLE = (
+    SKILL_ROOT
+    / "references"
+    / "examples"
+    / "equipment-borrowing"
+    / "docs"
+    / "design"
+    / "2026-08-25_设备借用闭环.md"
+)
 
 
 class SkillRoutingContractTests(unittest.TestCase):
@@ -154,16 +164,36 @@ class SkillRoutingContractTests(unittest.TestCase):
     def test_document_examples_are_scoped_to_project_first_creation(self) -> None:
         self.assertIn("目标项目不存在 `PROJECT_BLUEPRINT.md` 且正在首次创建蓝图时", SKILL)
         self.assertIn("`docs/design/` 不存在有效设计且正在首次创建设计时", SKILL)
+        self.assertIn(
+            "[完整蓝图示例](references/examples/equipment-borrowing/PROJECT_BLUEPRINT.md)",
+            SKILL,
+        )
+        self.assertIn(
+            "[关联设计示例](references/examples/equipment-borrowing/docs/design/2026-08-25_设备借用闭环.md)",
+            SKILL,
+        )
+        self.assertTrue(BLUEPRINT_EXAMPLE.is_file())
+        self.assertTrue(DESIGN_EXAMPLE.is_file())
         self.assertIn("已有对应文档体系时只读取规范、模板和当前项目相关文档", SKILL)
         self.assertNotIn("首次创建相应文档类型时，再读取 [完整示例]", SKILL)
 
     def test_resource_reads_reuse_fingerprints_and_resume_only_after_truncation(self) -> None:
-        self.assertIn("已加载技能资源的绝对路径和 SHA-256", SKILL)
+        self.assertIn("项目文档和技能文档资源状态", SKILL)
+        self.assertIn("目标项目绝对路径、资源绝对路径和 SHA-256", SKILL)
+        self.assertIn("只读取尚未加载或指纹变化的", SKILL)
         self.assertIn("路径和 SHA-256 未变化时复用", SKILL)
+        self.assertIn("变化时只失效受影响资源", SKILL)
         self.assertIn("不得先 `wc` 再按固定行数串行重读", SKILL)
         self.assertIn("只有工具明确截断时才从未返回位置补读", SKILL)
         self.assertIn("不得读取超过已知文件末尾的空区间", SKILL)
+        self.assertIn("不得跨会话或跨项目复用缓存", SKILL)
         self.assertIn("不得为读取资源修改插件、hook 或宿主 UI", SKILL)
+
+    def test_unreliable_resource_probe_stops_without_example_fallback(self) -> None:
+        self.assertIn("无法可靠判断目标路径、文档存在性、设计有效性或资源指纹时", SKILL)
+        self.assertIn("不得按“不存在”处理、加载示例或写入缓存", SKILL)
+        self.assertIn("先用路径、链接和头部元数据缩小候选", SKILL)
+        self.assertIn("仍会改变设计语义时停止并只确认一个差量", SKILL)
 
     def test_evolution_source_uses_metadata_then_targeted_contracts(self) -> None:
         self.assertIn("当前需求、蓝图引用和已确认关系锁定", SKILL)
