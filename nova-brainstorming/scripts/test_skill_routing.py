@@ -124,6 +124,21 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("Review 中断则保留 `待Review` 并返回调试", SKILL)
         self.assertIn("Review-Defer、新增待办及无关蓝图变化不自动进入当前范围", SKILL)
 
+    def test_new_pending_design_auto_enters_implementation_unless_blocked(self) -> None:
+        handoff = SKILL.index("### 已确认工作包的实施交接")
+        auto_transition = SKILL.index("本轮从需求澄清新建正式 `PEND-*` 时")
+        default_flow = SKILL.index("默认实施流程是编码、最低验收")
+        self.assertLess(handoff, auto_transition)
+        self.assertLess(auto_transition, default_flow)
+        self.assertIn("不要求用户在原始请求中再次说“实施”或报出新编号", SKILL)
+        self.assertIn("不得以仅交付文档的回复结束当前执行周期", SKILL)
+        self.assertIn("不得再次询问是否开始编码", SKILL)
+        self.assertIn("立即完整读取实施 SOP、固定任务差异基线", SKILL)
+        self.assertIn("仅头脑风暴、澄清、规划、蓝图、设计或文档", SKILL)
+        self.assertIn("用户明确暂停或取消", SKILL)
+        self.assertIn("待确认差量、研究证据不足、文档校验失败、契约冲突", SKILL)
+        self.assertIn("Plan mode 继续服从其方案审批门禁", SKILL)
+
     def test_skill_name_and_review_boundary_are_explicit(self) -> None:
         self.assertIn("name: nova-brainstorming", SKILL)
         self.assertNotIn("name: project-brainstorming", SKILL)
