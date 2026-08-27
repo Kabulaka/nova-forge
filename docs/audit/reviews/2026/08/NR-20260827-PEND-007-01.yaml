@@ -1,0 +1,32 @@
+{
+  "batch_id": "NR-20260827-PEND-007-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "a95a6f6d91c0cc17ab5c6bbccaa0376acff6d88f",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "docs/design/2026-08-27_Context-mode可选路由治理.md#wp-01-context-mode-routing",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "blueprint validator, design validator, targeted context-mode assertions 8/8, git diff check, commit scope/trailers and AGENTS link consistency (pass)",
+      "work_item": "PEND-007"
+    }
+  ],
+  "manifest_sha256": "d8332e5b55b0bce4edc3a849181282a29ed86877b357a6bdc0b13dacae90f085",
+  "review_content_sha256": "bcdd1a676bd5960802df9cd453973406b33c147aed6f4e4fe211d64852185edd",
+  "review_round": 2,
+  "review_scope": [
+    "main:PROJECT_BLUEPRINT.md",
+    "main:codex/AGENTS.global.md",
+    "main:docs/design/2026-08-27_Context-mode可选路由治理.md"
+  ],
+  "reviewed_at": "2026-08-27T18:19:28+08:00",
+  "reviewer": "review_pend006",
+  "schema": 1
+}
