@@ -1,0 +1,37 @@
+{
+  "batch_id": "NR-20260827-nova-resource-loading-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "53a7ebeca2b2fd47622e1c29ffaa24250951d47d",
+          "repository": "main"
+        },
+        {
+          "commit": "0c1ab6b5ef95878a9b18f0e114d1b5ceb5cf31f9",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "docs/design/2026-08-27_Nova文档资源按需加载与去重.md#wp-01-document-resource-loading",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "nova routing 21/21; blueprint/design validators; git diff check (pass)",
+      "work_item": "PEND-01a04338-4b0a-7d62-9808-e2ffe3ac409f"
+    }
+  ],
+  "manifest_sha256": "9c1ad3afd3ea546e4275b763c23ef59831ce1b203ab1600c31c4034ac3e72470",
+  "review_content_sha256": "7ca519280f84860506ddf5eaf9f535d08c381f978ff3220915109d6a0de23608",
+  "review_round": 2,
+  "review_scope": [
+    "main:PROJECT_BLUEPRINT.md",
+    "main:docs/design/2026-08-27_Nova文档资源按需加载与去重.md",
+    "main:nova-brainstorming/SKILL.md",
+    "main:nova-brainstorming/scripts/test_skill_routing.py"
+  ],
+  "reviewed_at": "2026-08-27T21:23:19+08:00",
+  "reviewer": "review_resource_loading",
+  "schema": 1
+}
