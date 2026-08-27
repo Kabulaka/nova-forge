@@ -1,0 +1,87 @@
+{
+  "batch_id": "NR-20260827-pend006",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "2e71aa74b3cdce3047dea19e198b9f0058d49397",
+          "repository": "main"
+        },
+        {
+          "commit": "9e86a2cc1673b0d0ecd09c108c1d35427b46f19c",
+          "repository": "main"
+        },
+        {
+          "commit": "dc7b58e9e0feea97263314560c816046633e7ba4",
+          "repository": "codex"
+        }
+      ],
+      "design_ref": "docs/design/2026-08-27_Nova技能套件与人工Review工作流.md#wp-05-bootstrap",
+      "package_ids": [
+        "WP-01",
+        "WP-02",
+        "WP-03",
+        "WP-04",
+        "WP-05"
+      ],
+      "validation": "nova-review 49/49; Unicode 1/1; nova-brainstorming 61/61; validators (pass)",
+      "work_item": "PEND-006"
+    }
+  ],
+  "manifest_sha256": "ef1733103daaf6d8162b541a82ffb6f1ebffe350c88275d3ff74c37477182d7e",
+  "review_content_sha256": "8f1e10fac8e35427e9d15cfbd16051dc05728216ddf8d2da75051f0a925f6906",
+  "review_round": 3,
+  "review_scope": [
+    "codex:AGENTS.md",
+    "main:PROJECT_BLUEPRINT.md",
+    "main:codex/AGENTS.global.md",
+    "main:codex/AGENTS.migration-map.md",
+    "main:docs/design/2026-08-27_Nova技能套件与人工Review工作流.md",
+    "main:nova-brainstorming/SKILL.md",
+    "main:nova-brainstorming/agents/openai.yaml",
+    "main:nova-brainstorming/assets/DESIGN.template.md",
+    "main:nova-brainstorming/assets/PROJECT_BLUEPRINT.template.md",
+    "main:nova-brainstorming/references/blueprint-migration-sop.md",
+    "main:nova-brainstorming/references/blueprint-standard.md",
+    "main:nova-brainstorming/references/conversation-sop.md",
+    "main:nova-brainstorming/references/design-document-standard.md",
+    "main:nova-brainstorming/references/examples/equipment-borrowing/PROJECT_BLUEPRINT.md",
+    "main:nova-brainstorming/references/examples/equipment-borrowing/docs/design/2026-08-25_设备借用闭环.md",
+    "main:nova-brainstorming/references/implementation-sop.md",
+    "main:nova-brainstorming/references/reference-research-sop.md",
+    "main:nova-brainstorming/scripts/test_skill_routing.py",
+    "main:nova-brainstorming/scripts/test_validate_blueprint.py",
+    "main:nova-brainstorming/scripts/validate_blueprint.py",
+    "main:nova-review/SKILL.md",
+    "main:nova-review/agents/openai.yaml",
+    "main:nova-review/references/audit-contract.md",
+    "main:nova-review/references/commit-contract.md",
+    "main:nova-review/references/review-sop.md",
+    "main:nova-review/scripts/nova_review.py",
+    "main:nova-review/scripts/probe_default_flow.py",
+    "main:nova-review/scripts/test_global_governance.py",
+    "main:nova-review/scripts/test_nova_review.py",
+    "main:nova-review/scripts/test_skill_contract.py",
+    "main:nova-review/scripts/test_validate_discovery.py",
+    "main:nova-review/scripts/validate_discovery.py",
+    "main:project-brainstorming/SKILL.md",
+    "main:project-brainstorming/agents/openai.yaml",
+    "main:project-brainstorming/assets/DESIGN.template.md",
+    "main:project-brainstorming/assets/PROJECT_BLUEPRINT.template.md",
+    "main:project-brainstorming/references/blueprint-migration-sop.md",
+    "main:project-brainstorming/references/blueprint-standard.md",
+    "main:project-brainstorming/references/conversation-sop.md",
+    "main:project-brainstorming/references/design-document-standard.md",
+    "main:project-brainstorming/references/examples/equipment-borrowing/PROJECT_BLUEPRINT.md",
+    "main:project-brainstorming/references/examples/equipment-borrowing/docs/design/2026-08-25_设备借用闭环.md",
+    "main:project-brainstorming/references/reference-research-sop.md",
+    "main:project-brainstorming/scripts/test_skill_routing.py",
+    "main:project-brainstorming/scripts/test_validate_blueprint.py",
+    "main:project-brainstorming/scripts/validate_blueprint.py"
+  ],
+  "reviewed_at": "2026-08-27T16:30:00+08:00",
+  "reviewer": "nova-review composite independent review",
+  "schema": 1
+}
