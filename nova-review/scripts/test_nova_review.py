@@ -288,6 +288,40 @@ class NovaReviewTests(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("Validation must end with (pass)", rejected.stderr)
 
+    def test_git_c_quoted_utf8_paths_are_decoded_and_invalid_bytes_rejected(self) -> None:
+        relative = "docs/design/中文路径.md"
+
+        def git_quote(value: str) -> str:
+            return "".join(
+                character
+                if ord(character) < 0x80
+                else "".join(f"\\{byte:03o}" for byte in character.encode("utf-8"))
+                for character in value
+            )
+
+        quoted = git_quote(relative)
+        diff = f'diff --git "a/{quoted}" "b/{quoted}"\n'
+        self.assertEqual(NOVA_TOOL.diff_paths(diff), [relative])
+
+        escaped = r'diff --git "a/docs/a\\b\" c.md" "b/docs/a\\b\" c.md"' + "\n"
+        self.assertEqual(NOVA_TOOL.diff_paths(escaped), ['docs/a\\b" c.md'])
+
+        nbsp_path = "docs/a\u00a0b.md"
+        nbsp = f"diff --git a/{nbsp_path} b/{nbsp_path}\n"
+        self.assertEqual(NOVA_TOOL.diff_paths(nbsp), [nbsp_path])
+
+        invalid = 'diff --git "a/docs/\\377.md" "b/docs/\\377.md"\n'
+        with self.assertRaisesRegex(NOVA_TOOL.NovaError, "not valid UTF-8"):
+            NOVA_TOOL.diff_paths(invalid)
+        unknown = 'diff --git "a/docs/\\q.md" "b/docs/\\q.md"\n'
+        with self.assertRaisesRegex(NOVA_TOOL.NovaError, "invalid escape"):
+            NOVA_TOOL.diff_paths(unknown)
+        with self.assertRaisesRegex(NOVA_TOOL.NovaError, "trailing escape"):
+            NOVA_TOOL.decode_git_path("docs/trailing\\")
+        adjacent = 'diff --git "a/docs/a.md""b/docs/a.md"\n'
+        with self.assertRaisesRegex(NOVA_TOOL.NovaError, "invalid diff header"):
+            NOVA_TOOL.diff_paths(adjacent)
+
     def test_invalid_or_ambiguous_metadata_fails_closed(self) -> None:
         code_diff = textwrap.dedent(
             """

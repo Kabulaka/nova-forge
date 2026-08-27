@@ -55,7 +55,7 @@ Manifest-SHA256: <64 位小写十六进制>
 Validation: nova-review validate-audit-message (pass)
 ```
 
-提交前必须先精确暂存本批关闭文件，再用 `validate-audit-message` 对 staged diff 校验。传入 diff 必须与仓库真实 staged diff 逐字节一致；记录内容从 Git index 读取，不信任可能已继续变化的工作树。校验器从 `HEAD`（已提交审计时为父提交）重新解析关闭映射、推导权威 `package_ids` 并执行确定性关闭函数，不能以 Review 记录自报集合为权威；随后逐字节推导年度 JSONL 只追加本批记录、索引与 Review 原先不存在且内容规范、蓝图只删除目标行、设计只完成目标工作包的唯一输出，并保持既有文件模式、新文件固定为普通 `100644`；staged/commit 的路径、blob 与模式必须全部相等。批次、manifest 摘要、严格 Review 记录、年度功能记录、每项索引、蓝图/设计关闭内容和路径必须完全一致，`Validation` 必须以 `(pass)` 结尾，且不得包含标准 `Work-Item` trailers 或额外路径。审计提交只保存已取得的 Review 事实，不产生新的 Review 授权或结论。
+提交前必须先精确暂存本批关闭文件，再用 `validate-audit-message` 对 staged diff 校验。传入 diff 必须与仓库真实 staged diff 逐字节一致；记录内容从 Git index 读取，不信任可能已继续变化的工作树。Git 输出的 C-quoted 路径须严格还原成真实 UTF-8 路径后再比较。校验器从 `HEAD`（已提交审计时为父提交）重新解析关闭映射、推导权威 `package_ids` 并执行确定性关闭函数，不能以 Review 记录自报集合为权威；随后逐字节推导年度 JSONL 只追加本批记录、索引与 Review 原先不存在且内容规范、蓝图只删除目标行、设计只完成目标工作包的唯一输出，并保持既有文件模式、新文件固定为普通 `100644`；staged/commit 的路径、blob 与模式必须全部相等。批次、manifest 摘要、严格 Review 记录、年度功能记录、每项索引、蓝图/设计关闭内容和路径必须完全一致，`Validation` 必须以 `(pass)` 结尾，且不得包含标准 `Work-Item` trailers 或额外路径。审计提交只保存已取得的 Review 事实，不产生新的 Review 授权或结论。
 
 ## 5. 提交权限
 

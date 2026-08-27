@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 import time
@@ -150,18 +149,93 @@ def parse_audit_message(text: str) -> tuple[dict[str, str], list[str]]:
     return values, errors
 
 
+def decode_git_path(value: str) -> str:
+    """Decode escapes after the dedicated tokenizer removes outer Git C quotes."""
+    decoded = bytearray()
+    escapes = {
+        "a": 0x07,
+        "b": 0x08,
+        "t": 0x09,
+        "n": 0x0A,
+        "v": 0x0B,
+        "f": 0x0C,
+        "r": 0x0D,
+        "\\": 0x5C,
+        '"': 0x22,
+    }
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if character != "\\":
+            decoded.extend(character.encode("utf-8"))
+            index += 1
+            continue
+        if index + 1 >= len(value):
+            raise NovaError(f"invalid trailing escape in Git path: {value}")
+        escaped = value[index + 1]
+        octal = value[index + 1 : index + 4]
+        if len(octal) == 3 and all(character in "01234567" for character in octal):
+            decoded.append(int(octal, 8))
+            index += 4
+            continue
+        if escaped not in escapes:
+            raise NovaError(f"invalid escape in Git path: {value}")
+        decoded.append(escapes[escaped])
+        index += 2
+    try:
+        return decoded.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise NovaError(f"Git path is not valid UTF-8: {value}") from exc
+
+
+def git_diff_header_paths(line: str) -> tuple[str, str]:
+    payload = line.removeprefix("diff --git ")
+    values: list[str] = []
+    index = 0
+    while len(values) < 2:
+        if values:
+            if index >= len(payload) or payload[index] != " ":
+                raise NovaError(f"invalid diff header: {line}")
+            while index < len(payload) and payload[index] == " ":
+                index += 1
+        if index >= len(payload):
+            raise NovaError(f"invalid diff header: {line}")
+        if payload[index] != '"':
+            end = index
+            while end < len(payload) and payload[end] != " ":
+                end += 1
+            values.append(payload[index:end])
+            index = end
+            continue
+        index += 1
+        raw: list[str] = []
+        while index < len(payload):
+            character = payload[index]
+            if character == '"':
+                index += 1
+                break
+            if character == "\\":
+                if index + 1 >= len(payload):
+                    raise NovaError(f"invalid diff header: {line}")
+                raw.extend((character, payload[index + 1]))
+                index += 2
+                continue
+            raw.append(character)
+            index += 1
+        else:
+            raise NovaError(f"invalid diff header: {line}")
+        values.append("".join(raw))
+    if index != len(payload):
+        raise NovaError(f"invalid diff header: {line}")
+    return decode_git_path(values[0]), decode_git_path(values[1])
+
+
 def diff_changes(diff: str) -> list[tuple[str, str]]:
     changes: list[tuple[str, str]] = []
     for line in diff.splitlines():
         if not line.startswith("diff --git "):
             continue
-        try:
-            parts = shlex.split(line)
-        except ValueError as exc:
-            raise NovaError(f"invalid diff header: {line}") from exc
-        if len(parts) != 4:
-            raise NovaError(f"invalid diff header: {line}")
-        old_path, new_path = parts[2], parts[3]
+        old_path, new_path = git_diff_header_paths(line)
         if old_path.startswith("a/"):
             old_path = old_path[2:]
         if new_path.startswith("b/"):
