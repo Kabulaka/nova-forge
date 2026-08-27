@@ -10,6 +10,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import uuid
 from pathlib import Path
 from unittest import mock
 
@@ -222,6 +223,84 @@ class NovaReviewTests(unittest.TestCase):
                 with self.subTest(commit_message=commit_message.splitlines()[0]):
                     result = self.validate(root, commit_message, diff)
                     self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_uuid7_work_items_generate_validate_and_remain_unique(self) -> None:
+        generated: set[str] = set()
+        for change_class, prefix in NOVA_TOOL.WORK_ITEM_PREFIXES.items():
+            result = self.run_tool("new-id", "--class", change_class)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            work_item = result.stdout.strip()
+            self.assertTrue(work_item.startswith(f"{prefix}-"))
+            parsed = uuid.UUID(work_item.removeprefix(f"{prefix}-"))
+            self.assertEqual(parsed.version, 7)
+            self.assertEqual(parsed.variant, uuid.RFC_4122)
+            self.assertEqual(str(parsed), work_item.removeprefix(f"{prefix}-"))
+            self.assertTrue(NOVA_TOOL.WORK_ITEM_PATTERNS[change_class].fullmatch(work_item))
+
+        generated.update(NOVA_TOOL.new_work_item("adhoc") for _ in range(2_000))
+        self.assertEqual(len(generated), 2_000)
+        rejected = self.run_tool("new-id", "--class", "unknown")
+        self.assertNotEqual(rejected.returncode, 0)
+
+    def test_uuid7_validation_is_strict_and_legacy_ids_remain_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for change_class in NOVA_TOOL.WORK_ITEM_PREFIXES:
+                work_item = NOVA_TOOL.new_work_item(change_class)
+                design_ref = (
+                    "docs/design/2026-08-27_x.md#wp-01-x"
+                    if change_class == "designed"
+                    else "none"
+                )
+                result = self.validate(root, message(work_item, change_class, design_ref))
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+            invalid = (
+                ("PEND-550e8400-e29b-41d4-a716-446655440000", "designed"),
+                ("PEND-018F22E2-79B0-7ABC-8123-456789ABCDEF", "designed"),
+                ("PEND-018f22e2-79b0-7000-7123-456789abcdef", "designed"),
+                (NOVA_TOOL.new_work_item("adhoc"), "designed"),
+                ("FIX-not-a-uuid", "adhoc"),
+            )
+            for work_item, change_class in invalid:
+                with self.subTest(work_item=work_item):
+                    design_ref = (
+                        "docs/design/2026-08-27_x.md#wp-01-x"
+                        if change_class == "designed"
+                        else "none"
+                    )
+                    result = self.validate(root, message(work_item, change_class, design_ref))
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Work-Item does not match", result.stderr)
+
+    def test_review_selection_preserves_uuid7_work_item(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            work_item = "FIX-018f22e2-79b0-7abc-8123-456789abcdef"
+            commit_hash = self.commit(repo, "fix.py", "fixed\n", message(work_item, "adhoc"))
+            result = self.run_tool(
+                "select",
+                "--repo",
+                str(repo),
+                "--mode",
+                "explicit",
+                "--work-item",
+                work_item,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                json.loads(result.stdout),
+                [
+                    {
+                        "change_class": "adhoc",
+                        "commits": [commit_hash],
+                        "design_ref": "none",
+                        "validation": ["python3 -m unittest (pass)"],
+                        "work_item": work_item,
+                    }
+                ],
+            )
 
     def test_ex_doc_rejects_semantic_paths_deletes_renames_and_symlinks(self) -> None:
         cases = {

@@ -6,11 +6,19 @@
 
 | 类别 | ID | 客观边界 | 默认 Review |
 |------|----|----------|-------------|
-| `designed` | `PEND-<数字>` | 新增或改变能力、接口、状态、权限、持久化、依赖、跨模块契约；必须有蓝图和设计工作包 | required |
-| `adhoc` | `FIX-<数字>` | 修复既有契约内的局部问题，不新增能力或改变公共契约；不进入蓝图 | required |
-| `maintenance` | `MAINT-<数字>` | 不改变运行时或测试语义的维护变更 | required，命中客观白名单才可 exempt |
+| `designed` | `PEND-<UUIDv7>` | 新增或改变能力、接口、状态、权限、持久化、依赖、跨模块契约；必须有蓝图和设计工作包 | required |
+| `adhoc` | `FIX-<UUIDv7>` | 修复既有契约内的局部问题，不新增能力或改变公共契约；不进入蓝图 | required |
+| `maintenance` | `MAINT-<UUIDv7>` | 不改变运行时或测试语义的维护变更 | required，命中客观白名单才可 exempt |
 
 无法证明是 `adhoc` 或 `maintenance` 时使用 `designed`；分类矛盾时不提交，先修正元数据。
+
+新工作项使用本地无状态命令生成小写规范 UUIDv7：
+
+```bash
+python3 nova-review/scripts/nova_review.py new-id --class designed
+```
+
+`--class` 可取 `designed`、`adhoc`、`maintenance`，分别生成 `PEND-*`、`FIX-*`、`MAINT-*`。既有纯数字 ID 继续合法且不得改写；Review、修复提交和后续证据必须逐字沿用原 ID，不得换号。生成器不读取登记表，不依赖锁、计数器、工作树、分支或主机状态。
 
 ## 2. 豁免白名单
 
@@ -27,7 +35,7 @@
 
 ```text
 Nova-Schema: 1
-Work-Item: PEND-001
+Work-Item: PEND-018f22e2-79b0-7abc-8123-456789abcdef
 Change-Class: designed
 Design-Ref: docs/design/2026-08-27_example.md#wp-01-example
 Review-Policy: required

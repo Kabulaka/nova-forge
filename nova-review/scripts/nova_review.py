@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate Nova commits, select pending work, and record Review PASS atomically."""
+"""Generate IDs, validate Nova commits, select pending work, and record PASS atomically."""
 
 from __future__ import annotations
 
@@ -11,9 +11,11 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
+import uuid
 from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime
@@ -37,10 +39,15 @@ AUDIT_TRAILERS = (
     "Manifest-SHA256",
     "Validation",
 )
+WORK_ITEM_PREFIXES = {
+    "designed": "PEND",
+    "adhoc": "FIX",
+    "maintenance": "MAINT",
+}
+UUID7_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 WORK_ITEM_PATTERNS = {
-    "designed": re.compile(r"^PEND-[0-9]+$"),
-    "adhoc": re.compile(r"^FIX-[0-9]+$"),
-    "maintenance": re.compile(r"^MAINT-[0-9]+$"),
+    change_class: re.compile(rf"^{prefix}-(?:[0-9]+|{UUID7_PATTERN})$")
+    for change_class, prefix in WORK_ITEM_PREFIXES.items()
 }
 DESIGN_REF_RE = re.compile(r"^docs/design/[^#\s]+\.md#[A-Za-z0-9][A-Za-z0-9._-]*$")
 BATCH_ID_RE = re.compile(r"^NR-[0-9]{8}-[A-Za-z0-9._-]+$")
@@ -94,6 +101,21 @@ def run_git_bytes(repo: Path, *args: str, allow_missing: bool = False) -> bytes 
 
 def valid_work_item(value: str) -> bool:
     return any(pattern.fullmatch(value) is not None for pattern in WORK_ITEM_PATTERNS.values())
+
+
+def new_work_item(change_class: str) -> str:
+    prefix = WORK_ITEM_PREFIXES.get(change_class)
+    if prefix is None:
+        raise NovaError(f"unsupported Change-Class: {change_class}")
+    timestamp_ms = time.time_ns() // 1_000_000
+    value = (
+        (timestamp_ms & ((1 << 48) - 1)) << 80
+        | 0x7 << 76
+        | secrets.randbits(12) << 64
+        | 0b10 << 62
+        | secrets.randbits(62)
+    )
+    return f"{prefix}-{uuid.UUID(int=value)}"
 
 
 def trailing_fields(text: str) -> list[tuple[str, str]]:
@@ -1636,10 +1658,10 @@ def design_package_state(text: str, package_id: str) -> str | None:
 def blueprint_items_for_design(text: str, design_file: str) -> set[str]:
     items: set[str] = set()
     for line in text.splitlines():
-        if not re.match(r"^\|\s*PEND-[0-9]+\s*\|", line):
+        if not line.lstrip().startswith("|"):
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) != 7:
+        if len(cells) != 7 or WORK_ITEM_PATTERNS["designed"].fullmatch(cells[0]) is None:
             continue
         links = re.findall(
             r"\[[^]\n]+\]\((docs/design/[^#\s]+\.md)#[A-Za-z0-9][A-Za-z0-9._-]*\)",
@@ -2290,6 +2312,11 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
 
+    new_id = commands.add_parser("new-id")
+    new_id.add_argument(
+        "--class", dest="change_class", choices=tuple(WORK_ITEM_PREFIXES), required=True
+    )
+
     validate = commands.add_parser("validate-message")
     validate.add_argument("--message-file", type=Path, required=True)
     validate.add_argument("--diff-file", type=Path)
@@ -2321,7 +2348,9 @@ def parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = parser().parse_args()
     try:
-        if args.command == "validate-message":
+        if args.command == "new-id":
+            print(new_work_item(args.change_class))
+        elif args.command == "validate-message":
             message = args.message_file.read_text(encoding="utf-8")
             diff = args.diff_file.read_text(encoding="utf-8") if args.diff_file else None
             metadata, errors = validate_message(message, diff)
