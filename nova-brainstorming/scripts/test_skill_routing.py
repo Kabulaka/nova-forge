@@ -151,6 +151,28 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("不得向终态文档追加工作包或改回非终态", SKILL)
         self.assertIn("通过“演进来源”链接旧设计", SKILL)
 
+    def test_document_examples_are_scoped_to_project_first_creation(self) -> None:
+        self.assertIn("目标项目不存在 `PROJECT_BLUEPRINT.md` 且正在首次创建蓝图时", SKILL)
+        self.assertIn("`docs/design/` 不存在有效设计且正在首次创建设计时", SKILL)
+        self.assertIn("已有对应文档体系时只读取规范、模板和当前项目相关文档", SKILL)
+        self.assertNotIn("首次创建相应文档类型时，再读取 [完整示例]", SKILL)
+
+    def test_resource_reads_reuse_fingerprints_and_resume_only_after_truncation(self) -> None:
+        self.assertIn("已加载技能资源的绝对路径和 SHA-256", SKILL)
+        self.assertIn("路径和 SHA-256 未变化时复用", SKILL)
+        self.assertIn("不得先 `wc` 再按固定行数串行重读", SKILL)
+        self.assertIn("只有工具明确截断时才从未返回位置补读", SKILL)
+        self.assertIn("不得读取超过已知文件末尾的空区间", SKILL)
+        self.assertIn("不得为读取资源修改插件、hook 或宿主 UI", SKILL)
+
+    def test_evolution_source_uses_metadata_then_targeted_contracts(self) -> None:
+        self.assertIn("当前需求、蓝图引用和已确认关系锁定", SKILL)
+        self.assertIn("标题、规范版本、状态、演进来源和工作包等头部元数据", SKILL)
+        self.assertIn("元数据不足以确认覆盖关系或存在契约冲突时", SKILL)
+        self.assertIn("定向读取相关共享契约、工作包和直接依赖", SKILL)
+        self.assertIn("不读取仅主题相邻的旁支设计", SKILL)
+        self.assertIn("确定设计演进来源", SKILL)
+
     def test_structured_question_route_is_capability_driven_and_cross_host(self) -> None:
         summary = CONVERSATION_SOP.index("### 阶段总结与交互载体")
         native_tool = CONVERSATION_SOP.index("宿主实际暴露原生结构化提问工具")
