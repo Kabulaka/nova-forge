@@ -226,21 +226,28 @@ class NovaReviewTests(unittest.TestCase):
 
     def test_uuid7_work_items_generate_validate_and_remain_unique(self) -> None:
         generated: set[str] = set()
-        for change_class, prefix in NOVA_TOOL.WORK_ITEM_PREFIXES.items():
-            result = self.run_tool("new-id", "--class", change_class)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            work_item = result.stdout.strip()
-            self.assertTrue(work_item.startswith(f"{prefix}-"))
-            parsed = uuid.UUID(work_item.removeprefix(f"{prefix}-"))
-            self.assertEqual(parsed.version, 7)
-            self.assertEqual(parsed.variant, uuid.RFC_4122)
-            self.assertEqual(str(parsed), work_item.removeprefix(f"{prefix}-"))
-            self.assertTrue(NOVA_TOOL.WORK_ITEM_PATTERNS[change_class].fullmatch(work_item))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertEqual(list(root.rglob("*")), [])
+            for change_class, prefix in NOVA_TOOL.WORK_ITEM_PREFIXES.items():
+                result = self.run_tool("new-id", "--class", change_class, cwd=root)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                work_item = result.stdout.strip()
+                self.assertTrue(work_item.startswith(f"{prefix}-"))
+                parsed = uuid.UUID(work_item.removeprefix(f"{prefix}-"))
+                self.assertEqual(parsed.version, 7)
+                self.assertEqual(parsed.variant, uuid.RFC_4122)
+                self.assertEqual(str(parsed), work_item.removeprefix(f"{prefix}-"))
+                self.assertTrue(
+                    NOVA_TOOL.WORK_ITEM_PATTERNS[change_class].fullmatch(work_item)
+                )
+
+            rejected = self.run_tool("new-id", "--class", "unknown", cwd=root)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertEqual(list(root.rglob("*")), [])
 
         generated.update(NOVA_TOOL.new_work_item("adhoc") for _ in range(2_000))
         self.assertEqual(len(generated), 2_000)
-        rejected = self.run_tool("new-id", "--class", "unknown")
-        self.assertNotEqual(rejected.returncode, 0)
 
     def test_uuid7_validation_is_strict_and_legacy_ids_remain_valid(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -301,6 +308,98 @@ class NovaReviewTests(unittest.TestCase):
                     }
                 ],
             )
+
+    def test_uuid7_designed_item_closes_and_queries_without_identity_change(self) -> None:
+        work_item = "PEND-018f22e2-79b0-7abc-8123-456789abcdef"
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            blueprint, design = self.designed_documents()
+            blueprint = blueprint.replace("PEND-001", work_item)
+            design = design.replace("PEND-001", work_item)
+            blueprint_path = repo / "PROJECT_BLUEPRINT.md"
+            blueprint_path.write_text(blueprint, encoding="utf-8")
+            design_path = repo / "docs/design/2026-08-27_x.md"
+            design_path.parent.mkdir(parents=True)
+            design_path.write_text(design, encoding="utf-8")
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo),
+                    "add",
+                    "PROJECT_BLUEPRINT.md",
+                    "docs/design/2026-08-27_x.md",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+                input=message(
+                    work_item,
+                    "designed",
+                    "docs/design/2026-08-27_x.md#wp-01-x",
+                ),
+                text=True,
+                check=True,
+            )
+            commit_hash = NOVA_TOOL.run_git(repo, "rev-parse", "HEAD").strip()
+            manifest = {
+                "schema": 1,
+                "batch_id": "NR-20260827-uuid7",
+                "reviewed_at": "2026-08-27T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": work_item,
+                        "change_class": "designed",
+                        "commits": [commit_hash],
+                        "validation": "python3 -m unittest (pass)",
+                        "design_ref": "docs/design/2026-08-27_x.md#wp-01-x",
+                        "blueprint": "PROJECT_BLUEPRINT.md",
+                        "design_file": "docs/design/2026-08-27_x.md",
+                        "package_ids": ["WP-01", "WP-02"],
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            checked = self.run_tool(
+                "check-manifest", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            self.assertNotIn(work_item, blueprint_path.read_text(encoding="utf-8"))
+            closed_design = design_path.read_text(encoding="utf-8")
+            self.assertIn(f"| {work_item} | WP-01、WP-02 |", closed_design)
+            self.assertIn("设计状态：已实现", closed_design)
+            self.assertNotIn("待Review", closed_design)
+
+            feature_path = repo / "docs/audit/features/2026.jsonl"
+            feature = json.loads(feature_path.read_text(encoding="utf-8"))
+            self.assertEqual(feature["work_item"], work_item)
+            review_path = repo / "docs/audit/reviews/2026/08/NR-20260827-uuid7.yaml"
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+            self.assertEqual(review["items"][0]["work_item"], work_item)
+            index_path = NOVA_TOOL.feature_index_path(repo, work_item)
+            self.assertEqual(
+                json.loads(index_path.read_text(encoding="utf-8"))["work_item"], work_item
+            )
+
+            self.commit_audit(repo, manifest)
+            queried = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertEqual(queried.returncode, 0, queried.stderr)
+            result = json.loads(queried.stdout)
+            self.assertEqual(result["work_item"], work_item)
+            self.assertEqual(result["features"][0]["work_item"], work_item)
 
     def test_ex_doc_rejects_semantic_paths_deletes_renames_and_symlinks(self) -> None:
         cases = {
