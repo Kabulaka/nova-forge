@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract tests for project-brainstorming context and resource routing."""
+"""Contract tests for nova-brainstorming context and resource routing."""
 
 from __future__ import annotations
 
@@ -111,15 +111,24 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("不重新运行需求访谈", SKILL)
         self.assertIn("只读取该条目、所引工作包、直接依赖", SKILL)
         self.assertIn("不重读完整蓝图、访谈 SOP 或已闭环关系", SKILL)
-        self.assertIn("编码、测试和 Review 继续服从目标项目指令", SKILL)
-        self.assertIn("上下文压缩、自检、Review 或继续执行不使交接失效", SKILL)
+        self.assertIn("用户明确启动 Review 时再转交 `nova-review`", SKILL)
+        self.assertIn("上下文压缩、自检、显式 Review 或继续修改不使交接失效", SKILL)
         self.assertIn("除已保存实施交接且其列明的失效条件均未发生外", SKILL)
         self.assertIn("条目仍为“待澄清”", SKILL)
         self.assertIn("设计依据缺失、验收不可执行或契约相互冲突时，不得实施", SKILL)
-        self.assertIn("目标项目规则要求的测试证据有效后", SKILL)
-        self.assertIn("这些文档差异须在首次 Review 前完成并纳入完整任务差异", SKILL)
-        self.assertIn("只有目标项目所需的 Review 证据也有效后", SKILL)
-        self.assertIn("Review-Defer、新增待办及无关蓝图变化不自动进入当前实施范围", SKILL)
+        self.assertIn("默认实施流程是编码、最低验收", SKILL)
+        self.assertIn("不得自动启动 Review", SKILL)
+        self.assertIn("正式 `PEND-*` 在 Review PASS 前继续保留于蓝图", SKILL)
+        self.assertIn("用户测试后要求继续修改时沿用同一编号", SKILL)
+        self.assertIn("push 和 SVN commit 必须另行授权", SKILL)
+        self.assertIn("Review 中断则保留 `待Review` 并返回调试", SKILL)
+        self.assertIn("Review-Defer、新增待办及无关蓝图变化不自动进入当前范围", SKILL)
+
+    def test_skill_name_and_review_boundary_are_explicit(self) -> None:
+        self.assertIn("name: nova-brainstorming", SKILL)
+        self.assertNotIn("name: project-brainstorming", SKILL)
+        self.assertIn("不用于独立代码审查", SKILL)
+        self.assertIn("只有 `nova-review` 记录有效 PASS 后", SKILL)
 
     def test_terminal_design_requires_new_dated_evolution_document(self) -> None:
         self.assertIn("YYYY-MM-DD_具体名称.md", SKILL)

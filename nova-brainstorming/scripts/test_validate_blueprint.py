@@ -362,7 +362,7 @@ class ValidatorTests(unittest.TestCase):
                 blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
                 result = self.run_validator(blueprint)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("must reference a confirmed or in-development", result.stdout)
+                self.assertIn("must reference a confirmed, in-development, or pending-review", result.stdout)
 
     def test_missing_design_anchor_fails(self) -> None:
         row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP](docs/design/2026-08-26_epic.md#wp-99-missing) | 无 | 可执行 |"
@@ -429,6 +429,28 @@ class ValidatorTests(unittest.TestCase):
             path = Path(directory) / "2026-08-26_design.md"
             path.write_text(valid_design(), encoding="utf-8")
             self.assertEqual(self.run_validator(path, design=True).returncode, 0)
+
+    def test_pending_review_work_package_remains_blueprint_referenceable(self) -> None:
+        design = valid_design(
+            state="已确认", package_states=("待Review", "已确认")
+        )
+        row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, design_path = self.write_project(
+                Path(directory), valid_blueprint(row), design
+            )
+            design_result = self.run_validator(design_path, design=True)
+            self.assertEqual(
+                design_result.returncode,
+                0,
+                design_result.stdout + design_result.stderr,
+            )
+            blueprint_result = self.run_validator(blueprint)
+            self.assertEqual(
+                blueprint_result.returncode,
+                0,
+                blueprint_result.stdout + blueprint_result.stderr,
+            )
 
     def test_design_filename_requires_valid_creation_date_and_specific_name(self) -> None:
         invalid_names = (

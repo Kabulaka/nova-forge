@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nova Review"
+  short_description: "人工触发的多工作项 Review 与审计闭环"
+  default_prompt: "Use $nova-review to review the explicitly selected Nova work items and record only an evidence-backed conclusion."

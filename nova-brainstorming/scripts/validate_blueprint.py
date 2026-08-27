@@ -56,9 +56,9 @@ CONTRACT_DIMENSIONS = (
 )
 CLARIFICATION_TYPES = {"证据推断", "待确认"}
 DESIGN_STATES = {"澄清中", "已确认", "已实现", "已废弃"}
-WORK_PACKAGE_STATES = {"待澄清", "澄清中", "已确认", "开发中", "已完成", "已废弃"}
+WORK_PACKAGE_STATES = {"待澄清", "澄清中", "已确认", "开发中", "待Review", "已完成", "已废弃"}
 TERMINAL_WORK_PACKAGE_STATES = {"已完成", "已废弃"}
-REFERENCED_WORK_PACKAGE_STATES = {"已确认", "开发中"}
+REFERENCED_WORK_PACKAGE_STATES = {"已确认", "开发中", "待Review"}
 
 TASK_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 WORK_PACKAGE_ID_RE = re.compile(r"^WP-[A-Za-z0-9._-]+$")
@@ -450,7 +450,7 @@ def validate_design_reference(blueprint: Path, value: str) -> list[str]:
         return [f"pending work cannot reference terminal design work package: {relative_path}#{anchor} ({state})"]
     if state not in REFERENCED_WORK_PACKAGE_STATES:
         return [
-            "pending work must reference a confirmed or in-development design work package: "
+            "pending work must reference a confirmed, in-development, or pending-review design work package: "
             f"{relative_path}#{anchor} ({state})"
         ]
     return []
