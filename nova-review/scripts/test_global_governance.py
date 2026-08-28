@@ -126,6 +126,29 @@ class GlobalGovernanceTests(unittest.TestCase):
         self.assertNotIn("commit", PROBE.ORDINARY_PROMPT.lower())
         self.assertNotIn("review", PROBE.ORDINARY_PROMPT.lower())
 
+    def test_runtime_probe_requires_new_fix_uuid7_and_reuses_it_for_review(self) -> None:
+        work_item = "FIX-018f22e2-79b0-7abc-8123-456789abcdef"
+        transcript = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "command": (
+                        "python3 nova-review/scripts/nova_review.py "
+                        "new-id --class adhoc"
+                    ),
+                },
+            }
+        )
+        metadata = {"Work-Item": work_item}
+        self.assertEqual(PROBE.generated_adhoc_work_item(metadata, transcript), work_item)
+        self.assertIn(work_item, PROBE.explicit_review_prompt(work_item))
+
+        with self.assertRaisesRegex(PROBE.ProbeError, "FIX UUIDv7"):
+            PROBE.generated_adhoc_work_item({"Work-Item": "FIX-001"}, transcript)
+        with self.assertRaisesRegex(PROBE.ProbeError, "new-id --class adhoc"):
+            PROBE.generated_adhoc_work_item(metadata, "")
+
     def test_runtime_probe_detects_collaboration_and_select_event_shapes(self) -> None:
         collaboration = json.dumps(
             {
