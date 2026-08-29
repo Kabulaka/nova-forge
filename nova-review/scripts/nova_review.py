@@ -778,6 +778,7 @@ def validate_recorded_commits(
     for item in review["items"]:
         work_item = item["work_item"]
         provided_main: set[str] = set()
+        related_values: set[str | None] = set()
         for commit_ref in item["commits"]:
             alias = commit_ref["repository"]
             if alias != "main":
@@ -800,8 +801,13 @@ def validate_recorded_commits(
             )
             if actual != expected:
                 raise NovaError(f"reviewed commit metadata mismatch for {commit_hash}")
+            related_values.add(metadata.get("Related-Work-Item"))
             provided_main.add(commit_hash)
             reviewed_diffs[("main", commit_hash)] = diff
+
+        if len(related_values) > 1:
+            raise NovaError(f"inconsistent Related-Work-Item across commits for {work_item}")
+        related_work_item = next(iter(related_values), None)
 
         required_main: set[str] = set()
         for entry in scan_commits(repo, work_item, revision):
@@ -812,14 +818,30 @@ def validate_recorded_commits(
                 raise NovaError(
                     f"invalid trailers in {entry['commit']}: " + "; ".join(entry["errors"])
                 )
+            if metadata.get("Related-Work-Item") != related_work_item:
+                raise NovaError(
+                    f"inconsistent Related-Work-Item across commits for {work_item}"
+                )
             if metadata.get("Review-Policy") != "required":
                 continue
-            if (metadata.get("Change-Class"), metadata.get("Design-Ref")) != (
+            if (
+                metadata.get("Change-Class"),
+                metadata.get("Design-Ref"),
+                metadata.get("Related-Work-Item"),
+            ) != (
                 item["change_class"],
                 item["design_ref"],
+                related_work_item,
             ):
                 raise NovaError(f"inconsistent required commit metadata for {work_item}")
             required_main.add(entry["commit"])
+        if (
+            related_work_item is not None
+            and load_completed_item(repo, related_work_item, revision=revision) is None
+        ):
+            raise NovaError(
+                f"Related-Work-Item is not a trusted archived PEND: {related_work_item}"
+            )
         if provided_main != required_main:
             raise NovaError(
                 f"audit commit coverage mismatch for {work_item}; "
@@ -1065,9 +1087,12 @@ def load_completed_item(
     audit_cache: dict[
         str, dict[str, tuple[dict[str, Any], dict[str, Any]]]
     ] | None = None,
+    revision: str = "HEAD",
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
     index_relative = str(feature_index_path(repo, work_item).relative_to(repo))
-    commits = run_git(repo, "log", "-1", "--format=%H", "--", index_relative).splitlines()
+    commits = run_git(
+        repo, "log", "-1", "--format=%H", revision, "--", index_relative
+    ).splitlines()
     if not commits:
         return None
     audit_commit = commits[0].strip()
@@ -1664,6 +1689,8 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                     )
     else:
         for item in normalized_items:
+            if load_completed_item(repo, item["work_item"]) is not None:
+                raise NovaError(f"work item already archived: {item['work_item']}")
             index_path = safe_repo_path(
                 repo,
                 str(feature_index_path(repo, item["work_item"]).relative_to(repo)),

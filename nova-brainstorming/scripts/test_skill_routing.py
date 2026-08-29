@@ -15,6 +15,9 @@ CONVERSATION_SOP = (SKILL_ROOT / "references" / "conversation-sop.md").read_text
 MIGRATION_SOP = (SKILL_ROOT / "references" / "blueprint-migration-sop.md").read_text(
     encoding="utf-8"
 )
+IMPLEMENTATION_SOP = (SKILL_ROOT / "references" / "implementation-sop.md").read_text(
+    encoding="utf-8"
+)
 DESIGN_STANDARD = (SKILL_ROOT / "references" / "design-document-standard.md").read_text(
     encoding="utf-8"
 )
@@ -136,7 +139,12 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("Related-Work-Item", SKILL)
         self.assertIn("push 和 SVN commit 必须另行授权", SKILL)
         self.assertIn("Review 中断则保留 `待Review` 并返回调试", SKILL)
-        self.assertIn("Review-Defer、新增待办及无关蓝图变化不自动进入当前范围", SKILL)
+        self.assertIn(
+            "Review-Defer、新增待办及无关蓝图变化不自动进入当前范围，也不得复用当前工作项",
+            SKILL,
+        )
+        self.assertIn("当前 Review 的 `Observation-Fix`/Review 修复", IMPLEMENTATION_SOP)
+        self.assertIn("合法 `Review-Defer` 必须重新分类建项，不得复用当前编号", IMPLEMENTATION_SOP)
 
     def test_new_pending_design_auto_enters_implementation_unless_blocked(self) -> None:
         handoff = SKILL.index("### 已确认工作包的实施交接")

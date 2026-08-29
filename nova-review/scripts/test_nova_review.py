@@ -201,6 +201,31 @@ class NovaReviewTests(unittest.TestCase):
             self.commit_audit(repo, manifest)
         return manifest_path
 
+    def recorded_fix_review(
+        self, repo: Path, work_item: str, commits: list[str]
+    ) -> dict[str, object]:
+        review: dict[str, object] = {
+            "schema": 1,
+            "batch_id": "NR-20260827-reconstruct",
+            "reviewed_at": "2026-08-27T12:00:00+08:00",
+            "reviewer": "review-agent",
+            "conclusion": "PASS",
+            "items": [
+                {
+                    "work_item": work_item,
+                    "change_class": "adhoc",
+                    "commits": [
+                        {"repository": "main", "commit": commit_hash}
+                        for commit_hash in commits
+                    ],
+                    "validation": "python3 -m unittest (pass)",
+                    "design_ref": "none",
+                }
+            ],
+        }
+        self.add_review_evidence(repo, review)
+        return review
+
     def record_designed_pass(self, repo: Path, suffix: str = "designed") -> str:
         blueprint, design = self.designed_documents()
         (repo / "PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
@@ -711,6 +736,66 @@ class NovaReviewTests(unittest.TestCase):
                 "Related-Work-Item is not a trusted archived PEND: PEND-001",
                 result.stderr,
             )
+
+    def test_audit_reconstruction_rejects_mixed_related_work_item_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            first = self.commit(
+                repo,
+                "fix.py",
+                "one\n",
+                message("FIX-001", "adhoc", related_work_item="PEND-001"),
+            )
+            second = self.commit(
+                repo, "fix.py", "two\n", message("FIX-001", "adhoc")
+            )
+            review = self.recorded_fix_review(repo, "FIX-001", [first, second])
+
+            with self.assertRaisesRegex(
+                NOVA_TOOL.NovaError,
+                "inconsistent Related-Work-Item across commits for FIX-001",
+            ):
+                NOVA_TOOL.validate_recorded_commits(repo, review, "HEAD")
+
+    def test_audit_reconstruction_rejects_related_pend_unarchived_at_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            self.commit(
+                repo,
+                "pending.py",
+                "pending\n",
+                message(
+                    "PEND-001",
+                    "designed",
+                    "docs/design/2026-08-29_pending.md#wp-01-pending",
+                ),
+            )
+            commit_hash = self.commit(
+                repo,
+                "fix.py",
+                "fixed\n",
+                message("FIX-001", "adhoc", related_work_item="PEND-001"),
+            )
+            review = self.recorded_fix_review(repo, "FIX-001", [commit_hash])
+
+            with self.assertRaisesRegex(
+                NOVA_TOOL.NovaError,
+                "Related-Work-Item is not a trusted archived PEND: PEND-001",
+            ):
+                NOVA_TOOL.validate_recorded_commits(repo, review, "HEAD")
+
+    def test_audit_reconstruction_accepts_legacy_commits_without_relationship(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            commit_hash = self.commit(
+                repo, "fix.py", "fixed\n", message("FIX-001", "adhoc")
+            )
+            review = self.recorded_fix_review(repo, "FIX-001", [commit_hash])
+
+            NOVA_TOOL.validate_recorded_commits(repo, review, "HEAD")
 
     def test_selection_modes_use_ready_ids_and_exclude_reviewed_or_unrelated_commits(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1336,6 +1421,50 @@ class NovaReviewTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("work item already archived: FIX-001", result.stderr)
             self.assertFalse((repo / "docs/audit/features/2026.jsonl").exists())
+
+    def test_manifest_rejects_archived_id_after_worktree_audit_files_are_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            original = self.commit(
+                repo, "fix.py", "one\n", message("FIX-001", "adhoc")
+            )
+            self.record_fix_pass(repo, "FIX-001", original, "sealed")
+            reused = self.commit(
+                repo, "fix.py", "two\n", message("FIX-001", "adhoc")
+            )
+            NOVA_TOOL.feature_index_path(repo, "FIX-001").unlink()
+            NOVA_TOOL.feature_path(
+                repo, NOVA_TOOL.parse_reviewed_at(
+                    "2026-08-27T12:00:00+08:00", "reviewed_at"
+                )
+            ).unlink()
+
+            manifest: dict[str, object] = {
+                "schema": 1,
+                "batch_id": "NR-20260827-reused",
+                "reviewed_at": "2026-08-27T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": "FIX-001",
+                        "change_class": "adhoc",
+                        "commits": [original, reused],
+                        "validation": "tests (pass)",
+                        "design_ref": "none",
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review-reused.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = self.run_tool(
+                "check-manifest", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("work item already archived: FIX-001", result.stderr)
 
     def test_manifest_must_cover_every_required_commit_for_work_item(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
