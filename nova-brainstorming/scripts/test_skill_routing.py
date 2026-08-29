@@ -259,6 +259,9 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("AI 不得仅凭本项成立自行宣称已收敛", CONVERSATION_SOP)
         self.assertIn("要求开发、沉默、空答案、取消、部分答案", CONVERSATION_SOP)
         self.assertIn("不再询问是否开始编码", CONVERSATION_SOP)
+        self.assertIn("该次确认同时授权写入", SKILL)
+        self.assertIn("不得再提出写入或开发确认", SKILL)
+        self.assertNotIn("取得用户确认后再写", SKILL)
         self.assertIn("正常连续访谈在最终确认前不写设计草稿", CONVERSATION_SOP)
         self.assertIn("只询问一次是否保存", CONVERSATION_SOP)
         self.assertIn("后台同时维护固定收敛矩阵", CONVERSATION_SOP)
@@ -266,6 +269,11 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("最终只展示由矩阵生成的一份整设计摘要", CONVERSATION_SOP)
         self.assertIn("用户明确确认@sha256:<Semantic-Fingerprint>", DESIGN_STANDARD)
         self.assertIn("任何设计语义变化都必须升级为版本 `5`", DESIGN_STANDARD)
+        self.assertIn(
+            "版本 `4` 仅限已登记且语义与 Git `HEAD` 权威基线一致的兼容设计",
+            DESIGN_STANDARD,
+        )
+        self.assertNotIn("新建或活动设计规范版本为 `4`", DESIGN_STANDARD)
 
     def test_unanswered_structured_question_is_resumable(self) -> None:
         self.assertIn("### 结构化问题的中断与恢复", CONVERSATION_SOP)

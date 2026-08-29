@@ -19,6 +19,7 @@ DESIGN_VERSION = "5"
 COMPATIBLE_DESIGN_VERSION = "4"
 LEGACY_DESIGN_VERSION = "3"
 LEGACY_SNAPSHOT_MANIFEST = ".v3-legacy-snapshots.json"
+COMPATIBLE_SNAPSHOT_MANIFEST = ".v4-compatible-snapshots.json"
 CONFIRMATION_PENDING = "待确认"
 CONFIRMATION_RE = re.compile(r"^用户明确确认@sha256:([0-9a-f]{64})$")
 BLUEPRINT_SECTIONS = (
@@ -183,6 +184,77 @@ def validate_legacy_design_snapshot(path: Path, text_snapshot: str) -> list[str]
         return [f"legacy design snapshot is not present in Git HEAD: {path.name}"]
     if head_result.stdout != content:
         return [f"legacy design snapshot differs from Git HEAD: {path.name}"]
+    return []
+
+
+def validate_compatible_design_snapshot(path: Path, text_snapshot: str) -> list[str]:
+    """Allow version 4 only when its semantics match a registered Git baseline."""
+    manifest_path = path.parent / COMPATIBLE_SNAPSHOT_MANIFEST
+    manifest_text, read_errors = read_document(manifest_path)
+    if manifest_text is None:
+        return [
+            "compatible version 4 design must match a registered semantic baseline: " + error
+            for error in read_errors
+        ]
+    try:
+        manifest = json.loads(manifest_text)
+    except json.JSONDecodeError as exc:
+        return [f"invalid compatible design snapshot manifest: {exc}"]
+    if not isinstance(manifest, dict):
+        return ["compatible design snapshot manifest must use schema 1 with a files object"]
+    files = manifest.get("files")
+    if manifest.get("schema") != 1 or not isinstance(files, dict):
+        return ["compatible design snapshot manifest must use schema 1 with a files object"]
+    expected = files.get(path.name)
+    if not isinstance(expected, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
+        return [
+            f"compatible version 4 design must match a registered semantic baseline: {path.name}"
+        ]
+
+    try:
+        root_result = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        return [f"cannot verify compatible design baseline in Git HEAD: {exc}"]
+    if root_result.returncode != 0:
+        return [f"compatible version 4 design requires a Git repository: {path.name}"]
+    repository_root = Path(root_result.stdout.strip()).resolve()
+    try:
+        relative_path = path.resolve().relative_to(repository_root).as_posix()
+    except ValueError:
+        return [f"compatible version 4 design must stay inside its Git repository: {path.name}"]
+    try:
+        head_result = subprocess.run(
+            ["git", "-C", str(repository_root), "show", f"HEAD:{relative_path}"],
+            check=False,
+            capture_output=True,
+        )
+    except OSError as exc:
+        return [f"cannot verify compatible design baseline in Git HEAD: {exc}"]
+    if head_result.returncode != 0:
+        return [f"compatible version 4 design is not present in Git HEAD: {path.name}"]
+    try:
+        head_text = head_result.stdout.decode("utf-8")
+    except UnicodeError as exc:
+        return [f"cannot decode compatible design baseline from Git HEAD: {exc}"]
+
+    head_fingerprint = "sha256:" + design_semantic_fingerprint(
+        path, text_snapshot=head_text
+    )
+    if head_fingerprint != expected:
+        return [f"compatible design Git HEAD semantics do not match manifest: {path.name}"]
+    current_fingerprint = "sha256:" + design_semantic_fingerprint(
+        path, text_snapshot=text_snapshot
+    )
+    if current_fingerprint != expected:
+        return [
+            f"compatible version 4 design semantics changed; upgrade to version {DESIGN_VERSION}: "
+            f"{path.name}"
+        ]
     return []
 
 
@@ -710,6 +782,8 @@ def validate_design(
         errors.append(f"active design must use version {DESIGN_VERSION}")
     if version == LEGACY_DESIGN_VERSION:
         errors.extend(validate_legacy_design_snapshot(path, text))
+    elif version == COMPATIBLE_DESIGN_VERSION:
+        errors.extend(validate_compatible_design_snapshot(path, text))
 
     legacy = version == LEGACY_DESIGN_VERSION
 

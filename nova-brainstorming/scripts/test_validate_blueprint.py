@@ -32,11 +32,12 @@ DIMENSIONS = (
     "失败与恢复",
     "AI 决策边界",
 )
+AUTO_CONFIRMATION = object()
 
 
 def valid_design(
     *,
-    version: str = "4",
+    version: str = "5",
     state: str = "已确认",
     package_states: tuple[str, ...] = ("已确认", "已确认"),
     package_ids: tuple[str, ...] = ("WP-01", "WP-02"),
@@ -44,7 +45,7 @@ def valid_design(
     include_staging: bool = False,
     replacement: bool = False,
     evolution: str = "无",
-    confirmation: str | None = None,
+    confirmation: str | None | object = AUTO_CONFIRMATION,
 ) -> str:
     if len(package_states) != len(package_ids):
         raise ValueError("package_states must match package_ids")
@@ -141,29 +142,48 @@ def valid_design(
         {map_rows_for_template}
         """
     ).strip()
-    if confirmation is not None:
+    effective_confirmation = confirmation
+    if confirmation is AUTO_CONFIRMATION:
+        if version == "5":
+            effective_confirmation = "待确认" if state == "澄清中" else "用户明确确认@sha256:" + "0" * 64
+        else:
+            effective_confirmation = None
+    if effective_confirmation is not None:
         header = header.replace(
             f"> 设计状态：{state}\n",
-            f"> 设计状态：{state}\n> 收敛确认：{confirmation}\n",
+            f"> 设计状态：{state}\n> 收敛确认：{effective_confirmation}\n",
         )
-    return header + "\n\n" + "\n\n".join(package_sections) + staging + "\n"
+    design = header + "\n\n" + "\n\n".join(package_sections) + staging + "\n"
+    if effective_confirmation == "用户明确确认@sha256:" + "0" * 64:
+        fingerprint = VALIDATOR_MODULE.design_semantic_fingerprint(
+            Path("2026-08-29_显式收敛确认.md"), text_snapshot=design
+        )
+        design = design.replace("0" * 64, fingerprint, 1)
+    return design
 
 
 def valid_confirmed_current_design(**kwargs: object) -> str:
+    return valid_design(version="5", **kwargs)
+
+
+def refresh_confirmation(design: str) -> str:
     placeholder = "0" * 64
-    design = valid_design(
-        version="5",
-        confirmation=f"用户明确确认@sha256:{placeholder}",
-        **kwargs,
+    pending = re.sub(
+        r"用户明确确认@sha256:[0-9a-f]{64}",
+        f"用户明确确认@sha256:{placeholder}",
+        design,
+        count=1,
     )
     fingerprint = VALIDATOR_MODULE.design_semantic_fingerprint(
-        Path("2026-08-29_显式收敛确认.md"), text_snapshot=design
+        Path("2026-08-29_显式收敛确认.md"), text_snapshot=pending
     )
-    return design.replace(placeholder, fingerprint, 1)
+    return pending.replace(placeholder, fingerprint, 1)
 
 
 def legacy_terminal_design() -> str:
-    design = valid_design(state="已实现", package_states=("已完成", "已完成"))
+    design = valid_design(
+        version="4", state="已实现", package_states=("已完成", "已完成")
+    )
     design = design.replace("设计规范版本：4", "设计规范版本：3")
     design = design.replace(
         "| 契约 | 语义键 | 唯一规则 |\n|------|--------|----------|",
@@ -335,6 +355,35 @@ class ValidatorTests(unittest.TestCase):
         )
         return design_path
 
+    def write_registered_compatible_design(self, root: Path) -> Path:
+        design = valid_design(version="4")
+        design_path = root / "docs" / "design" / "2026-08-26_design.md"
+        design_path.parent.mkdir(parents=True, exist_ok=True)
+        design_path.write_text(design, encoding="utf-8")
+        fingerprint = VALIDATOR_MODULE.design_semantic_fingerprint(
+            design_path, text_snapshot=design
+        )
+        manifest = {
+            "schema": 1,
+            "files": {design_path.name: f"sha256:{fingerprint}"},
+        }
+        (design_path.parent / ".v4-compatible-snapshots.json").write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        )
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.email", "test@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.name", "Nova Test"], check=True
+        )
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "commit", "-q", "-m", "fixture"], check=True
+        )
+        return design_path
+
     def test_two_pending_items_reference_different_work_packages_in_one_design(self) -> None:
         rows = "\n".join(
             (
@@ -416,8 +465,43 @@ class ValidatorTests(unittest.TestCase):
                 result.stdout,
             )
 
+    def test_new_version_four_design_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-29_新建旧版设计.md"
+            path.write_text(valid_design(version="4"), encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "compatible version 4 design must match a registered semantic baseline",
+                result.stdout,
+            )
+
+    def test_version_four_semantic_change_requires_upgrade(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_registered_compatible_design(Path(directory))
+            changed = path.read_text(encoding="utf-8").replace(
+                "两个工作包共享同一状态定义", "未经确认的新状态定义"
+            )
+            path.write_text(changed, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "compatible version 4 design semantics changed; upgrade to version 5",
+                result.stdout,
+            )
+
+    def test_version_four_lifecycle_only_change_remains_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_registered_compatible_design(Path(directory))
+            changed = path.read_text(encoding="utf-8").replace(
+                "| WP-01 | 能力 | 已确认 |", "| WP-01 | 能力 | 开发中 |"
+            )
+            path.write_text(changed, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_pending_item_rejects_design_document_from_older_format(self) -> None:
-        design = valid_design().replace("设计规范版本：4", "设计规范版本：2")
+        design = valid_design().replace("设计规范版本：5", "设计规范版本：2")
         row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
             blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
@@ -431,8 +515,8 @@ class ValidatorTests(unittest.TestCase):
 
     def test_pending_item_rejects_fenced_fake_design_version(self) -> None:
         design = valid_design().replace(
-            "> 设计规范版本：4",
-            "> 设计规范版本：2\n\n```text\n> 设计规范版本：4\n```",
+            "> 设计规范版本：5",
+            "> 设计规范版本：2\n\n```text\n> 设计规范版本：5\n```",
         )
         row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
@@ -802,6 +886,7 @@ class ValidatorTests(unittest.TestCase):
             "S-01、WP-01-C01、WP-01-C02",
             "S-01、WP-01-C01、WP-01-C07、WP-01-C02",
         )
+        design = refresh_confirmation(design)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
@@ -924,7 +1009,11 @@ class ValidatorTests(unittest.TestCase):
         designs = (
             valid_design(),
             valid_design(package_states=("开发中", "已确认")),
-            valid_design().replace("WP-01 的交付边界约束", "WP-01 的新交付边界约束"),
+            refresh_confirmation(
+                valid_design().replace(
+                    "WP-01 的交付边界约束", "WP-01 的新交付边界约束"
+                )
+            ),
         )
         fingerprints: list[str] = []
         with tempfile.TemporaryDirectory() as directory:
