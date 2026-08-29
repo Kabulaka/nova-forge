@@ -85,8 +85,8 @@ Reviewer 必须审查完七个维度并一次性返回完整报告，禁止发�
 
 ## 7. REJECT 修复与复审
 
-1. 主代理收到完整 REJECT 后逐条分析，统一修复全部 Blocker 和 Observation-Fix；不得只修一部分就复审，也不得借机重构无关代码。
-2. Observation-Defer 按来源 `Review-Defer` 写入蓝图；无确认设计或依赖时标“待澄清”，不纳入本轮修复或任务范围。
+1. 主代理收到完整 REJECT 后逐条分析，统一修复全部 Blocker 和 Observation-Fix；这些修复仍属于未归档的当前工作项，必须沿用原编号，不得只修一部分就复审，也不得借机重构无关代码。
+2. Observation-Defer 按来源 `Review-Defer` 写入蓝图；无确认设计或依赖时标“待澄清”，不纳入本轮修复或任务范围，也不得复用当前工作项编号。
 3. 只有修复导致证据失效时才重跑受影响测试；其他证据必须复用。测试通过后提交完整新任务 diff。
 4. 复审必须用 `followup_task` 复用上一轮 Reviewer，逐条确认旧问题，并只检查修复新增/修改行是否引入新问题；不得在上一轮未指出的区域搜索任何严重性的新问题。
 5. 复审新问题仅可来自修复直接触及的行，仍按 Blocker/Observation-Fix/Observation-Defer 分级。

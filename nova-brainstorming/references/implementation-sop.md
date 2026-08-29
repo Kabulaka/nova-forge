@@ -50,7 +50,7 @@
 ## 5. 提交与待 Review 交接
 
 1. 最低验收通过且无阻断后按子任务创建精确范围本地 Git commit；不得夹带任务差异之外的历史修改，也不得提交未通过测试的代码。
-2. 提交分类、稳定工作项、trailers 和客观豁免服从 `nova-review/references/commit-contract.md`。同一功能后续修正沿用相同 ID，追加 commit 和验证证据。
+2. 提交分类、稳定工作项、trailers 和客观豁免服从 `nova-review/references/commit-contract.md`。工作项未归档且修正仍属原设计、验收或当前 Review 时沿用相同 ID，追加 commit 和验证证据；可信审计归档后编号永久封存，后续变化重新分类建项。提交前使用仓库感知的 `validate-message --repo <根目录>` 拒绝归档 ID 复用，并校验明确来源 FIX 的 `Related-Work-Item` 指向可信归档 PEND。
 3. 只有 `PEND-*` 在最低验收后把既有设计工作包改为 `待Review`，蓝图条目继续保留；`FIX-*`/`MAINT-*` 不创建蓝图条目或工作包。只有 `Review-Policy: required` 的提交由元数据进入待审集合；合法 exempt 的 `MAINT-*` 以豁免证据直接完成。
 4. 默认不启动 Review。用户明确要求 Review 时才加载 `nova-review`；Review 中断可返回调试。只有有效 PASS 后才删除正式待办、完成工作包并写审计。
 5. 全局治理代表精确范围本地 Git commit 的持续授权；用户明确“不提交”只撤回当次授权。Git push、远程配置和 SVN commit 始终需要针对具体操作的独立授权。

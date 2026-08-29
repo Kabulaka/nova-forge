@@ -2,7 +2,7 @@
 
 ## 1. 身份与分类
 
-工作项 ID 是跨会话稳定身份，commit 只是该身份的证据：
+工作项 ID 是一次交付生命周期的跨会话稳定身份，commit 只是该身份的证据。可信审计归档是不可逆终态：活动工作项的原范围开发、测试和 Review 修复沿用原 ID；归档后任何变化重新分类建项，旧 ID 永久封存：
 
 | 类别 | ID | 客观边界 | 默认 Review |
 |------|----|----------|-------------|
@@ -18,7 +18,9 @@
 python3 nova-review/scripts/nova_review.py new-id --class designed
 ```
 
-`--class` 可取 `designed`、`adhoc`、`maintenance`，分别生成 `PEND-*`、`FIX-*`、`MAINT-*`。既有纯数字 ID 继续合法且不得改写；Review、修复提交和后续证据必须逐字沿用原 ID，不得换号。生成器不读取登记表，不依赖锁、计数器、工作树、分支或主机状态。
+`--class` 可取 `designed`、`adhoc`、`maintenance`，分别生成 `PEND-*`、`FIX-*`、`MAINT-*`。既有纯数字 ID 继续合法且不得改写，但不得因蓝图删除活动行而重新分配；Review、归档前原范围修复提交和后续证据必须逐字沿用原 ID。生成器不读取登记表，不依赖锁、计数器、工作树、分支或主机状态。
+
+归档后发现既有契约缺陷时创建新 FIX；新增能力或改变公共契约时创建新 PEND 并以新设计的“演进来源”链接终态设计；纯维护创建新 MAINT。明确源于已归档 PEND 的新 FIX 必须增加单值 `Related-Work-Item: PEND-*`，且该值必须与新 FIX 不同并能通过可信审计索引验证；无关任务不得伪造关联。
 
 ## 2. 豁免白名单
 
@@ -50,7 +52,8 @@ Validation: pytest tests/example.py (pass)
 - required 时 `Exemption-Rule: none`；exempt 时只能为上节白名单；
 - 只解析提交消息尾部连续且完整的 trailer block；正文中的示例字段不算 trailers；
 - `Validation` 写最低验收的命令并以 `(pass)` 结尾，不写可变 Review 状态；
-- 同一工作项后续修改继续使用相同 ID，并产生新 commit；不得为同一功能换号躲避历史。
+- `Related-Work-Item` 可省略且最多出现一次，只允许 `adhoc` FIX 指向可信审计已归档的 PEND；普通校验检查格式，仓库感知校验、待审选择和关闭校验检查归档真实性；
+- 未归档工作项的原范围后续修改继续使用相同 ID 并产生新 commit；归档后不得新增同 ID commit，也不得为新工作项复用旧号或修改旧审计掩盖冲突。
 
 ## 4. Review 关闭审计提交
 

@@ -17,7 +17,7 @@ description: 在用户明确要求 Review 时，按稳定工作项编号选择�
 
 固定每项的编号、commit 列表、设计引用、有效测试证据、未验证事项和工作副本差异。SVN/Git 历史中不属于这些编号的旧改动不得纳入。选择为空时报告原因，不把空范围当 PASS。
 
-候选编号只能来自用户输入、当前会话 ready 记录或既有 commit trailers。Review 不得调用 `new-id`、补造编号或替换编号；审查发现的当轮修复提交也必须沿用被审工作项。
+候选编号只能来自用户输入、当前会话 ready 记录或既有 commit trailers。Review 不得调用 `new-id`、补造编号或替换编号；审查发现的当轮修复提交也必须沿用被审工作项。选择阶段若可信审计已归档该编号但又出现未覆盖的新 commit，必须在启动 Reviewer 前失败并要求重新分类建项；不得把归档关系当作重新打开原工作项。
 
 ## 2. Review 可被人工中断
 
@@ -42,7 +42,7 @@ PASS 或按 SOP 合法的 PASS WITH NOTES 后，读取 [审计与关闭契约](r
 ## 5. 工具入口
 
 ```bash
-python3 scripts/nova_review.py validate-message --message-file /path/to/message --diff-file /path/to/diff
+python3 scripts/nova_review.py validate-message --repo /path/to/repo --message-file /path/to/message --diff-file /path/to/diff
 python3 scripts/nova_review.py validate-audit-message --repo /path/to/repo --message-file /path/to/message --diff-file /path/to/diff
 python3 scripts/nova_review.py select --repo /path/to/repo --mode current --session-item PEND-001
 python3 scripts/nova_review.py check-manifest --repo /path/to/repo --manifest /path/to/review.json
@@ -52,7 +52,7 @@ python3 scripts/validate_discovery.py --workspace /path/to/skills --codex-home /
 python3 scripts/probe_default_flow.py
 ```
 
-工具只使用 Python 标准库。`validate-message`、`validate-audit-message`、`select`、`check-manifest` 和 `query` 只读；`record-pass` 是唯一写审计/关闭入口。`probe_default_flow.py` 只在隔离临时 Git 仓库调用本机 Codex，验证普通开发自动 commit 且不 Review、显式 Review 才进入选择。关闭生成的文件使用提交契约中的 `Nova-Audit-Schema` trailers 单独提交，不形成新工作项或递归 Review。
+工具只使用 Python 标准库。`validate-message`、`validate-audit-message`、`select`、`check-manifest` 和 `query` 只读；`validate-message --repo` 额外校验当前编号未归档及 `Related-Work-Item` 的可信归档来源，不传 `--repo` 时只做兼容的消息与 diff 语法校验。`record-pass` 是唯一写审计/关闭入口。`probe_default_flow.py` 只在隔离临时 Git 仓库调用本机 Codex，验证普通开发自动 commit 且不 Review、显式 Review 才进入选择。关闭生成的文件使用提交契约中的 `Nova-Audit-Schema` trailers 单独提交，不形成新工作项或递归 Review。
 
 ## 资源路由
 

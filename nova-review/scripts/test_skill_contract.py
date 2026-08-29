@@ -42,7 +42,10 @@ class NovaReviewSkillContractTests(unittest.TestCase):
             "Validation",
         ):
             self.assertIn(trailer, COMMIT)
-        self.assertIn("工作项 ID 是跨会话稳定身份", COMMIT)
+        self.assertIn("工作项 ID 是一次交付生命周期的跨会话稳定身份", COMMIT)
+        self.assertIn("可信审计归档是不可逆终态", COMMIT)
+        self.assertIn("Related-Work-Item", COMMIT)
+        self.assertIn("蓝图删除活动行不释放编号", AUDIT)
         self.assertIn("无法证明是 `adhoc` 或 `maintenance` 时使用 `designed`", COMMIT)
         self.assertNotIn("EX-REVIEW-RECORD", COMMIT)
         self.assertIn("Nova-Audit-Schema", COMMIT)

@@ -30,20 +30,24 @@ def message(
     policy: str = "required",
     exemption: str = "none",
     validation: str = "python3 -m unittest (pass)",
+    related_work_item: str | None = None,
 ) -> str:
-    return textwrap.dedent(
-        f"""
-        test: change {work_item}
-
-        Nova-Schema: 1
-        Work-Item: {work_item}
-        Change-Class: {change_class}
-        Design-Ref: {design_ref}
-        Review-Policy: {policy}
-        Exemption-Rule: {exemption}
-        Validation: {validation}
-        """
-    ).strip() + "\n"
+    trailers = [
+        "Nova-Schema: 1",
+        f"Work-Item: {work_item}",
+    ]
+    if related_work_item is not None:
+        trailers.append(f"Related-Work-Item: {related_work_item}")
+    trailers.extend(
+        (
+            f"Change-Class: {change_class}",
+            f"Design-Ref: {design_ref}",
+            f"Review-Policy: {policy}",
+            f"Exemption-Rule: {exemption}",
+            f"Validation: {validation}",
+        )
+    )
+    return f"test: change {work_item}\n\n" + "\n".join(trailers) + "\n"
 
 
 class NovaReviewTests(unittest.TestCase):
@@ -82,10 +86,18 @@ class NovaReviewTests(unittest.TestCase):
             text=True,
         ).stdout.strip()
 
-    def validate(self, root: Path, commit_message: str, diff: str | None = None) -> subprocess.CompletedProcess[str]:
+    def validate(
+        self,
+        root: Path,
+        commit_message: str,
+        diff: str | None = None,
+        repo: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         message_path = root / "message.txt"
         message_path.write_text(commit_message, encoding="utf-8")
         args = ["validate-message", "--message-file", str(message_path)]
+        if repo is not None:
+            args.extend(("--repo", str(repo)))
         if diff is not None:
             diff_path = root / "change.diff"
             diff_path.write_text(diff, encoding="utf-8")
@@ -188,6 +200,54 @@ class NovaReviewTests(unittest.TestCase):
         if commit_audit:
             self.commit_audit(repo, manifest)
         return manifest_path
+
+    def record_designed_pass(self, repo: Path, suffix: str = "designed") -> str:
+        blueprint, design = self.designed_documents()
+        (repo / "PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
+        design_path = repo / "docs/design/2026-08-27_x.md"
+        design_path.parent.mkdir(parents=True, exist_ok=True)
+        design_path.write_text(design, encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "PROJECT_BLUEPRINT.md", str(design_path.relative_to(repo))],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+            input=message(
+                "PEND-001", "designed", "docs/design/2026-08-27_x.md#wp-01-x"
+            ),
+            text=True,
+            check=True,
+        )
+        commit_hash = NOVA_TOOL.run_git(repo, "rev-parse", "HEAD").strip()
+        manifest = {
+            "schema": 1,
+            "batch_id": f"NR-20260827-{suffix}",
+            "reviewed_at": "2026-08-27T12:00:00+08:00",
+            "reviewer": "review-agent",
+            "conclusion": "PASS",
+            "items": [
+                {
+                    "work_item": "PEND-001",
+                    "change_class": "designed",
+                    "commits": [commit_hash],
+                    "validation": "python3 -m unittest (pass)",
+                    "design_ref": "docs/design/2026-08-27_x.md#wp-01-x",
+                    "blueprint": "PROJECT_BLUEPRINT.md",
+                    "design_file": "docs/design/2026-08-27_x.md",
+                    "package_ids": ["WP-01", "WP-02"],
+                }
+            ],
+        }
+        self.add_review_evidence(repo, manifest)
+        manifest_path = repo / f"review-{suffix}.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        result = self.run_tool(
+            "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.commit_audit(repo, manifest)
+        return commit_hash
 
     def test_valid_classes_and_objective_exemptions(self) -> None:
         doc_diff = textwrap.dedent(
@@ -552,6 +612,106 @@ class NovaReviewTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(expected, result.stderr)
 
+    def test_related_work_item_requires_single_adhoc_pend_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = (
+                (
+                    message(
+                        "PEND-002",
+                        "designed",
+                        "docs/design/2026-08-29_x.md#wp-01-x",
+                        related_work_item="PEND-001",
+                    ),
+                    "Related-Work-Item is allowed only for adhoc FIX changes",
+                ),
+                (
+                    message("FIX-002", "adhoc", related_work_item="FIX-001"),
+                    "Related-Work-Item must reference a PEND work item",
+                ),
+                (
+                    message("FIX-002", "adhoc", related_work_item="PEND-001")
+                    + "Related-Work-Item: PEND-003\n",
+                    "Related-Work-Item must appear at most once",
+                ),
+            )
+            for commit_message, expected in cases:
+                with self.subTest(expected=expected):
+                    result = self.validate(root, commit_message)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected, result.stderr)
+
+    def test_archived_pend_reuse_is_rejected_and_related_fix_remains_independent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            self.record_designed_pass(repo, "archived-pend")
+
+            reused_message = message(
+                "PEND-001", "designed", "docs/design/2026-08-27_x.md#wp-01-x"
+            )
+            validation = self.validate(repo, reused_message, repo=repo)
+            self.assertNotEqual(validation.returncode, 0)
+            self.assertIn("work item already archived: PEND-001", validation.stderr)
+
+            self.commit(repo, "reused.py", "reused\n", reused_message)
+            selection = self.run_tool(
+                "select",
+                "--repo",
+                str(repo),
+                "--mode",
+                "explicit",
+                "--work-item",
+                "PEND-001",
+            )
+            self.assertNotEqual(selection.returncode, 0)
+            self.assertIn("work item already archived: PEND-001", selection.stderr)
+
+            related_message = message(
+                "FIX-002", "adhoc", related_work_item="PEND-001"
+            )
+            validation = self.validate(repo, related_message, repo=repo)
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+            related_commit = self.commit(repo, "fixed.py", "fixed\n", related_message)
+            selection = self.run_tool(
+                "select",
+                "--repo",
+                str(repo),
+                "--mode",
+                "explicit",
+                "--work-item",
+                "FIX-002",
+            )
+            self.assertEqual(selection.returncode, 0, selection.stderr)
+            selected = json.loads(selection.stdout)
+            self.assertEqual(selected[0]["commits"], [related_commit])
+            self.assertEqual(selected[0]["related_work_item"], "PEND-001")
+
+    def test_related_fix_rejects_unarchived_pend_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            self.commit(
+                repo,
+                "pending.py",
+                "pending\n",
+                message(
+                    "PEND-001",
+                    "designed",
+                    "docs/design/2026-08-29_pending.md#wp-01-pending",
+                ),
+            )
+            result = self.validate(
+                repo,
+                message("FIX-002", "adhoc", related_work_item="PEND-001"),
+                repo=repo,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Related-Work-Item is not a trusted archived PEND: PEND-001",
+                result.stderr,
+            )
+
     def test_selection_modes_use_ready_ids_and_exclude_reviewed_or_unrelated_commits(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
@@ -574,6 +734,16 @@ class NovaReviewTests(unittest.TestCase):
                 repo,
                 "feature.py",
                 "feature\n",
+                message(
+                    "PEND-001",
+                    "designed",
+                    "docs/design/2026-08-27_feature.md#wp-01-feature",
+                ),
+            )
+            pending_designed_fix = self.commit(
+                repo,
+                "feature-fix.py",
+                "feature fix\n",
                 message(
                     "PEND-001",
                     "designed",
@@ -620,7 +790,9 @@ class NovaReviewTests(unittest.TestCase):
             self.assertEqual(current_items[0]["commits"], [pending])
             self.assertEqual(current_items[1]["commits"], [pending_three])
             self.assertEqual(current_items[2]["commits"], [pending_maintenance])
-            self.assertEqual(current_items[3]["commits"], [pending_designed])
+            self.assertEqual(
+                current_items[3]["commits"], [pending_designed, pending_designed_fix]
+            )
 
             explicit = self.run_tool(
                 "select",

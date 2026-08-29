@@ -47,7 +47,7 @@
 - `maintenance` 使用 `MAINT-*`，`Design-Ref: none`，默认需要 Review，只有客观白名单可豁免；
 - 缺失、矛盾或无法证明的分类一律按需要 Review 处理。
 
-Nova commit 必须包含 `Nova-Schema`、`Work-Item`、`Change-Class`、`Design-Ref`、`Review-Policy`、`Exemption-Rule`、`Validation`。不得在不可变 commit 中写 `Review-State`。同一功能后续修正沿用相同工作项并追加 commit。
+Nova commit 必须包含 `Nova-Schema`、`Work-Item`、`Change-Class`、`Design-Ref`、`Review-Policy`、`Exemption-Rule`、`Validation`，明确源于已归档 PEND 的新 FIX 还必须包含 `Related-Work-Item`。不得在不可变 commit 中写 `Review-State`。工作项未归档且修正仍属原范围或当前 Review 时沿用相同编号并追加 commit；可信审计归档后编号永久封存，后续变化必须重新分类建项。
 
 ## 人工 Review
 

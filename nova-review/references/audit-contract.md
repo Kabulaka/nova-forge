@@ -12,7 +12,7 @@ docs/audit/
     └── <sha256(work-item) 前两位>/<work-item>.json
 ```
 
-功能归档每行一个 JSON 对象，跨年份按 `work_item` 唯一；Review 每批一个 `.yaml` 文件，但内容固定为严格 JSON（JSON 是 YAML 1.2 子集），可含多个工作项。工作项索引只保存归档年份、Review 相对路径和批次，用于按编号定向读取并校验三者一致；不得建立持续追加的 Markdown 总账。
+功能归档每行一个 JSON 对象，跨年份按 `work_item` 唯一；可信审计提交中的工作项索引同时是该编号不可逆归档终态的权威标记，蓝图删除活动行不释放编号。Review 每批一个 `.yaml` 文件，但内容固定为严格 JSON（JSON 是 YAML 1.2 子集），可含多个工作项。工作项索引只保存归档年份、Review 相对路径和批次，用于按编号定向读取并校验三者一致；不得建立持续追加的 Markdown 总账。
 
 ## 2. Review manifest
 
@@ -65,4 +65,4 @@ docs/audit/
 
 ## 4. 查询
 
-按稳定编号查询时先定位提交该哈希分片索引的最新 `Nova-Audit-Schema` commit，再从该 commit blob 验证索引、年度功能行、Review、蓝图/设计关闭内容、审计 trailers、manifest 摘要和精确变更路径；至少重新验证 `main` 仓库被审 commits、trailers、范围与审计提交前的完整覆盖。同一查询中多个工作项指向同一审计 commit 时，该 commit 的完整快照只验证一次并按 commit hash 复用结果。未提交的 `record-pass` 输出可幂等重放，但不能从待审集合排除。指定年份/月时，当前 `HEAD` 的目标年度分片只读取一次；为验证每个可信审计提交的精确父子变换，可读取该 audit commit 的父/子年度 blob，但同一 audit commit 不重复验证；其他年份分片即使损坏也不得被扫描。待审集合等于 `Review-Policy: required` 且 trailers 完整合法的 Nova commits 所含工作项减去上述可信审计记录；工作树中自洽伪造、字段不全或相互矛盾的记录不得把提交排除。裸 Review 还要与当前会话 ready ID 求交集。
+按稳定编号查询时先定位提交该哈希分片索引的最新 `Nova-Audit-Schema` commit，再从该 commit blob 验证索引、年度功能行、Review、蓝图/设计关闭内容、审计 trailers、manifest 摘要和精确变更路径；至少重新验证 `main` 仓库被审 commits、trailers、范围与审计提交前的完整覆盖。同一查询中多个工作项指向同一审计 commit 时，该 commit 的完整快照只验证一次并按 commit hash 复用结果。未提交的 `record-pass` 输出可幂等重放，但不能从待审集合排除。指定年份/月时，当前 `HEAD` 的目标年度分片只读取一次；为验证每个可信审计提交的精确父子变换，可读取该 audit commit 的父/子年度 blob，但同一 audit commit 不重复验证；其他年份分片即使损坏也不得被扫描。待审发现新 commit 使用已有可信归档编号时必须失败，不能再次提交同一工作项给 Reviewer；明确来源 FIX 的 `Related-Work-Item` 必须解析为可信归档 PEND。其余待审集合等于 `Review-Policy: required` 且 trailers 完整合法的未覆盖 Nova commits，工作树中自洽伪造、字段不全或相互矛盾的记录不得把提交排除。裸 Review 还要与当前会话 ready ID 求交集。

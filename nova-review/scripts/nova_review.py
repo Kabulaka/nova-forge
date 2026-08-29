@@ -33,6 +33,8 @@ TRAILERS = (
     "Exemption-Rule",
     "Validation",
 )
+OPTIONAL_TRAILERS = ("Related-Work-Item",)
+STANDARD_TRAILERS = TRAILERS + OPTIONAL_TRAILERS
 AUDIT_TRAILERS = (
     "Nova-Audit-Schema",
     "Review-Batch",
@@ -134,7 +136,7 @@ def trailing_fields(text: str) -> list[tuple[str, str]]:
 def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
     found: dict[str, list[str]] = defaultdict(list)
     for key, value in trailing_fields(text):
-        if key in TRAILERS or key == "Review-State":
+        if key in STANDARD_TRAILERS or key == "Review-State":
             found[key].append(value)
 
     errors: list[str] = []
@@ -143,6 +145,12 @@ def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
         entries = found.get(key, [])
         if len(entries) != 1:
             errors.append(f"{key} must appear exactly once")
+        if entries:
+            values[key] = entries[0]
+    for key in OPTIONAL_TRAILERS:
+        entries = found.get(key, [])
+        if len(entries) > 1:
+            errors.append(f"{key} must appear at most once")
         if entries:
             values[key] = entries[0]
     if found.get("Review-State"):
@@ -154,7 +162,7 @@ def parse_audit_message(text: str) -> tuple[dict[str, str], list[str]]:
     found: dict[str, list[str]] = defaultdict(list)
     standard_found = False
     for key, value in trailing_fields(text):
-        if key in set(TRAILERS) - {"Validation"} or key == "Review-State":
+        if key in set(STANDARD_TRAILERS) - {"Validation"} or key == "Review-State":
             standard_found = True
         if key in AUDIT_TRAILERS:
             found[key].append(value)
@@ -350,6 +358,15 @@ def validate_metadata(values: dict[str, str], diff: str | None = None) -> list[s
     elif not pattern.fullmatch(work_item):
         errors.append(f"Work-Item does not match Change-Class {change_class}")
 
+    related_work_item = values.get("Related-Work-Item")
+    if related_work_item is not None:
+        if change_class != "adhoc":
+            errors.append("Related-Work-Item is allowed only for adhoc FIX changes")
+        if WORK_ITEM_PATTERNS["designed"].fullmatch(related_work_item) is None:
+            errors.append("Related-Work-Item must reference a PEND work item")
+        if related_work_item == work_item:
+            errors.append("Related-Work-Item must differ from Work-Item")
+
     design_ref = values.get("Design-Ref", "")
     if change_class == "designed":
         if not DESIGN_REF_RE.fullmatch(design_ref):
@@ -385,10 +402,31 @@ def validate_metadata(values: dict[str, str], diff: str | None = None) -> list[s
     return errors
 
 
-def validate_message(message: str, diff: str | None = None) -> tuple[dict[str, str], list[str]]:
+def validate_repository_lifecycle(repo: Path, values: dict[str, str]) -> list[str]:
+    errors: list[str] = []
+    work_item = values.get("Work-Item", "")
+    related_work_item = values.get("Related-Work-Item")
+    try:
+        if valid_work_item(work_item) and load_completed_item(repo, work_item) is not None:
+            errors.append(f"work item already archived: {work_item}")
+        if related_work_item is not None:
+            if load_completed_item(repo, related_work_item) is None:
+                errors.append(
+                    f"Related-Work-Item is not a trusted archived PEND: {related_work_item}"
+                )
+    except (NovaError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+        errors.append(str(exc))
+    return errors
+
+
+def validate_message(
+    message: str, diff: str | None = None, repo: Path | None = None
+) -> tuple[dict[str, str], list[str]]:
     values, errors = parse_message(message)
     if not errors:
         errors.extend(validate_metadata(values, diff))
+    if not errors and repo is not None:
+        errors.extend(validate_repository_lifecycle(repo, values))
     return values, errors
 
 
@@ -1147,6 +1185,8 @@ def select_pending(
             )
         if entry["commit"] in reviewed or metadata.get("Review-Policy") != "required":
             continue
+        if load_completed_item(repo, work_item) is not None:
+            raise NovaError(f"work item already archived: {work_item}")
         grouped[work_item].append(entry)
 
     if mode == "explicit":
@@ -1158,22 +1198,36 @@ def select_pending(
     for work_item in sorted(grouped):
         entries = grouped[work_item]
         first = entries[0]["metadata"]
-        identity = (first.get("Change-Class"), first.get("Design-Ref"))
+        identity = (
+            first.get("Change-Class"),
+            first.get("Design-Ref"),
+            first.get("Related-Work-Item"),
+        )
         if any(
-            (entry["metadata"].get("Change-Class"), entry["metadata"].get("Design-Ref"))
+            (
+                entry["metadata"].get("Change-Class"),
+                entry["metadata"].get("Design-Ref"),
+                entry["metadata"].get("Related-Work-Item"),
+            )
             != identity
             for entry in entries
         ):
             raise NovaError(f"inconsistent metadata across commits for {work_item}")
-        selected.append(
-            {
-                "work_item": work_item,
-                "change_class": identity[0],
-                "design_ref": identity[1],
-                "commits": [entry["commit"] for entry in entries],
-                "validation": [entry["metadata"].get("Validation") for entry in entries],
-            }
-        )
+        selected_item = {
+            "work_item": work_item,
+            "change_class": identity[0],
+            "design_ref": identity[1],
+            "commits": [entry["commit"] for entry in entries],
+            "validation": [entry["metadata"].get("Validation") for entry in entries],
+        }
+        if identity[2] is not None:
+            related_work_item = str(identity[2])
+            if load_completed_item(repo, related_work_item) is None:
+                raise NovaError(
+                    f"Related-Work-Item is not a trusted archived PEND: {related_work_item}"
+                )
+            selected_item["related_work_item"] = related_work_item
+        selected.append(selected_item)
     return selected
 
 
@@ -1415,6 +1469,7 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         commit_refs = normalize_commit_refs(item.get("commits"), repositories, work_item)
 
         design_ref = item.get("design_ref")
+        related_values: set[str | None] = set()
         for commit_ref in commit_refs:
             commit_repo = repositories[commit_ref["repository"]]
             commit_hash = commit_ref["commit"]
@@ -1436,6 +1491,15 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                 raise NovaError(f"commit metadata mismatch for {commit_hash}")
             if metadata.get("Review-Policy") != "required":
                 raise NovaError(f"manifest commit does not require Review: {commit_hash}")
+            related_values.add(metadata.get("Related-Work-Item"))
+
+        if len(related_values) > 1:
+            raise NovaError(f"inconsistent Related-Work-Item across commits for {work_item}")
+        related_work_item = next(iter(related_values), None)
+        if related_work_item is not None and load_completed_item(repo, related_work_item) is None:
+            raise NovaError(
+                f"Related-Work-Item is not a trusted archived PEND: {related_work_item}"
+            )
 
         provided_commits = {
             (value["repository"], value["commit"]) for value in commit_refs
@@ -1456,7 +1520,8 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                 if (
                     metadata.get("Change-Class"),
                     metadata.get("Design-Ref"),
-                ) != (change_class, design_ref):
+                    metadata.get("Related-Work-Item"),
+                ) != (change_class, design_ref, related_work_item):
                     raise NovaError(f"inconsistent required commit metadata for {work_item}")
                 required_commits.add((alias, entry["commit"]))
         if provided_commits != required_commits:
@@ -2319,6 +2384,7 @@ def parser() -> argparse.ArgumentParser:
     )
 
     validate = commands.add_parser("validate-message")
+    validate.add_argument("--repo", type=Path)
     validate.add_argument("--message-file", type=Path, required=True)
     validate.add_argument("--diff-file", type=Path)
 
@@ -2354,7 +2420,8 @@ def main() -> int:
         elif args.command == "validate-message":
             message = args.message_file.read_text(encoding="utf-8")
             diff = args.diff_file.read_text(encoding="utf-8") if args.diff_file else None
-            metadata, errors = validate_message(message, diff)
+            repo = args.repo.resolve() if args.repo else None
+            metadata, errors = validate_message(message, diff, repo)
             if errors:
                 raise NovaError("; ".join(errors))
             print(json.dumps(metadata, ensure_ascii=False, sort_keys=True))
