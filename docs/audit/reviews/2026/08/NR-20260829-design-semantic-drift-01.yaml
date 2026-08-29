@@ -1,0 +1,52 @@
+{
+  "batch_id": "NR-20260829-design-semantic-drift-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "9cb3a713a3a2088b81f7342d682f74f1bf1adf33",
+          "repository": "main"
+        },
+        {
+          "commit": "23f6afeddcf0ca5cd70de2f1d027c6a116673b1c",
+          "repository": "main"
+        },
+        {
+          "commit": "a65d6aacb267a77716d41ddc0d87613f2002d00b",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "docs/design/2026-08-29_AI精确设计契约与工作包收口.md#wp-03-epic-closure",
+      "package_ids": [
+        "WP-01",
+        "WP-02",
+        "WP-03"
+      ],
+      "validation": "nova-brainstorming unittest (79 pass), 14 designs and 2 blueprints (pass); nova-review unittest (54 pass), real check-manifest v4 compatibility (pass); both quick_validate, py_compile and diff check (pass)",
+      "work_item": "PEND-01a04b8c-50ff-7c4a-a642-25782ac4849a"
+    }
+  ],
+  "manifest_sha256": "2ca440aa7072254f7cd344e9fd3ce4cba04f071f1055eaaae8b9cebd77fa9eb4",
+  "review_content_sha256": "3df940687240d062d332bc26e8599433c0003707f776ba3e321577f127b27273",
+  "review_round": 3,
+  "review_scope": [
+    "main:PROJECT_BLUEPRINT.md",
+    "main:docs/design/.v3-legacy-snapshots.json",
+    "main:docs/design/2026-08-29_AI精确设计契约与工作包收口.md",
+    "main:nova-brainstorming/SKILL.md",
+    "main:nova-brainstorming/assets/DESIGN.template.md",
+    "main:nova-brainstorming/references/design-document-standard.md",
+    "main:nova-brainstorming/references/examples/equipment-borrowing/PROJECT_BLUEPRINT.md",
+    "main:nova-brainstorming/references/examples/equipment-borrowing/docs/design/2026-08-25_设备借用闭环.md",
+    "main:nova-brainstorming/references/implementation-sop.md",
+    "main:nova-brainstorming/scripts/test_validate_blueprint.py",
+    "main:nova-brainstorming/scripts/validate_blueprint.py",
+    "main:nova-review/scripts/nova_review.py",
+    "main:nova-review/scripts/test_nova_review.py"
+  ],
+  "reviewed_at": "2026-08-29T12:49:51+08:00",
+  "reviewer": "review_design_semantic_drift",
+  "schema": 1
+}
