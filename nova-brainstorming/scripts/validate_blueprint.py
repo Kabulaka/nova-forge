@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Validate a version-3 project blueprint or epic design document."""
+"""Validate a versioned project blueprint or epic design document."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 import sys
 from dataclasses import dataclass
@@ -12,7 +14,8 @@ from pathlib import Path
 
 
 BLUEPRINT_VERSION = "3"
-DESIGN_VERSION = "3"
+DESIGN_VERSION = "4"
+LEGACY_DESIGN_VERSION = "3"
 BLUEPRINT_SECTIONS = (
     "项目定位",
     "技术栈",
@@ -41,9 +44,12 @@ RESOURCE_HEADERS = ("适用范围", "不变量", "验证")
 RECOVERY_HEADERS = ("资源或失败点", "所有者", "恢复与清理")
 
 PROBLEM_HEADERS = ("问题", "成功结果")
-SHARED_CONTRACT_HEADERS = ("契约", "已确认约束")
-WORK_PACKAGE_HEADERS = ("工作包", "状态", "交付结果", "前置依赖", "设计章节")
-PACKAGE_CONTRACT_HEADERS = ("契约", "维度", "已确认约束")
+LEGACY_SHARED_CONTRACT_HEADERS = ("契约", "已确认约束")
+SHARED_CONTRACT_HEADERS = ("契约", "语义键", "唯一规则")
+LEGACY_WORK_PACKAGE_HEADERS = ("工作包", "状态", "交付结果", "前置依赖", "设计章节")
+WORK_PACKAGE_HEADERS = ("工作包", "角色", "状态", "交付结果", "前置依赖", "设计章节")
+LEGACY_PACKAGE_CONTRACT_HEADERS = ("契约", "维度", "已确认约束")
+PACKAGE_CONTRACT_HEADERS = ("契约", "维度", "语义键", "唯一规则")
 ACCEPTANCE_HEADERS = ("覆盖契约", "场景", "预期结果")
 CLARIFICATION_HEADERS = ("类型", "内容", "来源")
 CONTRACT_DIMENSIONS = (
@@ -57,6 +63,7 @@ CONTRACT_DIMENSIONS = (
 CLARIFICATION_TYPES = {"证据推断", "待确认"}
 DESIGN_STATES = {"澄清中", "已确认", "已实现", "已废弃"}
 WORK_PACKAGE_STATES = {"待澄清", "澄清中", "已确认", "开发中", "待Review", "已完成", "已废弃"}
+WORK_PACKAGE_ROLES = {"能力", "收口"}
 TERMINAL_WORK_PACKAGE_STATES = {"已完成", "已废弃"}
 REFERENCED_WORK_PACKAGE_STATES = {"已确认", "开发中", "待Review"}
 
@@ -426,6 +433,9 @@ def validate_design_reference(blueprint: Path, value: str) -> list[str]:
     if text is None:
         return errors
     lines, _ = common_errors(text)
+    structural_text = "\n".join(lines)
+    version_match = re.search(r"^>\s*设计规范版本[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
+    version = version_match.group(1) if version_match else DESIGN_VERSION
     anchors = explicit_anchors(lines)
     if anchor not in anchors:
         return [f"design anchor not found: {relative_path}#{anchor}"]
@@ -438,11 +448,15 @@ def validate_design_reference(blueprint: Path, value: str) -> list[str]:
     if not anchor_matches_package_id(anchor, package.package_id):
         return [f"design anchor does not match work package {package.package_id}: {anchor}"]
     rows, table_errors = table_under_heading(
-        lines, entries, "工作包地图", WORK_PACKAGE_HEADERS, "work package map"
+        lines,
+        entries,
+        "工作包地图",
+        LEGACY_WORK_PACKAGE_HEADERS if version == LEGACY_DESIGN_VERSION else WORK_PACKAGE_HEADERS,
+        "work package map",
     )
     if table_errors:
         return [f"invalid design document {relative_path}: {error}" for error in table_errors]
-    state_by_id = {row[0]: row[1] for row in rows}
+    state_by_id = {row[0]: row[1] if version == LEGACY_DESIGN_VERSION else row[2] for row in rows}
     state = state_by_id.get(package.package_id)
     if state is None:
         return [f"design work package missing from map: {relative_path}#{anchor}"]
@@ -559,14 +573,22 @@ def validate_design(
         errors.append("design must contain exactly one level-1 title")
 
     version_match = re.search(r"^>\s*设计规范版本[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
-    if not version_match or version_match.group(1) != DESIGN_VERSION:
-        found = version_match.group(1) if version_match else "missing"
-        errors.append(f"design format upgrade required: expected version {DESIGN_VERSION}, found {found}")
+    version = version_match.group(1) if version_match else None
+    if version not in {DESIGN_VERSION, LEGACY_DESIGN_VERSION}:
+        found = version if version else "missing"
+        errors.append(
+            f"design format upgrade required: expected version {DESIGN_VERSION} "
+            f"or terminal legacy version {LEGACY_DESIGN_VERSION}, found {found}"
+        )
 
     state_match = re.search(r"^>\s*设计状态[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
     state = state_match.group(1) if state_match else None
     if state not in DESIGN_STATES:
         errors.append("design status must be one of: " + ", ".join(sorted(DESIGN_STATES)))
+    if version == LEGACY_DESIGN_VERSION and state not in {"已实现", "已废弃"}:
+        errors.append(f"active design must use version {DESIGN_VERSION}")
+
+    legacy = version == LEGACY_DESIGN_VERSION
 
     evolution_matches = re.findall(
         r"^>\s*演进来源[：:]\s*(.+?)\s*$", structural_text, re.MULTILINE
@@ -613,20 +635,36 @@ def validate_design(
         errors.append("problem and result table must contain at least one row")
 
     shared_rows, table_errors = table_under_heading(
-        lines, entries, "共享契约", SHARED_CONTRACT_HEADERS, "shared contract"
+        lines,
+        entries,
+        "共享契约",
+        LEGACY_SHARED_CONTRACT_HEADERS if legacy else SHARED_CONTRACT_HEADERS,
+        "shared contract",
     )
     errors.extend(table_errors)
     if not shared_rows:
         errors.append("shared contract table must contain at least one row")
     shared_ids = [row[0] for row in shared_rows]
-    for contract_id, constraint in shared_rows:
+    semantic_keys: list[str] = []
+    for row in shared_rows:
+        contract_id = row[0]
+        semantic_key = "" if legacy else row[1]
+        constraint = row[1] if legacy else row[2]
         if not SHARED_CONTRACT_ID_RE.fullmatch(contract_id):
             errors.append(f"invalid shared contract id: {contract_id}")
+        if not legacy:
+            if not semantic_key:
+                errors.append(f"empty semantic key for shared contract {contract_id}")
+            semantic_keys.append(semantic_key)
         if not constraint:
             errors.append(f"empty confirmed constraint for shared contract {contract_id}")
 
     map_rows, map_errors = table_under_heading(
-        lines, entries, "工作包地图", WORK_PACKAGE_HEADERS, "work package map"
+        lines,
+        entries,
+        "工作包地图",
+        LEGACY_WORK_PACKAGE_HEADERS if legacy else WORK_PACKAGE_HEADERS,
+        "work package map",
     )
     errors.extend(map_errors)
     if not map_rows:
@@ -645,10 +683,19 @@ def validate_design(
         errors.append(f"duplicate work package map id: {duplicate}")
     valid_package_ids = set(map_ids)
     state_by_id: dict[str, str] = {}
+    role_by_id: dict[str, str] = {}
+    dependency_by_id: dict[str, str] = {}
     anchor_by_id = {package.package_id: package.anchor for package in package_sections}
-    for package_id, package_state, deliverable, dependency, section_link in map_rows:
+    for row in map_rows:
+        if legacy:
+            package_id, package_state, deliverable, dependency, section_link = row
+            role = "能力"
+        else:
+            package_id, role, package_state, deliverable, dependency, section_link = row
         if not WORK_PACKAGE_ID_RE.fullmatch(package_id):
             errors.append(f"invalid work package id: {package_id}")
+        if not legacy and role not in WORK_PACKAGE_ROLES:
+            errors.append(f"invalid work package role for {package_id}: {role}")
         if package_state not in WORK_PACKAGE_STATES:
             errors.append(f"invalid work package state for {package_id}: {package_state}")
         if not deliverable:
@@ -662,20 +709,40 @@ def validate_design(
         elif link_match.group(1) != anchor_by_id.get(package_id):
             errors.append(f"work package map link must target {package_id} section anchor")
         state_by_id[package_id] = package_state
+        role_by_id[package_id] = role
+        dependency_by_id[package_id] = dependency
 
     if set(map_ids) != set(section_ids):
         errors.append("work package map ids must exactly match WP-* sections")
     if set(metadata_ids) != set(map_ids):
         errors.append("design metadata work package ids must exactly match work package map")
 
+    closure_ids = [package_id for package_id in map_ids if role_by_id.get(package_id) == "收口"]
+    if not legacy:
+        if len(map_ids) == 1 and closure_ids:
+            errors.append("single-package design must use the 能力 role, not 收口")
+        if len(map_ids) > 1 and len(closure_ids) != 1:
+            errors.append("multi-package design must contain exactly one 收口 work package")
+        if len(closure_ids) == 1:
+            closure_id = closure_ids[0]
+            if not (state == "澄清中" and dependency_by_id[closure_id] == "待澄清"):
+                actual_dependencies = set(split_ids(dependency_by_id[closure_id]))
+                expected_dependencies = valid_package_ids - {closure_id}
+                if actual_dependencies != expected_dependencies:
+                    errors.append(
+                        f"closure work package {closure_id} must directly depend on every other work package"
+                    )
+
     all_contract_ids = list(shared_ids)
     acceptance_coverage: set[str] = set()
+    contract_owner: dict[str, str] = {}
+    acceptance_rows_by_package: dict[str, list[list[str]]] = {}
     for package in package_sections:
         contract_rows, contract_errors = table_under_heading(
             lines,
             entries,
             "契约",
-            PACKAGE_CONTRACT_HEADERS,
+            LEGACY_PACKAGE_CONTRACT_HEADERS if legacy else PACKAGE_CONTRACT_HEADERS,
             f"{package.package_id} contract",
             package.start,
             package.end,
@@ -684,18 +751,40 @@ def validate_design(
         contract_ids = [row[0] for row in contract_rows]
         dimensions = [row[1] for row in contract_rows]
         expected_contract = re.compile(rf"^{re.escape(package.package_id)}-C[0-9]+$")
-        for contract_id, _, constraint in contract_rows:
+        for row in contract_rows:
+            contract_id = row[0]
+            semantic_key = "" if legacy else row[2]
+            constraint = row[2] if legacy else row[3]
             if not expected_contract.fullmatch(contract_id):
                 errors.append(f"invalid contract id for {package.package_id}: {contract_id}")
+            if not legacy:
+                if not semantic_key:
+                    errors.append(f"empty semantic key for contract {contract_id}")
+                semantic_keys.append(semantic_key)
             if not constraint:
                 errors.append(f"empty confirmed constraint for contract {contract_id}")
+            contract_owner[contract_id] = package.package_id
         for duplicate in sorted(duplicate_values(contract_ids)):
             errors.append(f"duplicate contract id: {duplicate}")
-        if tuple(dimensions) != CONTRACT_DIMENSIONS:
-            errors.append(
-                f"{package.package_id} contract dimensions must be exactly: "
-                + " | ".join(CONTRACT_DIMENSIONS)
-            )
+        if legacy:
+            if tuple(dimensions) != CONTRACT_DIMENSIONS:
+                errors.append(
+                    f"{package.package_id} contract dimensions must be exactly: "
+                    + " | ".join(CONTRACT_DIMENSIONS)
+                )
+        else:
+            invalid_dimensions = [value for value in dimensions if value not in CONTRACT_DIMENSIONS]
+            if invalid_dimensions:
+                errors.append(
+                    f"{package.package_id} contains invalid contract dimensions: "
+                    + " | ".join(invalid_dimensions)
+                )
+            first_occurrences = tuple(dict.fromkeys(dimensions))
+            if first_occurrences != CONTRACT_DIMENSIONS:
+                errors.append(
+                    f"{package.package_id} contract dimensions must cover in first-occurrence order: "
+                    + " | ".join(CONTRACT_DIMENSIONS)
+                )
         all_contract_ids.extend(contract_ids)
 
         acceptance_rows, acceptance_errors = table_under_heading(
@@ -708,6 +797,7 @@ def validate_design(
             package.end,
         )
         errors.extend(acceptance_errors)
+        acceptance_rows_by_package[package.package_id] = acceptance_rows
         if not acceptance_rows:
             errors.append(f"{package.package_id} acceptance table must contain at least one row")
         for coverage, scenario, expected in acceptance_rows:
@@ -721,11 +811,32 @@ def validate_design(
 
     for duplicate in sorted(duplicate_values(all_contract_ids)):
         errors.append(f"duplicate contract id across design: {duplicate}")
+    if not legacy:
+        for duplicate in sorted(duplicate_values(semantic_keys)):
+            errors.append(f"duplicate semantic key across design: {duplicate}")
     known_contract_ids = set(all_contract_ids)
     for contract_id in sorted(acceptance_coverage - known_contract_ids):
         errors.append(f"acceptance references unknown contract: {contract_id}")
     for contract_id in sorted(known_contract_ids - acceptance_coverage):
         errors.append(f"contract lacks acceptance coverage: {contract_id}")
+
+    if not legacy and len(closure_ids) == 1:
+        closure_id = closure_ids[0]
+        required_packages = valid_package_ids - {closure_id}
+        has_combination_acceptance = False
+        for coverage, _, _ in acceptance_rows_by_package.get(closure_id, []):
+            covered_packages = {
+                contract_owner[contract_id]
+                for contract_id in split_ids(coverage)
+                if contract_id in contract_owner
+            }
+            if required_packages <= covered_packages:
+                has_combination_acceptance = True
+                break
+        if not has_combination_acceptance:
+            errors.append(
+                f"closure work package {closure_id} needs one acceptance scenario covering every other work package"
+            )
 
     clarification_headings = [entry for entry in entries if entry.title == "澄清暂存"]
     if state == "澄清中":
@@ -774,6 +885,86 @@ def validate_design(
     return errors, warnings
 
 
+def design_semantic_fingerprint(path: Path) -> str:
+    """Hash design semantics while excluding lifecycle-only status fields."""
+    text = path.read_text(encoding="utf-8")
+    lines, _ = common_errors(text)
+    entries = heading_entries(lines)
+    structural_text = "\n".join(lines)
+    version_match = re.search(r"^>\s*设计规范版本[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
+    version = version_match.group(1) if version_match else ""
+    legacy = version == LEGACY_DESIGN_VERSION
+    evolution_match = re.search(r"^>\s*演进来源[：:]\s*(.+?)\s*$", structural_text, re.MULTILINE)
+    metadata_match = re.search(r"^>\s*工作包[：:]\s*(.+?)\s*$", structural_text, re.MULTILINE)
+
+    problem_rows, _ = table_under_heading(
+        lines, entries, "问题与成功结果", PROBLEM_HEADERS, "problem and result"
+    )
+    shared_rows, _ = table_under_heading(
+        lines,
+        entries,
+        "共享契约",
+        LEGACY_SHARED_CONTRACT_HEADERS if legacy else SHARED_CONTRACT_HEADERS,
+        "shared contract",
+    )
+    map_rows, _ = table_under_heading(
+        lines,
+        entries,
+        "工作包地图",
+        LEGACY_WORK_PACKAGE_HEADERS if legacy else WORK_PACKAGE_HEADERS,
+        "work package map",
+    )
+    semantic_map_rows: list[list[str]] = []
+    for row in map_rows:
+        if legacy:
+            package_id, _, deliverable, dependency, section_link = row
+            semantic_map_rows.append([package_id, "能力", deliverable, dependency, section_link])
+        else:
+            package_id, role, _, deliverable, dependency, section_link = row
+            semantic_map_rows.append([package_id, role, deliverable, dependency, section_link])
+
+    package_payload: list[dict[str, object]] = []
+    for package in work_package_sections(lines, entries):
+        contract_rows, _ = table_under_heading(
+            lines,
+            entries,
+            "契约",
+            LEGACY_PACKAGE_CONTRACT_HEADERS if legacy else PACKAGE_CONTRACT_HEADERS,
+            f"{package.package_id} contract",
+            package.start,
+            package.end,
+        )
+        acceptance_rows, _ = table_under_heading(
+            lines,
+            entries,
+            "验收",
+            ACCEPTANCE_HEADERS,
+            f"{package.package_id} acceptance",
+            package.start,
+            package.end,
+        )
+        package_payload.append(
+            {
+                "id": package.package_id,
+                "anchor": package.anchor,
+                "contracts": contract_rows,
+                "acceptance": acceptance_rows,
+            }
+        )
+
+    payload = {
+        "version": version,
+        "evolution": evolution_match.group(1) if evolution_match else "",
+        "packages": split_ids(metadata_match.group(1)) if metadata_match else [],
+        "problems": problem_rows,
+        "shared_contracts": shared_rows,
+        "work_package_map": semantic_map_rows,
+        "work_package_semantics": package_payload,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def main() -> int:
     args = parse_args()
     path = Path(args.path).expanduser().resolve()
@@ -784,6 +975,8 @@ def main() -> int:
         print(f"WARNING: {warning}")
     for error in errors:
         print(f"ERROR: {error}")
+    if args.design and not errors:
+        print(f"Semantic-Fingerprint: sha256:{design_semantic_fingerprint(path)}")
     print("PASS" if not errors else "FAIL")
     return 0 if not errors else 1
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Black-box tests for the version-3 blueprint and design validator."""
+"""Black-box tests for the versioned blueprint and design validator."""
 
 from __future__ import annotations
 
@@ -38,26 +38,27 @@ def valid_design(
     for index, package_id in enumerate(("WP-01", "WP-02"), start=1):
         anchor = f"wp-{index:02d}-example"
         contract_rows = "\n".join(
-            f"| {package_id}-C{dimension_index:02d} | {dimension} | {package_id} 的{dimension}约束 |"
+            f"| {package_id}-C{dimension_index:02d} | {dimension} | "
+            f"{package_id}/{dimension} | {package_id} 的{dimension}约束 |"
             for dimension_index, dimension in enumerate(DIMENSIONS, start=1)
         )
         own_contracts = "、".join(f"{package_id}-C{i:02d}" for i in range(1, 7))
-        shared = "S-01、" if package_id == "WP-01" else ""
+        related = "S-01、" if package_id == "WP-01" else "WP-01-C01、"
         package_sections.append(
             f"""<a id="{anchor}"></a>
 ## {package_id} 示例工作包 {index}
 
 ### 契约
 
-| 契约 | 维度 | 已确认约束 |
-|------|------|------------|
+| 契约 | 维度 | 语义键 | 唯一规则 |
+|------|------|--------|----------|
 {contract_rows}
 
 ### 验收
 
 | 覆盖契约 | 场景 | 预期结果 |
 |----------|------|----------|
-| {shared}{own_contracts} | 执行 {package_id} 正常及失败场景 | 契约全部得到可观察验证 |"""
+| {related}{own_contracts} | 执行 {package_id} 正常及失败场景 | 契约全部得到可观察验证 |"""
         )
 
     replacement_line = "> 替代来源：[新设计](replacement.md)\n" if replacement else ""
@@ -79,7 +80,7 @@ def valid_design(
         f"""
         # 示例史诗设计
 
-        > 设计规范版本：3
+        > 设计规范版本：4
         > 设计状态：{state}
         > 演进来源：{evolution}
         > 工作包：WP-01、WP-02
@@ -95,20 +96,56 @@ def valid_design(
 
         ### 1.2 共享契约
 
-        | 契约 | 已确认约束 |
-        |------|------------|
-        | S-01 | 两个工作包共享同一状态定义 |
+        | 契约 | 语义键 | 唯一规则 |
+        |------|--------|----------|
+        | S-01 | 共享/状态 | 两个工作包共享同一状态定义 |
 
         <a id="work-package-map"></a>
         ## 2. 工作包地图
 
-        | 工作包 | 状态 | 交付结果 | 前置依赖 | 设计章节 |
-        |--------|------|----------|----------|----------|
-        | WP-01 | {package_states[0]} | 交付第一个独立结果 | 无 | [章节](#wp-01-example) |
-        | WP-02 | {package_states[1]} | 交付第二个独立结果 | WP-01 | [章节](#wp-02-example) |
+        | 工作包 | 角色 | 状态 | 交付结果 | 前置依赖 | 设计章节 |
+        |--------|------|------|----------|----------|----------|
+        | WP-01 | 能力 | {package_states[0]} | 交付第一个独立结果 | 无 | [章节](#wp-01-example) |
+        | WP-02 | 收口 | {package_states[1]} | 交付第二个独立结果 | WP-01 | [章节](#wp-02-example) |
         """
     ).strip()
     return header + "\n\n" + "\n\n".join(package_sections) + staging + "\n"
+
+
+def legacy_terminal_design() -> str:
+    design = valid_design(state="已实现", package_states=("已完成", "已完成"))
+    design = design.replace("设计规范版本：4", "设计规范版本：3")
+    design = design.replace(
+        "| 契约 | 语义键 | 唯一规则 |\n|------|--------|----------|",
+        "| 契约 | 已确认约束 |\n|------|------------|",
+    )
+    design = design.replace(
+        "| S-01 | 共享/状态 | 两个工作包共享同一状态定义 |",
+        "| S-01 | 两个工作包共享同一状态定义 |",
+    )
+    design = design.replace(
+        "| 工作包 | 角色 | 状态 | 交付结果 | 前置依赖 | 设计章节 |\n"
+        "|--------|------|------|----------|----------|----------|",
+        "| 工作包 | 状态 | 交付结果 | 前置依赖 | 设计章节 |\n"
+        "|--------|------|----------|----------|----------|",
+    )
+    design = re.sub(
+        r"^(\| WP-\d+) \| (?:能力|收口) \|",
+        r"\1 |",
+        design,
+        flags=re.MULTILINE,
+    )
+    design = design.replace(
+        "| 契约 | 维度 | 语义键 | 唯一规则 |\n|------|------|--------|----------|",
+        "| 契约 | 维度 | 已确认约束 |\n|------|------|------------|",
+    )
+    design = re.sub(
+        r"^(\| WP-\d+-C\d+ \| [^|]+ \|) [^|]+ \| ([^|]+ \|)$",
+        r"\1 \2",
+        design,
+        flags=re.MULTILINE,
+    )
+    return design
 
 
 def valid_blueprint(rows: str) -> str:
@@ -238,26 +275,26 @@ class ValidatorTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_pending_item_rejects_design_document_from_older_format(self) -> None:
-        design = valid_design().replace("设计规范版本：3", "设计规范版本：2")
+        design = valid_design().replace("设计规范版本：4", "设计规范版本：2")
         row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
             blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
             result = self.run_validator(blueprint)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("invalid design document docs/design/2026-08-26_epic.md", result.stdout)
-            self.assertIn("design format upgrade required: expected version 3, found 2", result.stdout)
+            self.assertIn("expected version 4 or terminal legacy version 3, found 2", result.stdout)
 
     def test_pending_item_rejects_fenced_fake_design_version(self) -> None:
         design = valid_design().replace(
-            "> 设计规范版本：3",
-            "> 设计规范版本：2\n\n```text\n> 设计规范版本：3\n```",
+            "> 设计规范版本：4",
+            "> 设计规范版本：2\n\n```text\n> 设计规范版本：4\n```",
         )
         row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
         with tempfile.TemporaryDirectory() as directory:
             blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
             result = self.run_validator(blueprint)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("design format upgrade required: expected version 3, found 2", result.stdout)
+            self.assertIn("expected version 4 or terminal legacy version 3, found 2", result.stdout)
 
     def test_pending_item_requires_fully_valid_design_document(self) -> None:
         invalid_designs = (
@@ -269,7 +306,9 @@ class ValidatorTests(unittest.TestCase):
                 "duplicate explicit anchor",
             ),
             (
-                valid_design().replace("| WP-01 | 已确认 |", "| WP-01 | 未知 |"),
+                valid_design().replace(
+                    "| WP-01 | 能力 | 已确认 |", "| WP-01 | 能力 | 未知 |"
+                ),
                 "invalid work package state",
             ),
         )
@@ -594,28 +633,132 @@ class ValidatorTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must not contain clarification staging", result.stdout)
 
-    def test_contract_dimensions_are_exact_and_not_repeated(self) -> None:
+    def test_contract_dimensions_must_cover_in_order(self) -> None:
         design = valid_design().replace(
-            "| WP-01-C06 | AI 决策边界 | WP-01 的AI 决策边界约束 |",
-            "| WP-01-C06 | 交付边界 | 重复维度 |",
+            "| WP-01-C06 | AI 决策边界 | WP-01/AI 决策边界 | WP-01 的AI 决策边界约束 |",
+            "| WP-01-C06 | 交付边界 | WP-01/重复范围 | 重复维度 |",
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "2026-08-26_design.md"
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("contract dimensions must be exactly", result.stdout)
+            self.assertIn("contract dimensions must cover in first-occurrence order", result.stdout)
+
+    def test_contract_dimension_can_repeat_with_atomic_semantic_key(self) -> None:
+        design = valid_design().replace(
+            "| WP-01-C02 | 参与者与权限",
+            "| WP-01-C07 | 交付边界 | WP-01/额外边界 | 第二条原子边界 |\n"
+            "| WP-01-C02 | 参与者与权限",
+        ).replace(
+            "S-01、WP-01-C01、WP-01-C02",
+            "S-01、WP-01-C01、WP-01-C07、WP-01-C02",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-26_design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_duplicate_semantic_key_fails(self) -> None:
+        design = valid_design().replace("WP-02/交付边界", "WP-01/交付边界")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-26_design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("duplicate semantic key across design", result.stdout)
+
+    def test_multi_package_design_requires_one_complete_closure(self) -> None:
+        invalid_designs = (
+            (
+                valid_design().replace("| WP-02 | 收口 |", "| WP-02 | 能力 |"),
+                "exactly one 收口 work package",
+            ),
+            (
+                valid_design().replace(
+                    "| WP-02 | 收口 | 已确认 | 交付第二个独立结果 | WP-01 |",
+                    "| WP-02 | 收口 | 已确认 | 交付第二个独立结果 | 无 |",
+                ),
+                "must directly depend on every other work package",
+            ),
+            (
+                valid_design().replace("| WP-01-C01、WP-02-C01", "| WP-02-C01"),
+                "needs one acceptance scenario covering every other work package",
+            ),
+        )
+        for design, expected in invalid_designs:
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "2026-08-26_design.md"
+                path.write_text(design, encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stdout)
+
+    def test_clarifying_closure_can_keep_dependency_pending(self) -> None:
+        design = valid_design(
+            state="澄清中", package_states=("澄清中", "待澄清"), include_staging=True
+        ).replace(
+            "| WP-02 | 收口 | 待澄清 | 交付第二个独立结果 | WP-01 |",
+            "| WP-02 | 收口 | 待澄清 | 交付第二个独立结果 | 待澄清 |",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-26_design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_terminal_version_three_is_accepted_but_active_version_three_is_not(self) -> None:
+        cases = (
+            (legacy_terminal_design(), 0, "Semantic-Fingerprint"),
+            (
+                legacy_terminal_design()
+                .replace("> 设计状态：已实现", "> 设计状态：已确认")
+                .replace("| 已完成 |", "| 已确认 |"),
+                1,
+                "active design must use version 4",
+            ),
+        )
+        for design, returncode, expected in cases:
+            with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "2026-08-26_design.md"
+                path.write_text(design, encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertEqual(result.returncode, returncode, result.stdout + result.stderr)
+                self.assertIn(expected, result.stdout)
+
+    def test_semantic_fingerprint_ignores_status_but_tracks_contract_changes(self) -> None:
+        designs = (
+            valid_design(),
+            valid_design(package_states=("开发中", "已确认")),
+            valid_design().replace("WP-01 的交付边界约束", "WP-01 的新交付边界约束"),
+        )
+        fingerprints: list[str] = []
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-26_design.md"
+            for design in designs:
+                path.write_text(design, encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                match = re.search(r"Semantic-Fingerprint: sha256:([0-9a-f]{64})", result.stdout)
+                self.assertIsNotNone(match, result.stdout)
+                fingerprints.append(match.group(1))
+        self.assertEqual(fingerprints[0], fingerprints[1])
+        self.assertNotEqual(fingerprints[0], fingerprints[2])
 
     def test_shared_and_work_package_contracts_require_confirmed_constraints(self) -> None:
         invalid_designs = (
             (
-                valid_design().replace("| S-01 | 两个工作包共享同一状态定义 |", "| S-01 | |"),
+                valid_design().replace(
+                    "| S-01 | 共享/状态 | 两个工作包共享同一状态定义 |",
+                    "| S-01 | 共享/状态 | |",
+                ),
                 "empty confirmed constraint for shared contract S-01",
             ),
             (
                 valid_design().replace(
-                    "| WP-01-C01 | 交付边界 | WP-01 的交付边界约束 |",
-                    "| WP-01-C01 | 交付边界 | |",
+                    "| WP-01-C01 | 交付边界 | WP-01/交付边界 | WP-01 的交付边界约束 |",
+                    "| WP-01-C01 | 交付边界 | WP-01/交付边界 | |",
                 ),
                 "empty confirmed constraint for contract WP-01-C01",
             ),
@@ -731,14 +874,14 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(design_result.returncode, 0, design_result.stdout + design_result.stderr)
         self.assertEqual(blueprint_result.returncode, 0, blueprint_result.stdout + blueprint_result.stderr)
 
-    def test_templates_declare_version_three_and_required_contract_tables(self) -> None:
+    def test_templates_declare_current_versions_and_required_contract_tables(self) -> None:
         blueprint = (SKILL_ROOT / "assets" / "PROJECT_BLUEPRINT.template.md").read_text(encoding="utf-8")
         design = (SKILL_ROOT / "assets" / "DESIGN.template.md").read_text(encoding="utf-8")
         self.assertIn("> 蓝图规范版本：3", blueprint)
         self.assertIn("| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |", blueprint)
-        self.assertIn("> 设计规范版本：3", design)
+        self.assertIn("> 设计规范版本：4", design)
         self.assertIn("> 演进来源：", design)
-        self.assertIn("| 契约 | 维度 | 已确认约束 |", design)
+        self.assertIn("| 契约 | 维度 | 语义键 | 唯一规则 |", design)
         self.assertEqual(set(re.findall(r"\| ([^|]+) \| <", design)) & set(DIMENSIONS), set(DIMENSIONS))
 
 
