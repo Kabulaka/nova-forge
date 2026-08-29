@@ -1,3 +1,4 @@
 interface:
+  display_name: "Nova Brainstorming"
   short_description: "澄清项目需求并维护蓝图、设计文档与待办引用"
   default_prompt: "Use $nova-brainstorming to clarify my project one question at a time and maintain its blueprint, design documents, pending work, and implementation handoff."
