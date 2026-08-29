@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import date
@@ -16,6 +17,7 @@ from pathlib import Path
 BLUEPRINT_VERSION = "3"
 DESIGN_VERSION = "4"
 LEGACY_DESIGN_VERSION = "3"
+LEGACY_SNAPSHOT_MANIFEST = ".v3-legacy-snapshots.json"
 BLUEPRINT_SECTIONS = (
     "项目定位",
     "技术栈",
@@ -117,9 +119,68 @@ def read_document(path: Path) -> tuple[str | None, list[str]]:
     if not path.is_file():
         return None, [f"file not found: {path}"]
     try:
-        return path.read_text(encoding="utf-8"), []
+        return path.read_bytes().decode("utf-8"), []
     except (OSError, UnicodeError) as exc:
         return None, [f"cannot read document: {exc}"]
+
+
+def validate_legacy_design_snapshot(path: Path, text_snapshot: str) -> list[str]:
+    manifest_path = path.parent / LEGACY_SNAPSHOT_MANIFEST
+    manifest_text, read_errors = read_document(manifest_path)
+    if manifest_text is None:
+        return [
+            "terminal legacy design must match a registered Git HEAD snapshot: " + error
+            for error in read_errors
+        ]
+    try:
+        manifest = json.loads(manifest_text)
+    except json.JSONDecodeError as exc:
+        return [f"invalid legacy design snapshot manifest: {exc}"]
+    if not isinstance(manifest, dict):
+        return ["legacy design snapshot manifest must use schema 1 with a files object"]
+    files = manifest.get("files")
+    if manifest.get("schema") != 1 or not isinstance(files, dict):
+        return ["legacy design snapshot manifest must use schema 1 with a files object"]
+    expected = files.get(path.name)
+    if not isinstance(expected, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
+        return [
+            f"terminal legacy design must match a registered Git HEAD snapshot: {path.name}"
+        ]
+
+    content = text_snapshot.encode("utf-8")
+    actual = "sha256:" + hashlib.sha256(content).hexdigest()
+    if actual != expected:
+        return [f"legacy design snapshot content does not match manifest: {path.name}"]
+
+    try:
+        root_result = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+            check=False,
+            capture_output=True,
+        )
+    except OSError as exc:
+        return [f"cannot verify legacy design snapshot in Git HEAD: {exc}"]
+    if root_result.returncode != 0:
+        return [f"legacy design snapshot requires a Git repository: {path.name}"]
+    try:
+        repository_root = Path(root_result.stdout.decode("utf-8").strip()).resolve()
+        relative_path = path.resolve().relative_to(repository_root).as_posix()
+    except (UnicodeError, ValueError) as exc:
+        return [f"cannot resolve legacy design snapshot in Git repository: {exc}"]
+
+    try:
+        head_result = subprocess.run(
+            ["git", "-C", str(repository_root), "show", f"HEAD:{relative_path}"],
+            check=False,
+            capture_output=True,
+        )
+    except OSError as exc:
+        return [f"cannot verify legacy design snapshot in Git HEAD: {exc}"]
+    if head_result.returncode != 0:
+        return [f"legacy design snapshot is not present in Git HEAD: {path.name}"]
+    if head_result.stdout != content:
+        return [f"legacy design snapshot differs from Git HEAD: {path.name}"]
+    return []
 
 
 def validate_design_filename(path: Path) -> list[str]:
@@ -152,12 +213,12 @@ def validate_evolution_source(
     filename_errors = validate_design_filename(target)
     if filename_errors:
         return [f"invalid design evolution source: {error}" for error in filename_errors]
-    target_errors, _ = validate_design(target, evolution_stack)
-    if target_errors:
-        return [f"invalid design evolution source: {error}" for error in target_errors]
     text, read_errors = read_document(target)
     if text is None:
         return [f"invalid design evolution source: {error}" for error in read_errors]
+    target_errors, _ = validate_design(target, evolution_stack, text_snapshot=text)
+    if target_errors:
+        return [f"invalid design evolution source: {error}" for error in target_errors]
     lines, _ = markdown_structure_lines(text)
     structural_text = "\n".join(lines)
     state_match = re.search(r"^>\s*设计状态[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
@@ -366,6 +427,57 @@ def validate_dependency(
     return errors
 
 
+def validate_work_package_dependency_graph(
+    package_ids: list[str], dependency_by_id: dict[str, str], closure_ids: list[str]
+) -> list[str]:
+    valid_ids = set(package_ids)
+    graph = {
+        package_id: [
+            dependency
+            for dependency in split_ids(dependency_by_id.get(package_id, "无"))
+            if dependency in valid_ids
+        ]
+        if dependency_by_id.get(package_id, "无") not in {"无", "待澄清"}
+        else []
+        for package_id in package_ids
+    }
+    errors: list[str] = []
+    if len(closure_ids) == 1:
+        closure_id = closure_ids[0]
+        for package_id in package_ids:
+            if package_id != closure_id and closure_id in graph[package_id]:
+                errors.append(
+                    f"capability work package {package_id} must not depend on closure work package {closure_id}"
+                )
+
+    visiting: list[str] = []
+    visited: set[str] = set()
+
+    def visit(package_id: str) -> list[str] | None:
+        if package_id in visiting:
+            start = visiting.index(package_id)
+            return visiting[start:] + [package_id]
+        if package_id in visited:
+            return None
+        visiting.append(package_id)
+        for dependency in graph[package_id]:
+            cycle = visit(dependency)
+            if cycle:
+                return cycle
+        visiting.pop()
+        visited.add(package_id)
+        return None
+
+    for package_id in package_ids:
+        cycle = visit(package_id)
+        if cycle:
+            errors.append(
+                "work package dependency graph must be acyclic: " + " -> ".join(cycle)
+            )
+            break
+    return errors
+
+
 def explicit_anchors(lines: list[str]) -> list[str]:
     anchors: list[str] = []
     for line in lines:
@@ -426,12 +538,12 @@ def validate_design_reference(blueprint: Path, value: str) -> list[str]:
     target = (blueprint.parent / relative_path).resolve()
     if not within_design_root(blueprint, target):
         return [f"design basis must stay under docs/design: {relative_path}"]
-    design_errors, _ = validate_design(target)
-    if design_errors:
-        return [f"invalid design document {relative_path}: {error}" for error in design_errors]
     text, errors = read_document(target)
     if text is None:
         return errors
+    design_errors, _ = validate_design(target, text_snapshot=text)
+    if design_errors:
+        return [f"invalid design document {relative_path}: {error}" for error in design_errors]
     lines, _ = common_errors(text)
     structural_text = "\n".join(lines)
     version_match = re.search(r"^>\s*设计规范版本[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
@@ -553,16 +665,21 @@ def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
 
 
 def validate_design(
-    path: Path, evolution_stack: frozenset[Path] | None = None
+    path: Path,
+    evolution_stack: frozenset[Path] | None = None,
+    text_snapshot: str | None = None,
 ) -> tuple[list[str], list[str]]:
     resolved_path = path.resolve()
     stack = frozenset() if evolution_stack is None else evolution_stack
     if resolved_path in stack:
         return [f"design evolution source cycle detected: {path.name}"], []
     next_stack = stack | {resolved_path}
-    text, read_errors = read_document(path)
-    if text is None:
-        return read_errors, []
+    if text_snapshot is None:
+        text, read_errors = read_document(path)
+        if text is None:
+            return read_errors, []
+    else:
+        text = text_snapshot
     lines, errors = common_errors(text)
     errors.extend(validate_design_filename(path))
     warnings: list[str] = []
@@ -587,6 +704,8 @@ def validate_design(
         errors.append("design status must be one of: " + ", ".join(sorted(DESIGN_STATES)))
     if version == LEGACY_DESIGN_VERSION and state not in {"已实现", "已废弃"}:
         errors.append(f"active design must use version {DESIGN_VERSION}")
+    if version == LEGACY_DESIGN_VERSION:
+        errors.extend(validate_legacy_design_snapshot(path, text))
 
     legacy = version == LEGACY_DESIGN_VERSION
 
@@ -732,6 +851,9 @@ def validate_design(
                     errors.append(
                         f"closure work package {closure_id} must directly depend on every other work package"
                     )
+        errors.extend(
+            validate_work_package_dependency_graph(map_ids, dependency_by_id, closure_ids)
+        )
 
     all_contract_ids = list(shared_ids)
     acceptance_coverage: set[str] = set()
@@ -885,9 +1007,14 @@ def validate_design(
     return errors, warnings
 
 
-def design_semantic_fingerprint(path: Path) -> str:
+def design_semantic_fingerprint(path: Path, text_snapshot: str | None = None) -> str:
     """Hash design semantics while excluding lifecycle-only status fields."""
-    text = path.read_text(encoding="utf-8")
+    if text_snapshot is None:
+        text, read_errors = read_document(path)
+        if text is None:
+            raise ValueError(read_errors[0])
+    else:
+        text = text_snapshot
     lines, _ = common_errors(text)
     entries = heading_entries(lines)
     structural_text = "\n".join(lines)
@@ -965,18 +1092,31 @@ def design_semantic_fingerprint(path: Path) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def validate_design_snapshot(path: Path) -> tuple[list[str], list[str], str | None]:
+    text, read_errors = read_document(path)
+    if text is None:
+        return read_errors, [], None
+    errors, warnings = validate_design(path, text_snapshot=text)
+    fingerprint = None if errors else design_semantic_fingerprint(path, text_snapshot=text)
+    return errors, warnings, fingerprint
+
+
 def main() -> int:
     args = parse_args()
     path = Path(args.path).expanduser().resolve()
-    errors, warnings = validate_design(path) if args.design else validate_blueprint(path)
+    if args.design:
+        errors, warnings, fingerprint = validate_design_snapshot(path)
+    else:
+        errors, warnings = validate_blueprint(path)
+        fingerprint = None
 
     print(f"{'Design' if args.design else 'Blueprint'}: {path}")
     for warning in warnings:
         print(f"WARNING: {warning}")
     for error in errors:
         print(f"ERROR: {error}")
-    if args.design and not errors:
-        print(f"Semantic-Fingerprint: sha256:{design_semantic_fingerprint(path)}")
+    if args.design and fingerprint is not None:
+        print(f"Semantic-Fingerprint: sha256:{fingerprint}")
     print("PASS" if not errors else "FAIL")
     return 0 if not errors else 1
 

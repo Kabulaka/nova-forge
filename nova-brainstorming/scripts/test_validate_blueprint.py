@@ -4,18 +4,26 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+import json
 import re
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = SKILL_ROOT / "scripts" / "validate_blueprint.py"
 EXAMPLE_ROOT = SKILL_ROOT / "references" / "examples" / "equipment-borrowing"
+VALIDATOR_SPEC = importlib.util.spec_from_file_location("nova_validate_blueprint", VALIDATOR)
+assert VALIDATOR_SPEC is not None and VALIDATOR_SPEC.loader is not None
+VALIDATOR_MODULE = importlib.util.module_from_spec(VALIDATOR_SPEC)
+sys.modules[VALIDATOR_SPEC.name] = VALIDATOR_MODULE
+VALIDATOR_SPEC.loader.exec_module(VALIDATOR_MODULE)
 DIMENSIONS = (
     "交付边界",
     "参与者与权限",
@@ -29,21 +37,42 @@ DIMENSIONS = (
 def valid_design(
     *,
     state: str = "已确认",
-    package_states: tuple[str, str] = ("已确认", "已确认"),
+    package_states: tuple[str, ...] = ("已确认", "已确认"),
+    package_ids: tuple[str, ...] = ("WP-01", "WP-02"),
+    dependencies: tuple[str, ...] | None = None,
     include_staging: bool = False,
     replacement: bool = False,
     evolution: str = "无",
 ) -> str:
+    if len(package_states) != len(package_ids):
+        raise ValueError("package_states must match package_ids")
+    if dependencies is None:
+        dependencies = tuple(
+            "、".join(package_ids[:-1]) if index == len(package_ids) - 1 and index > 0 else "无"
+            for index in range(len(package_ids))
+        )
+    if len(dependencies) != len(package_ids):
+        raise ValueError("dependencies must match package_ids")
     package_sections: list[str] = []
-    for index, package_id in enumerate(("WP-01", "WP-02"), start=1):
+    map_rows: list[str] = []
+    for index, package_id in enumerate(package_ids, start=1):
         anchor = f"wp-{index:02d}-example"
+        role = "收口" if len(package_ids) > 1 and index == len(package_ids) else "能力"
+        ordinal = ("一", "二", "三", "四")[index - 1]
+        map_rows.append(
+            f"| {package_id} | {role} | {package_states[index - 1]} | "
+            f"交付第{ordinal}个独立结果 | {dependencies[index - 1]} | [章节](#{anchor}) |"
+        )
         contract_rows = "\n".join(
             f"| {package_id}-C{dimension_index:02d} | {dimension} | "
             f"{package_id}/{dimension} | {package_id} 的{dimension}约束 |"
             for dimension_index, dimension in enumerate(DIMENSIONS, start=1)
         )
         own_contracts = "、".join(f"{package_id}-C{i:02d}" for i in range(1, 7))
-        related = "S-01、" if package_id == "WP-01" else "WP-01-C01、"
+        if role == "收口":
+            related = "、".join(f"{other_id}-C01" for other_id in package_ids[:-1]) + "、"
+        else:
+            related = "S-01、"
         package_sections.append(
             f"""<a id="{anchor}"></a>
 ## {package_id} 示例工作包 {index}
@@ -60,6 +89,8 @@ def valid_design(
 |----------|------|----------|
 | {related}{own_contracts} | 执行 {package_id} 正常及失败场景 | 契约全部得到可观察验证 |"""
         )
+
+    map_rows_for_template = "\n        ".join(map_rows)
 
     replacement_line = "> 替代来源：[新设计](replacement.md)\n" if replacement else ""
     staging = ""
@@ -83,7 +114,7 @@ def valid_design(
         > 设计规范版本：4
         > 设计状态：{state}
         > 演进来源：{evolution}
-        > 工作包：WP-01、WP-02
+        > 工作包：{"、".join(package_ids)}
         {replacement_line}
         <a id="shared-context"></a>
         ## 1. 共享约束
@@ -105,8 +136,7 @@ def valid_design(
 
         | 工作包 | 角色 | 状态 | 交付结果 | 前置依赖 | 设计章节 |
         |--------|------|------|----------|----------|----------|
-        | WP-01 | 能力 | {package_states[0]} | 交付第一个独立结果 | 无 | [章节](#wp-01-example) |
-        | WP-02 | 收口 | {package_states[1]} | 交付第二个独立结果 | WP-01 | [章节](#wp-02-example) |
+        {map_rows_for_template}
         """
     ).strip()
     return header + "\n\n" + "\n\n".join(package_sections) + staging + "\n"
@@ -260,6 +290,30 @@ class ValidatorTests(unittest.TestCase):
             design_path.parent.mkdir(parents=True, exist_ok=True)
             design_path.write_text(design, encoding="utf-8")
         return blueprint_path, design_path
+
+    def write_registered_legacy_design(self, root: Path) -> Path:
+        design = legacy_terminal_design()
+        design_path = root / "docs" / "design" / "2026-08-26_design.md"
+        design_path.parent.mkdir(parents=True, exist_ok=True)
+        design_path.write_text(design, encoding="utf-8")
+        digest = hashlib.sha256(design.encode("utf-8")).hexdigest()
+        manifest = {"schema": 1, "files": {design_path.name: f"sha256:{digest}"}}
+        (design_path.parent / ".v3-legacy-snapshots.json").write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        )
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.email", "test@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.name", "Nova Test"], check=True
+        )
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "commit", "-q", "-m", "fixture"], check=True
+        )
+        return design_path
 
     def test_two_pending_items_reference_different_work_packages_in_one_design(self) -> None:
         rows = "\n".join(
@@ -695,6 +749,29 @@ class ValidatorTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(expected, result.stdout)
 
+    def test_capability_must_not_depend_on_closure_and_two_node_cycle_fails(self) -> None:
+        design = valid_design(dependencies=("WP-02", "WP-01"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-26_design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not depend on closure work package", result.stdout)
+            self.assertIn("dependency graph must be acyclic", result.stdout)
+
+    def test_three_node_work_package_dependency_cycle_fails(self) -> None:
+        design = valid_design(
+            package_ids=("WP-01", "WP-02", "WP-03", "WP-04"),
+            package_states=("已确认", "已确认", "已确认", "已确认"),
+            dependencies=("WP-02", "WP-03", "WP-01", "WP-01、WP-02、WP-03"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-26_design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("dependency graph must be acyclic", result.stdout)
+
     def test_clarifying_closure_can_keep_dependency_pending(self) -> None:
         design = valid_design(
             state="澄清中", package_states=("澄清中", "待澄清"), include_staging=True
@@ -708,24 +785,46 @@ class ValidatorTests(unittest.TestCase):
             result = self.run_validator(path, design=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_terminal_version_three_is_accepted_but_active_version_three_is_not(self) -> None:
-        cases = (
-            (legacy_terminal_design(), 0, "Semantic-Fingerprint"),
-            (
-                legacy_terminal_design()
-                .replace("> 设计状态：已实现", "> 设计状态：已确认")
-                .replace("| 已完成 |", "| 已确认 |"),
-                1,
-                "active design must use version 4",
-            ),
+    def test_new_terminal_version_three_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-26_design.md"
+            path.write_text(legacy_terminal_design(), encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("registered Git HEAD snapshot", result.stdout)
+
+    def test_registered_terminal_version_three_git_snapshot_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_registered_legacy_design(Path(directory))
+            result = self.run_validator(path, design=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Semantic-Fingerprint", result.stdout)
+
+    def test_modified_terminal_version_three_git_snapshot_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_registered_legacy_design(Path(directory))
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "两个工作包需要共享状态", "两个工作包需要共享修改后的状态"
+                ),
+                encoding="utf-8",
+            )
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("does not match manifest", result.stdout)
+
+    def test_active_version_three_is_rejected(self) -> None:
+        design = (
+            legacy_terminal_design()
+            .replace("> 设计状态：已实现", "> 设计状态：已确认")
+            .replace("| 已完成 |", "| 已确认 |")
         )
-        for design, returncode, expected in cases:
-            with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "2026-08-26_design.md"
-                path.write_text(design, encoding="utf-8")
-                result = self.run_validator(path, design=True)
-                self.assertEqual(result.returncode, returncode, result.stdout + result.stderr)
-                self.assertIn(expected, result.stdout)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-26_design.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("active design must use version 4", result.stdout)
 
     def test_semantic_fingerprint_ignores_status_but_tracks_contract_changes(self) -> None:
         designs = (
@@ -745,6 +844,37 @@ class ValidatorTests(unittest.TestCase):
                 fingerprints.append(match.group(1))
         self.assertEqual(fingerprints[0], fingerprints[1])
         self.assertNotEqual(fingerprints[0], fingerprints[2])
+
+    def test_design_validation_and_fingerprint_share_one_read_snapshot(self) -> None:
+        first = valid_design()
+        changed = first.replace("WP-01 的交付边界约束", "读取后变化的约束")
+        reads = 0
+
+        def changing_read(_: Path) -> tuple[str | None, list[str]]:
+            nonlocal reads
+            reads += 1
+            return (first if reads == 1 else changed), []
+
+        path = Path("/tmp/2026-08-26_design.md")
+        with mock.patch.object(VALIDATOR_MODULE, "read_document", side_effect=changing_read):
+            errors, warnings, fingerprint = VALIDATOR_MODULE.validate_design_snapshot(path)
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+        self.assertEqual(reads, 1)
+        self.assertEqual(
+            fingerprint,
+            VALIDATOR_MODULE.design_semantic_fingerprint(path, text_snapshot=first),
+        )
+
+    def test_design_snapshot_read_failure_is_fail_closed(self) -> None:
+        failure = "cannot read document: simulated failure"
+        with mock.patch.object(VALIDATOR_MODULE, "read_document", return_value=(None, [failure])):
+            errors, warnings, fingerprint = VALIDATOR_MODULE.validate_design_snapshot(
+                Path("/tmp/2026-08-26_design.md")
+            )
+        self.assertEqual(errors, [failure])
+        self.assertEqual(warnings, [])
+        self.assertIsNone(fingerprint)
 
     def test_shared_and_work_package_contracts_require_confirmed_constraints(self) -> None:
         invalid_designs = (
