@@ -17,16 +17,19 @@ MAX_OUTPUT_LINES = 40
 
 CALL_TYPES = {"function_call", "custom_tool_call"}
 OUTPUT_TYPES = {"function_call_output", "custom_tool_call_output"}
-CONTEXT_TOOL_RE = re.compile(r"(?:mcp__context_mode__)?ctx_(?:batch_execute|execute|execute_file|search)\b")
-BROAD_DISCOVERY_RE = re.compile(
-    r"ALL_TOOLS\s*\.\s*(?:filter|map)\s*\(|ALL_TOOLS[\s\S]{0,240}?\.includes\s*\("
-)
-EXACT_DISCOVERY_RE = re.compile(
-    r"ALL_TOOLS\s*\.\s*find\s*\([^)]*?\.name\s*={2,3}\s*['\"]([^'\"]+)['\"]"
-)
-FULL_FILE_CONTENT_RE = re.compile(
-    r"(?:text|console\.log|print)\s*\(\s*(?:FILE_CONTENT|file_content)\s*\)"
-)
+CONTEXT_TOOL_NAMES = {
+    "mcp__context_mode__ctx_batch_execute",
+    "mcp__context_mode__ctx_execute",
+    "mcp__context_mode__ctx_execute_file",
+    "mcp__context_mode__ctx_search",
+}
+FULL_TOOL_NAME_RE = re.compile(r"[A-Za-z0-9_:-]+\Z")
+
+
+@dataclass(frozen=True)
+class JsToken:
+    kind: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,163 @@ def _payload_item(record: dict[str, object]) -> tuple[str, dict[str, object]]:
     return (item_type if isinstance(item_type, str) else ""), payload
 
 
+def _js_tokens(source: str) -> list[JsToken]:
+    """Tokenize the small JavaScript subset used by functions.exec cells."""
+    tokens: list[JsToken] = []
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char.isspace():
+            index += 1
+            continue
+        if source.startswith("//", index):
+            newline = source.find("\n", index + 2)
+            index = len(source) if newline == -1 else newline + 1
+            continue
+        if source.startswith("/*", index):
+            end = source.find("*/", index + 2)
+            index = len(source) if end == -1 else end + 2
+            continue
+        if char in "'\"`":
+            quote = char
+            index += 1
+            value: list[str] = []
+            escaped = False
+            while index < len(source):
+                current = source[index]
+                if current == "\\":
+                    escaped = True
+                    index += 2
+                    continue
+                if current == quote:
+                    index += 1
+                    break
+                value.append(current)
+                index += 1
+            tokens.append(JsToken("string", "" if escaped else "".join(value)))
+            continue
+        if char.isalpha() or char in "_$":
+            end = index + 1
+            while end < len(source) and (source[end].isalnum() or source[end] in "_$"):
+                end += 1
+            tokens.append(JsToken("identifier", source[index:end]))
+            index = end
+            continue
+        operator = next(
+            (candidate for candidate in ("===", "!==", "=>", "==", "!=", "&&", "||") if source.startswith(candidate, index)),
+            char,
+        )
+        tokens.append(JsToken("operator", operator))
+        index += len(operator)
+    return tokens
+
+
+def _matching_paren(tokens: Sequence[JsToken], open_index: int) -> int | None:
+    depth = 0
+    for index in range(open_index, len(tokens)):
+        if tokens[index].value == "(":
+            depth += 1
+        elif tokens[index].value == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _all_tools_discoveries(source: str) -> tuple[list[str], bool]:
+    """Return proven exact targets and whether any ALL_TOOLS use is broad."""
+    tokens = _js_tokens(source)
+    targets: list[str] = []
+    broad = False
+    index = 0
+    while index < len(tokens):
+        if tokens[index] != JsToken("identifier", "ALL_TOOLS"):
+            index += 1
+            continue
+        prefix = tokens[index : index + 4]
+        if [token.value for token in prefix] != ["ALL_TOOLS", ".", "find", "("]:
+            broad = True
+            index += 1
+            continue
+        close_index = _matching_paren(tokens, index + 3)
+        if close_index is None:
+            broad = True
+            break
+        predicate = tokens[index + 4 : close_index]
+        strings = [token.value for token in predicate if token.kind == "string"]
+        candidates: list[str] = []
+        for position in range(len(predicate) - 2):
+            left, operator, right = predicate[position : position + 3]
+            if operator.value not in {"==", "==="}:
+                continue
+            if left.value == "name" and right.kind == "string":
+                candidates.append(right.value)
+            elif left.kind == "string" and right.value == "name":
+                candidates.append(left.value)
+        forbidden = {"/", "[", "]", "?", ":", "&&", "||"}
+        proven = (
+            len(candidates) == 1
+            and len(strings) == 1
+            and FULL_TOOL_NAME_RE.fullmatch(candidates[0]) is not None
+            and not any(token.value in forbidden for token in predicate)
+            and not any(token.value in {"filter", "map", "includes", "test"} for token in predicate)
+        )
+        if proven:
+            targets.append(candidates[0])
+        else:
+            broad = True
+        index = close_index + 1
+    return targets, broad
+
+
+def _is_context_call(call_name: str, arguments: str) -> bool:
+    if call_name in CONTEXT_TOOL_NAMES:
+        return True
+    tokens = _js_tokens(arguments)
+    for index in range(len(tokens) - 3):
+        if (
+            tokens[index].value == "tools"
+            and tokens[index + 1].value == "."
+            and tokens[index + 2].value in CONTEXT_TOOL_NAMES
+            and tokens[index + 3].value == "("
+        ):
+            return True
+    return False
+
+
+def _forwards_full_file_content(arguments: str, depth: int = 0) -> bool:
+    tokens = _js_tokens(arguments)
+    for index, token in enumerate(tokens):
+        open_index: int | None = None
+        if token.value in {"text", "print"} and index + 1 < len(tokens):
+            open_index = index + 1 if tokens[index + 1].value == "(" else None
+        elif (
+            token.value == "console"
+            and index + 3 < len(tokens)
+            and [item.value for item in tokens[index + 1 : index + 4]] == [".", "log", "("]
+        ):
+            open_index = index + 3
+        if open_index is None:
+            continue
+        close_index = _matching_paren(tokens, open_index)
+        if close_index is None:
+            continue
+        if any(
+            item.kind == "identifier" and item.value in {"FILE_CONTENT", "file_content"}
+            for item in tokens[open_index + 1 : close_index]
+        ):
+            return True
+    if depth < 2:
+        for token in tokens:
+            if (
+                token.kind == "string"
+                and ("FILE_CONTENT" in token.value or "file_content" in token.value)
+                and _forwards_full_file_content(token.value, depth + 1)
+            ):
+                return True
+    return False
+
+
 def _expand_paths(inputs: Sequence[Path]) -> list[Path]:
     files: set[Path] = set()
     for raw in inputs:
@@ -97,7 +257,7 @@ def audit_files(paths: Iterable[Path]) -> AuditReport:
     report = AuditReport()
     for path in paths:
         report.files += 1
-        calls: dict[str, tuple[str, int]] = {}
+        calls: dict[str, tuple[bool, int]] = {}
         discoveries: dict[str, int] = {}
 
         with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -122,11 +282,13 @@ def audit_files(paths: Iterable[Path]) -> AuditReport:
                 if item_type in CALL_TYPES:
                     report.calls += 1
                     call_id = payload.get("call_id") or payload.get("id")
+                    call_name = payload.get("name") if isinstance(payload.get("name"), str) else ""
                     arguments = _text(payload.get("arguments") or payload.get("input") or "")
                     if isinstance(call_id, str):
-                        calls[call_id] = (arguments, line_number)
+                        calls[call_id] = (_is_context_call(call_name, arguments), line_number)
 
-                    if BROAD_DISCOVERY_RE.search(arguments):
+                    exact_targets, broad_discovery = _all_tools_discoveries(arguments)
+                    if broad_discovery:
                         report.violations.append(
                             Violation(
                                 "BROAD_TOOL_DISCOVERY",
@@ -135,7 +297,7 @@ def audit_files(paths: Iterable[Path]) -> AuditReport:
                                 "ALL_TOOLS must be queried with an exact-name find",
                             )
                         )
-                    for target in EXACT_DISCOVERY_RE.findall(arguments):
+                    for target in exact_targets:
                         first_line = discoveries.setdefault(target, line_number)
                         if first_line != line_number:
                             report.violations.append(
@@ -146,7 +308,7 @@ def audit_files(paths: Iterable[Path]) -> AuditReport:
                                     f"{target} was already discovered at line {first_line}",
                                 )
                             )
-                    if FULL_FILE_CONTENT_RE.search(arguments):
+                    if _forwards_full_file_content(arguments):
                         report.violations.append(
                             Violation(
                                 "FULL_FILE_CONTENT_OUTPUT",
@@ -160,11 +322,11 @@ def audit_files(paths: Iterable[Path]) -> AuditReport:
                     report.outputs += 1
                     call_id = payload.get("call_id")
                     call = calls.get(call_id) if isinstance(call_id, str) else None
-                    if not call or not CONTEXT_TOOL_RE.search(call[0]):
+                    if not call or not call[0]:
                         continue
                     output = _text(payload.get("output") or payload.get("content") or "")
                     output_bytes = len(output.encode("utf-8"))
-                    output_lines = output.count("\n") + 1
+                    output_lines = len(output.splitlines())
                     if output_bytes > MAX_OUTPUT_BYTES or output_lines > MAX_OUTPUT_LINES:
                         report.violations.append(
                             Violation(

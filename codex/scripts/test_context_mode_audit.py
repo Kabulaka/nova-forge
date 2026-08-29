@@ -65,34 +65,51 @@ class ContextModeAuditTests(unittest.TestCase):
         self.assertTrue(report.ok)
 
     def test_broad_and_repeated_discovery_fail(self) -> None:
-        broad = 'text(ALL_TOOLS.filter(x=>x.name.includes("ctx_")));'
-        exact = 'text(ALL_TOOLS.find(x=>x.name==="mcp__context_mode__ctx_search"));'
+        broad = 'text(ALL_TOOLS.find(x=>/^mcp__context_mode__ctx_/.test(x.name)));'
+        exact = 'text(ALL_TOOLS.find(({name})=>name==="mcp__context_mode__ctx_search"));'
         report = self.audit([call("c1", broad), call("c2", exact), call("c3", exact)])
         self.assertEqual(
             {item.code for item in report.violations},
             {"BROAD_TOOL_DISCOVERY", "REPEATED_TOOL_DISCOVERY"},
         )
 
-    def test_line_and_utf8_byte_limits_fail(self) -> None:
+    def test_exact_line_and_byte_boundaries_pass(self) -> None:
+        code = 'await tools.mcp__context_mode__ctx_search({queries:["evidence"],limit:2});'
+        report = self.audit(
+            [
+                call("c1", code),
+                output("c1", "x\n" * 40),
+                call("c2", code),
+                output("c2", "x" * 4096),
+            ]
+        )
+        self.assertTrue(report.ok)
+
+    def test_line_and_byte_limits_fail_above_boundary(self) -> None:
         code = 'await tools.mcp__context_mode__ctx_search({queries:["evidence"],limit:2});'
         report = self.audit(
             [
                 call("c1", code),
                 output("c1", "x\n" * 41),
                 call("c2", code),
-                output("c2", "界" * 1366),
+                output("c2", "x" * 4097),
             ]
         )
         violations = [item for item in report.violations if item.code == "CONTEXT_OUTPUT_LIMIT"]
         self.assertEqual(len(violations), 2)
-        self.assertIn("42 lines", violations[0].detail)
-        self.assertIn("4098 bytes", violations[1].detail)
+        self.assertIn("41 lines", violations[0].detail)
+        self.assertIn("4097 bytes", violations[1].detail)
+
+    def test_non_context_command_mentioning_tool_name_does_not_limit_output(self) -> None:
+        code = 'await tools.exec_command({cmd:"rg -n ctx_search docs"});'
+        report = self.audit([call("c1", code), output("c1", "x\n" * 41)])
+        self.assertTrue(report.ok)
 
     def test_invalid_json_and_full_file_content_are_reported_without_stopping(self) -> None:
         report = self.audit(
             [
                 "{not-json",
-                call("c1", "console.log(FILE_CONTENT);"),
+                call("c1", "text({body: FILE_CONTENT});"),
                 response_item({"type": "message", "role": "assistant", "content": []}),
             ]
         )
@@ -101,6 +118,18 @@ class ContextModeAuditTests(unittest.TestCase):
             {"INVALID_JSON", "FULL_FILE_CONTENT_OUTPUT"},
         )
         self.assertEqual(report.records, 2)
+
+    def test_embedded_context_code_forwarding_full_file_is_reported(self) -> None:
+        code = (
+            'await tools.mcp__context_mode__ctx_execute_file({'
+            'path:"sample.log",language:"javascript",'
+            'code:"console.log(FILE_CONTENT)"});'
+        )
+        report = self.audit([call("c1", code)])
+        self.assertEqual(
+            [item.code for item in report.violations],
+            ["FULL_FILE_CONTENT_OUTPUT"],
+        )
 
     def test_cli_expands_directory_and_returns_nonzero_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
