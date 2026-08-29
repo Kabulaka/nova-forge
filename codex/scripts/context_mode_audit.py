@@ -104,11 +104,18 @@ def _js_tokens(source: str) -> list[JsToken]:
             quote = char
             index += 1
             value: list[str] = []
-            escaped = False
             while index < len(source):
                 current = source[index]
                 if current == "\\":
-                    escaped = True
+                    if index + 1 >= len(source):
+                        index += 1
+                        break
+                    escaped = source[index + 1]
+                    value.append(
+                        {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f"}.get(
+                            escaped, escaped
+                        )
+                    )
                     index += 2
                     continue
                 if current == quote:
@@ -116,7 +123,7 @@ def _js_tokens(source: str) -> list[JsToken]:
                     break
                 value.append(current)
                 index += 1
-            tokens.append(JsToken("string", "" if escaped else "".join(value)))
+            tokens.append(JsToken("string", "".join(value)))
             continue
         if char.isalpha() or char in "_$":
             end = index + 1
@@ -165,31 +172,60 @@ def _all_tools_discoveries(source: str) -> tuple[list[str], bool]:
         if close_index is None:
             broad = True
             break
-        predicate = tokens[index + 4 : close_index]
-        strings = [token.value for token in predicate if token.kind == "string"]
-        candidates: list[str] = []
-        for position in range(len(predicate) - 2):
-            left, operator, right = predicate[position : position + 3]
-            if operator.value not in {"==", "==="}:
-                continue
-            if left.value == "name" and right.kind == "string":
-                candidates.append(right.value)
-            elif left.kind == "string" and right.value == "name":
-                candidates.append(left.value)
-        forbidden = {"/", "[", "]", "?", ":", "&&", "||"}
-        proven = (
-            len(candidates) == 1
-            and len(strings) == 1
-            and FULL_TOOL_NAME_RE.fullmatch(candidates[0]) is not None
-            and not any(token.value in forbidden for token in predicate)
-            and not any(token.value in {"filter", "map", "includes", "test"} for token in predicate)
-        )
-        if proven:
-            targets.append(candidates[0])
+        target = _exact_find_target(tokens[index + 4 : close_index])
+        if target is not None:
+            targets.append(target)
         else:
             broad = True
         index = close_index + 1
     return targets, broad
+
+
+def _strip_wrapping_parens(tokens: list[JsToken]) -> list[JsToken]:
+    while len(tokens) >= 2 and tokens[0].value == "(" and _matching_paren(tokens, 0) == len(tokens) - 1:
+        tokens = tokens[1:-1]
+    return tokens
+
+
+def _exact_find_target(predicate: Sequence[JsToken]) -> str | None:
+    values = [token.value for token in predicate]
+    if values.count("=>") != 1:
+        return None
+    arrow = values.index("=>")
+    parameters = _strip_wrapping_parens(list(predicate[:arrow]))
+    body = _strip_wrapping_parens(list(predicate[arrow + 1 :]))
+
+    direct_name: str | None = None
+    object_name: str | None = None
+    if len(parameters) == 1 and parameters[0].kind == "identifier":
+        object_name = parameters[0].value
+    elif [token.value for token in parameters] == ["{", "name", "}"]:
+        direct_name = "name"
+    else:
+        return None
+
+    comparison = [token.value for token in body]
+    candidate: str | None = None
+    if direct_name is not None and len(body) == 3:
+        if body[0].value == direct_name and body[1].value in {"==", "==="} and body[2].kind == "string":
+            candidate = body[2].value
+        elif body[0].kind == "string" and body[1].value in {"==", "==="} and body[2].value == direct_name:
+            candidate = body[0].value
+    elif object_name is not None:
+        member = [object_name, ".", "name"]
+        bracket = [object_name, "[", "name", "]"]
+        for reference in (member, bracket):
+            if comparison[: len(reference)] == reference:
+                tail = body[len(reference) :]
+                if len(tail) == 2 and tail[0].value in {"==", "==="} and tail[1].kind == "string":
+                    candidate = tail[1].value
+            if comparison[-len(reference) :] == reference:
+                head = body[: -len(reference)]
+                if len(head) == 2 and head[0].kind == "string" and head[1].value in {"==", "==="}:
+                    candidate = head[0].value
+    if candidate is None or FULL_TOOL_NAME_RE.fullmatch(candidate) is None:
+        return None
+    return candidate
 
 
 def _is_context_call(call_name: str, arguments: str) -> bool:
@@ -224,9 +260,12 @@ def _forwards_full_file_content(arguments: str, depth: int = 0) -> bool:
         close_index = _matching_paren(tokens, open_index)
         if close_index is None:
             continue
+        sink_arguments = tokens[open_index + 1 : close_index]
         if any(
-            item.kind == "identifier" and item.value in {"FILE_CONTENT", "file_content"}
-            for item in tokens[open_index + 1 : close_index]
+            item.kind == "identifier"
+            and item.value in {"FILE_CONTENT", "file_content"}
+            and (position + 1 == len(sink_arguments) or sink_arguments[position + 1].value not in {".", "[", "("})
+            for position, item in enumerate(sink_arguments)
         ):
             return True
     if depth < 2:

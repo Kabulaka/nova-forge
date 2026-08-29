@@ -73,6 +73,19 @@ class ContextModeAuditTests(unittest.TestCase):
             {"BROAD_TOOL_DISCOVERY", "REPEATED_TOOL_DISCOVERY"},
         )
 
+    def test_find_callback_binding_must_match_and_bracket_name_is_exact(self) -> None:
+        unrelated = (
+            'text(ALL_TOOLS.find(x=>y.name==="mcp__context_mode__ctx_search"));'
+        )
+        bracket = (
+            'text(ALL_TOOLS.find(x=>x["name"]==="mcp__context_mode__ctx_search"));'
+        )
+        report = self.audit([call("c1", unrelated), call("c2", bracket)])
+        self.assertEqual(
+            [item.code for item in report.violations],
+            ["BROAD_TOOL_DISCOVERY"],
+        )
+
     def test_exact_line_and_byte_boundaries_pass(self) -> None:
         code = 'await tools.mcp__context_mode__ctx_search({queries:["evidence"],limit:2});'
         report = self.audit(
@@ -126,6 +139,19 @@ class ContextModeAuditTests(unittest.TestCase):
             'code:"console.log(FILE_CONTENT)"});'
         )
         report = self.audit([call("c1", code)])
+        self.assertEqual(
+            [item.code for item in report.violations],
+            ["FULL_FILE_CONTENT_OUTPUT"],
+        )
+
+    def test_escaped_embedded_full_file_fails_but_derived_summary_passes(self) -> None:
+        escaped = (
+            'await tools.mcp__context_mode__ctx_execute_file({'
+            'path:"sample.log",language:"javascript",'
+            'code:"console.log(\\\"prefix\\\", FILE_CONTENT)"});'
+        )
+        summary = "console.log(FILE_CONTENT.split('\\n').length);"
+        report = self.audit([call("c1", escaped), call("c2", summary)])
         self.assertEqual(
             [item.code for item in report.violations],
             ["FULL_FILE_CONTENT_OUTPUT"],
