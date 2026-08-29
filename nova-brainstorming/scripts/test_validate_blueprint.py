@@ -36,6 +36,7 @@ DIMENSIONS = (
 
 def valid_design(
     *,
+    version: str = "4",
     state: str = "已确认",
     package_states: tuple[str, ...] = ("已确认", "已确认"),
     package_ids: tuple[str, ...] = ("WP-01", "WP-02"),
@@ -43,6 +44,7 @@ def valid_design(
     include_staging: bool = False,
     replacement: bool = False,
     evolution: str = "无",
+    confirmation: str | None = None,
 ) -> str:
     if len(package_states) != len(package_ids):
         raise ValueError("package_states must match package_ids")
@@ -111,7 +113,7 @@ def valid_design(
         f"""
         # 示例史诗设计
 
-        > 设计规范版本：4
+        > 设计规范版本：{version}
         > 设计状态：{state}
         > 演进来源：{evolution}
         > 工作包：{"、".join(package_ids)}
@@ -139,7 +141,25 @@ def valid_design(
         {map_rows_for_template}
         """
     ).strip()
+    if confirmation is not None:
+        header = header.replace(
+            f"> 设计状态：{state}\n",
+            f"> 设计状态：{state}\n> 收敛确认：{confirmation}\n",
+        )
     return header + "\n\n" + "\n\n".join(package_sections) + staging + "\n"
+
+
+def valid_confirmed_current_design(**kwargs: object) -> str:
+    placeholder = "0" * 64
+    design = valid_design(
+        version="5",
+        confirmation=f"用户明确确认@sha256:{placeholder}",
+        **kwargs,
+    )
+    fingerprint = VALIDATOR_MODULE.design_semantic_fingerprint(
+        Path("2026-08-29_显式收敛确认.md"), text_snapshot=design
+    )
+    return design.replace(placeholder, fingerprint, 1)
 
 
 def legacy_terminal_design() -> str:
@@ -328,6 +348,74 @@ class ValidatorTests(unittest.TestCase):
             result = self.run_validator(blueprint)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_version_five_confirmed_design_requires_matching_confirmation(self) -> None:
+        confirmed = valid_confirmed_current_design()
+        invalid = (
+            (
+                re.sub(r"^> 收敛确认：.*\n", "", confirmed, flags=re.MULTILINE),
+                "must contain exactly one convergence confirmation metadata line",
+            ),
+            (
+                re.sub(
+                    r"sha256:[0-9a-f]{64}",
+                    "sha256:" + "0" * 64,
+                    confirmed,
+                    count=1,
+                ),
+                "convergence confirmation fingerprint does not match design semantics",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            valid_path = root / "2026-08-29_显式收敛确认.md"
+            valid_path.write_text(confirmed, encoding="utf-8")
+            self.assertEqual(
+                self.run_validator(valid_path, design=True).returncode, 0
+            )
+            for index, (content, expected) in enumerate(invalid, start=1):
+                path = root / f"2026-08-29_无效确认{index}.md"
+                path.write_text(content, encoding="utf-8")
+                result = self.run_validator(path, design=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stdout)
+
+    def test_version_five_semantic_change_invalidates_confirmation(self) -> None:
+        design = valid_confirmed_current_design().replace(
+            "两个工作包共享同一状态定义", "修改后的共享状态定义"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-29_确认后语义变化.md"
+            path.write_text(design, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "convergence confirmation fingerprint does not match design semantics",
+                result.stdout,
+            )
+
+    def test_version_five_clarifying_design_uses_pending_confirmation(self) -> None:
+        design = valid_design(
+            version="5",
+            state="澄清中",
+            package_states=("待澄清", "已确认"),
+            include_staging=True,
+            confirmation="待确认",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-29_澄清草稿.md"
+            path.write_text(design, encoding="utf-8")
+            self.assertEqual(self.run_validator(path, design=True).returncode, 0)
+            path.write_text(
+                design.replace("收敛确认：待确认", "收敛确认：用户明确确认"),
+                encoding="utf-8",
+            )
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "clarifying version 5 design must use convergence confirmation 待确认",
+                result.stdout,
+            )
+
     def test_pending_item_rejects_design_document_from_older_format(self) -> None:
         design = valid_design().replace("设计规范版本：4", "设计规范版本：2")
         row = "| TASK-01 | P1 | 用户提出 | 功能 | [WP-01](docs/design/2026-08-26_epic.md#wp-01-example) | 无 | 可执行 |"
@@ -336,7 +424,10 @@ class ValidatorTests(unittest.TestCase):
             result = self.run_validator(blueprint)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("invalid design document docs/design/2026-08-26_epic.md", result.stdout)
-            self.assertIn("expected version 4 or terminal legacy version 3, found 2", result.stdout)
+            self.assertIn(
+                "expected version 5, compatible version 4, or terminal legacy version 3, found 2",
+                result.stdout,
+            )
 
     def test_pending_item_rejects_fenced_fake_design_version(self) -> None:
         design = valid_design().replace(
@@ -348,7 +439,10 @@ class ValidatorTests(unittest.TestCase):
             blueprint, _ = self.write_project(Path(directory), valid_blueprint(row), design)
             result = self.run_validator(blueprint)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("expected version 4 or terminal legacy version 3, found 2", result.stdout)
+            self.assertIn(
+                "expected version 5, compatible version 4, or terminal legacy version 3, found 2",
+                result.stdout,
+            )
 
     def test_pending_item_requires_fully_valid_design_document(self) -> None:
         invalid_designs = (
@@ -824,7 +918,7 @@ class ValidatorTests(unittest.TestCase):
             path.write_text(design, encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("active design must use version 4", result.stdout)
+            self.assertIn("active design must use version 5", result.stdout)
 
     def test_semantic_fingerprint_ignores_status_but_tracks_contract_changes(self) -> None:
         designs = (
@@ -1009,7 +1103,8 @@ class ValidatorTests(unittest.TestCase):
         design = (SKILL_ROOT / "assets" / "DESIGN.template.md").read_text(encoding="utf-8")
         self.assertIn("> 蓝图规范版本：3", blueprint)
         self.assertIn("| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |", blueprint)
-        self.assertIn("> 设计规范版本：4", design)
+        self.assertIn("> 设计规范版本：5", design)
+        self.assertIn("> 收敛确认：待确认", design)
         self.assertIn("> 演进来源：", design)
         self.assertIn("| 契约 | 维度 | 语义键 | 唯一规则 |", design)
         self.assertEqual(set(re.findall(r"\| ([^|]+) \| <", design)) & set(DIMENSIONS), set(DIMENSIONS))

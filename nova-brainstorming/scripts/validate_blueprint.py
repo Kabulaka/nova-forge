@@ -15,9 +15,12 @@ from pathlib import Path
 
 
 BLUEPRINT_VERSION = "3"
-DESIGN_VERSION = "4"
+DESIGN_VERSION = "5"
+COMPATIBLE_DESIGN_VERSION = "4"
 LEGACY_DESIGN_VERSION = "3"
 LEGACY_SNAPSHOT_MANIFEST = ".v3-legacy-snapshots.json"
+CONFIRMATION_PENDING = "待确认"
+CONFIRMATION_RE = re.compile(r"^用户明确确认@sha256:([0-9a-f]{64})$")
 BLUEPRINT_SECTIONS = (
     "项目定位",
     "技术栈",
@@ -691,11 +694,12 @@ def validate_design(
 
     version_match = re.search(r"^>\s*设计规范版本[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
     version = version_match.group(1) if version_match else None
-    if version not in {DESIGN_VERSION, LEGACY_DESIGN_VERSION}:
+    if version not in {DESIGN_VERSION, COMPATIBLE_DESIGN_VERSION, LEGACY_DESIGN_VERSION}:
         found = version if version else "missing"
         errors.append(
-            f"design format upgrade required: expected version {DESIGN_VERSION} "
-            f"or terminal legacy version {LEGACY_DESIGN_VERSION}, found {found}"
+            f"design format upgrade required: expected version {DESIGN_VERSION}, "
+            f"compatible version {COMPATIBLE_DESIGN_VERSION}, or terminal legacy version "
+            f"{LEGACY_DESIGN_VERSION}, found {found}"
         )
 
     state_match = re.search(r"^>\s*设计状态[：:]\s*(\S+)\s*$", structural_text, re.MULTILINE)
@@ -975,6 +979,37 @@ def validate_design(
                 errors.append(f"invalid clarification type: {row[0]}")
     elif clarification_headings:
         errors.append("non-clarifying design must not contain clarification staging")
+
+    if version == DESIGN_VERSION:
+        confirmation_matches = re.findall(
+            r"^>\s*收敛确认[：:]\s*(.+?)\s*$", structural_text, re.MULTILINE
+        )
+        if len(confirmation_matches) != 1:
+            errors.append(
+                "version 5 design must contain exactly one convergence confirmation metadata line"
+            )
+        else:
+            confirmation = confirmation_matches[0]
+            if state == "澄清中":
+                if confirmation != CONFIRMATION_PENDING:
+                    errors.append(
+                        "clarifying version 5 design must use convergence confirmation 待确认"
+                    )
+            else:
+                confirmation_match = CONFIRMATION_RE.fullmatch(confirmation)
+                if not confirmation_match:
+                    errors.append(
+                        "confirmed version 5 design must use "
+                        "用户明确确认@sha256:<64 lowercase hex>"
+                    )
+                else:
+                    expected_fingerprint = design_semantic_fingerprint(
+                        path, text_snapshot=text
+                    )
+                    if confirmation_match.group(1) != expected_fingerprint:
+                        errors.append(
+                            "convergence confirmation fingerprint does not match design semantics"
+                        )
 
     package_states = list(state_by_id.values())
     has_unconfirmed = any(value in {"待澄清", "澄清中"} for value in package_states)
