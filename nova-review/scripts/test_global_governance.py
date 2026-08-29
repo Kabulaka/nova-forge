@@ -51,6 +51,17 @@ class GlobalGovernanceTests(unittest.TestCase):
         self.assertIn("用户可随时要求先调试、暂停或取消", GLOBAL)
         self.assertIn("Plan mode 本身不自动授权或启动 Review", GLOBAL)
 
+    def test_context_mode_routing_is_precise_and_bounded(self) -> None:
+        self.assertIn("最多 40 行且 UTF-8 不超过 4KB", GLOBAL)
+        self.assertIn("裁剪时显式标记", GLOBAL)
+        self.assertIn("禁止输出完整 `FILE_CONTENT` 或完整工具结果对象", GLOBAL)
+        self.assertIn("一次性过滤、统计或聚合优先使用 `ctx_execute`", GLOBAL)
+        self.assertIn("带显式 `limit` 的 `ctx_search`", GLOBAL)
+        self.assertIn("已知名称和参数的延迟工具直接调用", GLOBAL)
+        self.assertIn("按完整工具名精确 `find`", GLOBAL)
+        self.assertIn("禁止用 `filter`、`includes` 或宽泛正则枚举 `ALL_TOOLS`", GLOBAL)
+        self.assertIn("不自动安装或重复探测", GLOBAL)
+
     def test_implementation_sop_keeps_full_completion_report(self) -> None:
         for heading in (
             "### 概要",
