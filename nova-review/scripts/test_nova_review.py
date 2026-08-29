@@ -314,7 +314,7 @@ class NovaReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
             self.init_repo(repo)
-            blueprint, design = self.designed_documents()
+            blueprint, design = self.designed_documents(role_column=True)
             blueprint = blueprint.replace("PEND-001", work_item)
             design = design.replace("PEND-001", work_item)
             blueprint_path = repo / "PROJECT_BLUEPRINT.md"
@@ -380,6 +380,8 @@ class NovaReviewTests(unittest.TestCase):
             self.assertIn(f"| {work_item} | WP-01、WP-02 |", closed_design)
             self.assertIn("设计状态：已实现", closed_design)
             self.assertNotIn("待Review", closed_design)
+            self.assertIn("| WP-01 | 能力 | 已完成 |", closed_design)
+            self.assertIn("| WP-02 | 收口 | 已完成 |", closed_design)
 
             feature_path = repo / "docs/audit/features/2026.jsonl"
             feature = json.loads(feature_path.read_text(encoding="utf-8"))
@@ -651,7 +653,7 @@ class NovaReviewTests(unittest.TestCase):
                 ["FIX-002", "FIX-003", "MAINT-002", "PEND-001"],
             )
 
-    def designed_documents(self) -> tuple[str, str]:
+    def designed_documents(self, *, role_column: bool = False) -> tuple[str, str]:
         blueprint = textwrap.dedent(
             """
             # Blueprint
@@ -692,6 +694,16 @@ class NovaReviewTests(unittest.TestCase):
             ## WP-02 Example
             """
         ).lstrip()
+        if role_column:
+            design = design.replace("设计规范版本：3", "设计规范版本：4")
+            design = design.replace(
+                "| 工作包 | 状态 | 交付结果 | 前置依赖 | 设计章节 |\n"
+                "|--------|------|----------|----------|----------|",
+                "| 工作包 | 角色 | 状态 | 交付结果 | 前置依赖 | 设计章节 |\n"
+                "|--------|------|------|----------|----------|----------|",
+            )
+            design = design.replace("| WP-01 | 待Review |", "| WP-01 | 能力 | 待Review |")
+            design = design.replace("| WP-02 | 待Review |", "| WP-02 | 收口 | 待Review |")
         return blueprint, design
 
     def test_partial_package_list_cannot_delete_the_blueprint_item(self) -> None:

@@ -56,7 +56,8 @@ DOC_SUFFIXES = {".md", ".txt", ".rst"}
 DOC_FORBIDDEN_PARTS = {"test", "tests", "fixture", "fixtures", "scripts", "config"}
 DOC_FORBIDDEN_NAMES = {"requirements.txt", "constraints.txt"}
 MAP_ROW_RE = re.compile(
-    r"^(?P<prefix>\|\s*(?P<id>WP-[A-Za-z0-9._-]+)\s*\|\s*)"
+    r"^(?P<prefix>\|\s*(?P<id>WP-[A-Za-z0-9._-]+)\s*\|\s*"
+    r"(?:(?:能力|收口)\s*\|\s*)?)"
     r"(?P<state>待澄清|澄清中|已确认|开发中|待Review|已完成|已废弃)"
     r"(?P<suffix>\s*\|.*)$"
 )
