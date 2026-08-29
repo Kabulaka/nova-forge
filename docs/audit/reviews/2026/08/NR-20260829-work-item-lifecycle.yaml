@@ -1,0 +1,46 @@
+{
+  "batch_id": "NR-20260829-work-item-lifecycle",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "96022bcccff7afd9a469a09a59c4749f7aa4810d",
+          "repository": "main"
+        },
+        {
+          "commit": "6285949e4b05c2cd498e46174022901d2b809de5",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "docs/design/2026-08-29_工作项生命周期与归档关联.md#wp-01-work-item-lifecycle",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "Nova Review 62 tests; Nova Brainstorming 88 tests; blueprint/design/discovery/py_compile/diff check (pass)",
+      "work_item": "PEND-01a04c41-1df4-7665-b27a-3dceb28442e8"
+    }
+  ],
+  "manifest_sha256": "7903f630f6f9c09a612fc1e425607a61e00c02b6de5f6bd9cf3c10e6a7b7a728",
+  "review_content_sha256": "35346e296d64d0e1f92b3982ee3a35780ca3562e9651d809836136a097146dff",
+  "review_round": 2,
+  "review_scope": [
+    "main:PROJECT_BLUEPRINT.md",
+    "main:codex/AGENTS.global.md",
+    "main:docs/design/2026-08-29_工作项生命周期与归档关联.md",
+    "main:nova-brainstorming/SKILL.md",
+    "main:nova-brainstorming/references/implementation-sop.md",
+    "main:nova-brainstorming/scripts/test_skill_routing.py",
+    "main:nova-review/SKILL.md",
+    "main:nova-review/references/audit-contract.md",
+    "main:nova-review/references/commit-contract.md",
+    "main:nova-review/references/review-sop.md",
+    "main:nova-review/scripts/nova_review.py",
+    "main:nova-review/scripts/test_nova_review.py",
+    "main:nova-review/scripts/test_skill_contract.py"
+  ],
+  "reviewed_at": "2026-08-29T12:00:00+08:00",
+  "reviewer": "review_governance_contract, review_tool_lifecycle, review_design_routing",
+  "schema": 1
+}
