@@ -355,7 +355,7 @@ class ValidatorTests(unittest.TestCase):
         )
         return design_path
 
-    def write_registered_compatible_design(self, root: Path) -> Path:
+    def write_registered_compatible_design(self, root: Path, *, register: bool = True) -> Path:
         design = valid_design(version="4")
         design_path = root / "docs" / "design" / "2026-08-26_design.md"
         design_path.parent.mkdir(parents=True, exist_ok=True)
@@ -363,13 +363,14 @@ class ValidatorTests(unittest.TestCase):
         fingerprint = VALIDATOR_MODULE.design_semantic_fingerprint(
             design_path, text_snapshot=design
         )
-        manifest = {
-            "schema": 1,
-            "files": {design_path.name: f"sha256:{fingerprint}"},
-        }
-        (design_path.parent / ".v4-compatible-snapshots.json").write_text(
-            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
-        )
+        if register:
+            manifest = {
+                "schema": 1,
+                "files": {design_path.name: f"sha256:{fingerprint}"},
+            }
+            (design_path.parent / ".v4-compatible-snapshots.json").write_text(
+                json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+            )
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         subprocess.run(
             ["git", "-C", str(root), "config", "user.email", "test@example.invalid"],
@@ -467,12 +468,26 @@ class ValidatorTests(unittest.TestCase):
 
     def test_new_version_four_design_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "2026-08-29_新建旧版设计.md"
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.email", "test@example.invalid"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.name", "Nova Test"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "-q", "--allow-empty", "-m", "fixture"],
+                check=True,
+            )
+            path = root / "2026-08-29_新建旧版设计.md"
             path.write_text(valid_design(version="4"), encoding="utf-8")
             result = self.run_validator(path, design=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "compatible version 4 design must match a registered semantic baseline",
+                "compatible version 4 design is not present in Git HEAD",
                 result.stdout,
             )
 
@@ -493,6 +508,30 @@ class ValidatorTests(unittest.TestCase):
     def test_version_four_lifecycle_only_change_remains_compatible(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = self.write_registered_compatible_design(Path(directory))
+            changed = path.read_text(encoding="utf-8").replace(
+                "| WP-01 | 能力 | 已确认 |", "| WP-01 | 能力 | 开发中 |"
+            )
+            path.write_text(changed, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_unregistered_existing_version_four_semantic_change_requires_upgrade(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_registered_compatible_design(Path(directory), register=False)
+            changed = path.read_text(encoding="utf-8").replace(
+                "两个工作包共享同一状态定义", "未经确认的新状态定义"
+            )
+            path.write_text(changed, encoding="utf-8")
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "compatible version 4 design semantics changed; upgrade to version 5",
+                result.stdout,
+            )
+
+    def test_unregistered_existing_version_four_lifecycle_change_is_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_registered_compatible_design(Path(directory), register=False)
             changed = path.read_text(encoding="utf-8").replace(
                 "| WP-01 | 能力 | 已确认 |", "| WP-01 | 能力 | 开发中 |"
             )

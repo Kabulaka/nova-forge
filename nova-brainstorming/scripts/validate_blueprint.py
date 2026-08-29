@@ -188,27 +188,30 @@ def validate_legacy_design_snapshot(path: Path, text_snapshot: str) -> list[str]
 
 
 def validate_compatible_design_snapshot(path: Path, text_snapshot: str) -> list[str]:
-    """Allow version 4 only when its semantics match a registered Git baseline."""
+    """Allow version 4 only when its semantics match a registered or Git HEAD baseline."""
     manifest_path = path.parent / COMPATIBLE_SNAPSHOT_MANIFEST
     manifest_text, read_errors = read_document(manifest_path)
-    if manifest_text is None:
+    expected: str | None = None
+    if manifest_text is not None:
+        try:
+            manifest = json.loads(manifest_text)
+        except json.JSONDecodeError as exc:
+            return [f"invalid compatible design snapshot manifest: {exc}"]
+        if not isinstance(manifest, dict):
+            return ["compatible design snapshot manifest must use schema 1 with a files object"]
+        files = manifest.get("files")
+        if manifest.get("schema") != 1 or not isinstance(files, dict):
+            return ["compatible design snapshot manifest must use schema 1 with a files object"]
+        expected = files.get(path.name)
+        if expected is not None and (
+            not isinstance(expected, str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected)
+        ):
+            return [f"invalid compatible design semantic baseline: {path.name}"]
+    elif manifest_path.exists():
         return [
-            "compatible version 4 design must match a registered semantic baseline: " + error
+            "cannot read compatible design snapshot manifest: " + error
             for error in read_errors
-        ]
-    try:
-        manifest = json.loads(manifest_text)
-    except json.JSONDecodeError as exc:
-        return [f"invalid compatible design snapshot manifest: {exc}"]
-    if not isinstance(manifest, dict):
-        return ["compatible design snapshot manifest must use schema 1 with a files object"]
-    files = manifest.get("files")
-    if manifest.get("schema") != 1 or not isinstance(files, dict):
-        return ["compatible design snapshot manifest must use schema 1 with a files object"]
-    expected = files.get(path.name)
-    if not isinstance(expected, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
-        return [
-            f"compatible version 4 design must match a registered semantic baseline: {path.name}"
         ]
 
     try:
@@ -245,12 +248,13 @@ def validate_compatible_design_snapshot(path: Path, text_snapshot: str) -> list[
     head_fingerprint = "sha256:" + design_semantic_fingerprint(
         path, text_snapshot=head_text
     )
-    if head_fingerprint != expected:
+    if expected is not None and head_fingerprint != expected:
         return [f"compatible design Git HEAD semantics do not match manifest: {path.name}"]
+    baseline_fingerprint = expected or head_fingerprint
     current_fingerprint = "sha256:" + design_semantic_fingerprint(
         path, text_snapshot=text_snapshot
     )
-    if current_fingerprint != expected:
+    if current_fingerprint != baseline_fingerprint:
         return [
             f"compatible version 4 design semantics changed; upgrade to version {DESIGN_VERSION}: "
             f"{path.name}"
