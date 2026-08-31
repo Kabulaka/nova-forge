@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import shutil
 import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -13,6 +16,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = ROOT / "scripts/validate_requirements.py"
 EXAMPLE = ROOT / "references/examples/equipment-rental/.nova"
+REVIEW_TOOL = ROOT.parent / "nova-review/scripts/nova_review.py"
+REVIEW_SPEC = importlib.util.spec_from_file_location("nova_requirements_review_fixture", REVIEW_TOOL)
+assert REVIEW_SPEC is not None and REVIEW_SPEC.loader is not None
+NOVA_REVIEW = importlib.util.module_from_spec(REVIEW_SPEC)
+sys.modules[REVIEW_SPEC.name] = NOVA_REVIEW
+REVIEW_SPEC.loader.exec_module(NOVA_REVIEW)
+REQ = "REQ-019a1234-5678-7abc-8def-0123456789ab"
 
 
 class RequirementsValidatorTests(unittest.TestCase):
@@ -29,24 +39,132 @@ class RequirementsValidatorTests(unittest.TestCase):
         shutil.copytree(EXAMPLE, target)
         return target
 
-    def write_review_pass(self, target: Path, work_item: str = "PEND-123") -> None:
-        index = target / f"audit/index/aa/{work_item}.json"
-        review = target / "audit/reviews/2026/08/NR-test.json"
-        index.parent.mkdir(parents=True)
-        review.parent.mkdir(parents=True)
-        index.write_text(json.dumps({
+    def audited_requirements(self, temporary: str) -> Path:
+        repo = Path(temporary) / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Nova Test"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "nova@example.invalid"], check=True)
+        target = repo / ".nova"
+        shutil.copytree(EXAMPLE, target)
+        blueprint = textwrap.dedent(
+            f"""
+            # Blueprint
+
+            ## 6. 待开发功能
+
+            | 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 | 需求引用 |
+            |------|--------|------|------|----------|----------|----------|----------|
+            | PEND-123 | P0 | 用户提出 | 设备借用 | [WP-01](design/2026-08-31_requirement.md#wp-01-requirement) | 无 | 完成 | {REQ}@v1 |
+            """
+        ).lstrip()
+        (target / "PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
+        design = textwrap.dedent(
+            f"""
+            # Requirement implementation
+
+            > 设计规范版本：3
+            > 设计状态：已确认
+            > 演进来源：无
+            > Requirement-Ref：{REQ}@v1
+            > 工作包：WP-01
+
+            ## 2. 工作包地图
+
+            | 工作包 | 状态 | 交付结果 | 前置依赖 | 设计章节 |
+            |--------|------|----------|----------|----------|
+            | WP-01 | 待Review | 实现需求 | 无 | [实现](#wp-01-requirement) |
+
+            ### 2.1 工作项关闭映射
+
+            | 工作项 | 工作包 |
+            |--------|--------|
+            | PEND-123 | WP-01 |
+
+            <a id="wp-01-requirement"></a>
+            ## WP-01 实现
+            """
+        ).lstrip()
+        design_path = target / "design/2026-08-31_requirement.md"
+        design_path.parent.mkdir(parents=True)
+        design_path.write_text(design, encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", ".nova"], check=True)
+        message = textwrap.dedent(
+            """
+            feat: implement requirement
+
+            Nova-Schema: 1
+            Work-Item: PEND-123
+            Change-Class: designed
+            Design-Ref: .nova/design/2026-08-31_requirement.md#wp-01-requirement
+            Review-Policy: required
+            Exemption-Rule: none
+            Validation: requirements fixture (pass)
+            """
+        ).strip() + "\n"
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+            input=message,
+            text=True,
+            check=True,
+        )
+        commit_hash = NOVA_REVIEW.run_git(repo, "rev-parse", "HEAD").strip()
+        diff = NOVA_REVIEW.run_git(repo, "show", "--format=", "--binary", "--no-ext-diff", commit_hash)
+        digest, scope = NOVA_REVIEW.compute_review_evidence({("main", commit_hash): diff})
+        manifest = {
             "schema": 1,
-            "work_item": work_item,
-            "feature_year": 2026,
-            "review_batch": "NR-test",
-            "review_path": ".nova/audit/reviews/2026/08/NR-test.json",
-        }), encoding="utf-8")
-        review.write_text(json.dumps({
-            "schema": 1,
-            "batch_id": "NR-test",
+            "batch_id": "NR-20260831-requirement",
+            "reviewed_at": "2026-08-31T12:00:00+08:00",
+            "reviewer": "review-agent",
             "conclusion": "PASS",
-            "items": [{"work_item": work_item}],
-        }), encoding="utf-8")
+            "review_round": 1,
+            "review_content_sha256": digest,
+            "review_scope": scope,
+            "items": [{
+                "work_item": "PEND-123",
+                "change_class": "designed",
+                "commits": [commit_hash],
+                "validation": "requirements fixture (pass)",
+                "design_ref": ".nova/design/2026-08-31_requirement.md#wp-01-requirement",
+                "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                "design_file": ".nova/design/2026-08-31_requirement.md",
+                "package_ids": ["WP-01"],
+            }],
+        }
+        manifest_path = repo / "review.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        recorded = subprocess.run(
+            [sys.executable, str(REVIEW_TOOL), "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+        subprocess.run(
+            ["git", "-C", str(repo), "add", ".nova/PROJECT_BLUEPRINT.md", ".nova/PRODUCT_REQUIREMENTS.md", ".nova/design", ".nova/audit"],
+            check=True,
+        )
+        manifest_digest = NOVA_REVIEW.hashlib.sha256(NOVA_REVIEW.canonical_manifest(manifest)).hexdigest()
+        audit_message = textwrap.dedent(
+            f"""
+            audit: record requirement Review
+
+            Nova-Audit-Schema: 1
+            Review-Batch: NR-20260831-requirement
+            Manifest-SHA256: {manifest_digest}
+            Validation: nova-review audit validation (pass)
+            """
+        ).strip() + "\n"
+        staged = NOVA_REVIEW.run_git(repo, "diff", "--cached", "--binary", "--no-ext-diff")
+        _, errors = NOVA_REVIEW.validate_audit_message(repo, audit_message, staged)
+        self.assertEqual(errors, [])
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+            input=audit_message,
+            text=True,
+            check=True,
+        )
+        return target
 
     def test_complete_example_passes(self) -> None:
         result = self.run_validator("--index", str(EXAMPLE / "PRODUCT_REQUIREMENTS.md"))
@@ -79,9 +197,28 @@ class RequirementsValidatorTests(unittest.TestCase):
             failed = self.run_validator("--index", str(product))
             self.assertNotEqual(failed.returncode, 0)
             self.assertIn("not a trusted Review PASS", failed.stdout)
-            self.write_review_pass(target)
-            passed = self.run_validator("--index", str(product))
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.audited_requirements(temporary)
+            passed = self.run_validator("--index", str(target / "PRODUCT_REQUIREMENTS.md"))
             self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+
+    def test_unrelated_or_forged_pass_does_not_implement_requirement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_example(temporary)
+            product = target / "PRODUCT_REQUIREMENTS.md"
+            text = product.read_text(encoding="utf-8").replace(
+                "| v1 | 待实现 | 借用管理 |", "| v1 | 已实现 | 借用管理 |"
+            ).replace("| 无 | 无 |", "| v1 | PEND-123 |")
+            product.write_text(text, encoding="utf-8")
+            fake_index = target / "audit/index/aa/PEND-123.json"
+            fake_review = target / "audit/reviews/2026/08/NR-fake.yaml"
+            fake_index.parent.mkdir(parents=True)
+            fake_review.parent.mkdir(parents=True)
+            fake_index.write_text(json.dumps({"schema": 1, "work_item": "PEND-123"}), encoding="utf-8")
+            fake_review.write_text(json.dumps({"schema": 1, "conclusion": "PASS"}), encoding="utf-8")
+            result = self.run_validator("--index", str(product))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not a trusted Review PASS", result.stdout)
 
     def test_unknown_module_and_empty_cell_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

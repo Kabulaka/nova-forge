@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
+import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
+from types import ModuleType
 
 
 SECTIONS = ("并行开发门禁", "契约索引", "硬依赖")
@@ -26,6 +30,8 @@ GATE_TYPES = {
 }
 PEND_RE = re.compile(r"^PEND-(?:[0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$")
 PLACEHOLDER_RE = re.compile(r"<(?!/?a\b)[^>\n]+>|\b(?:TODO|TBD)\b|\{\{[^}\n]+\}\}", re.IGNORECASE)
+OPENAPI_VERSION_RE = re.compile(r"^3\.(?:0|1)\.\d+$")
+ASYNCAPI_VERSION_RE = re.compile(r"^(?:2|3)\.\d+\.\d+$")
 
 
 def parse_args() -> argparse.Namespace:
@@ -120,17 +126,49 @@ def validate_foundation_contract(path: Path) -> list[str]:
     return errors
 
 
-def structured_contract_root(path: Path, key: str) -> bool:
+def structured_contract_root(path: Path, key: str) -> str | None:
     text, errors = read(path)
     if text is None or errors:
-        return False
+        return None
     if path.suffix == ".json":
         try:
             value = json.loads(text)
         except json.JSONDecodeError:
-            return False
-        return isinstance(value, dict) and isinstance(value.get(key), str) and bool(value[key].strip())
-    return re.search(rf"(?m)^{re.escape(key)}\s*:\s*['\"]?[^\s'\"]+", text) is not None
+            return None
+        root = value.get(key) if isinstance(value, dict) else None
+        return root.strip() if isinstance(root, str) and root.strip() else None
+    match = re.search(rf"(?m)^{re.escape(key)}\s*:\s*['\"]?([^\s'\"]+)", text)
+    return match.group(1) if match else None
+
+
+def structured_contract_version(path: Path) -> str | None:
+    text, errors = read(path)
+    if text is None or errors:
+        return None
+    if path.suffix == ".json":
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        info = value.get("info") if isinstance(value, dict) else None
+        version = info.get("version") if isinstance(info, dict) else None
+        return str(version).strip() if isinstance(version, (str, int, float)) else None
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*)info\s*:\s*$", line)
+        if not match:
+            continue
+        indent = len(match.group(1))
+        for nested in lines[index + 1 :]:
+            if not nested.strip() or nested.lstrip().startswith("#"):
+                continue
+            nested_indent = len(nested) - len(nested.lstrip())
+            if nested_indent <= indent:
+                break
+            version_match = re.match(r"^\s*version\s*:\s*['\"]?([^\s'\"]+)", nested)
+            if version_match:
+                return version_match.group(1)
+    return None
 
 
 def validate_mock(path: Path, root: Path, indexed: set[Path]) -> list[str]:
@@ -151,37 +189,100 @@ def validate_mock(path: Path, root: Path, indexed: set[Path]) -> list[str]:
         return ["Mock contract reference escapes architecture directory"]
     if target not in indexed:
         return ["Mock contract reference must target an indexed contract"]
+    actual_version = structured_contract_version(target)
+    if actual_version is None:
+        return ["Mock target contract must declare info.version"]
+    if version != actual_version:
+        return [f"Mock contract version mismatch: expected {actual_version}, found {version}"]
     return []
 
 
-def trusted_review_pass(nova_root: Path, work_item: str) -> bool:
-    index_files = list((nova_root / "audit/index").glob(f"*/{work_item}.json"))
-    if len(index_files) != 1:
+@lru_cache(maxsize=1)
+def nova_review_module() -> ModuleType | None:
+    tool = Path(__file__).resolve().parents[2] / "nova-review/scripts/nova_review.py"
+    if not tool.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("nova_review_architecture_evidence", tool)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+    except (ImportError, OSError):
+        return None
+
+
+def git_repo_for_nova(nova_root: Path) -> Path | None:
+    result = subprocess.run(
+        ["git", "-C", str(nova_root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        return None
+    repo = Path(result.stdout.strip()).resolve()
+    return repo if (repo / ".nova").resolve() == nova_root.resolve() else None
+
+
+def trusted_review_pass(nova_root: Path, work_item: str, required_paths: set[Path]) -> bool:
+    module = nova_review_module()
+    repo = git_repo_for_nova(nova_root)
+    if module is None or repo is None:
         return False
     try:
-        index = json.loads(index_files[0].read_text(encoding="utf-8"))
-        if index.get("schema") != 1 or index.get("work_item") != work_item:
-            return False
-        review_path = index.get("review_path")
-        if not isinstance(review_path, str):
-            return False
-        if review_path.startswith(".nova/"):
-            review = nova_root / review_path.removeprefix(".nova/")
-        elif review_path.startswith("docs/audit/"):
-            review = nova_root / review_path.removeprefix("docs/audit/")
-        else:
-            return False
-        review = review.resolve()
-        review.relative_to((nova_root / "audit/reviews").resolve())
-        record = json.loads(review.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+        completed = module.load_completed_item(repo, work_item)
+    except (module.NovaError, OSError, UnicodeError, json.JSONDecodeError):
         return False
-    return (
-        record.get("schema") == 1
-        and record.get("batch_id") == index.get("review_batch")
-        and record.get("conclusion") in {"PASS", "PASS WITH NOTES"}
-        and any(item.get("work_item") == work_item for item in record.get("items", []) if isinstance(item, dict))
-    )
+    if completed is None:
+        return False
+    feature, _ = completed
+    if feature.get("change_class") != "designed":
+        return False
+    try:
+        reviewed_at = module.parse_reviewed_at(feature["completed_at"], "completed_at")
+        review_path = module.review_path_for_values(
+            repo, reviewed_at, feature["review_batch"]
+        )
+        review_relative = review_path.relative_to(repo).as_posix()
+        review_bytes = module.git_blob(repo, "HEAD", review_relative)
+        if review_bytes is None:
+            return False
+        review = module.validate_review_record(
+            json.loads(review_bytes.decode("utf-8")), review_path
+        )
+    except (module.NovaError, OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+        return False
+    reviewed_commits = {
+        item["commit"]
+        for item in feature.get("commits", [])
+        if isinstance(item, dict) and item.get("repository") == "main"
+    }
+    scope = set(review.get("review_scope", []))
+    for required in required_paths:
+        try:
+            relative = required.resolve().relative_to(repo).as_posix()
+        except ValueError:
+            return False
+        if f"main:{relative}" not in scope:
+            return False
+        dirty = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
+            check=False,
+        )
+        if dirty.returncode != 0:
+            return False
+        latest = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%H", "--", relative],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if latest.returncode or latest.stdout.strip() not in reviewed_commits:
+            return False
+    return True
 
 
 def validate(path: Path, ready: bool) -> list[str]:
@@ -235,18 +336,11 @@ def validate(path: Path, ready: bool) -> list[str]:
             derived = "待确认" if "待确认" in states else "待Review" if "待Review" in states else "已通过"
             if state != derived:
                 errors.append(f"gate state conflicts with indexed contracts: {name}")
-        trusted_evidence = False
         if state in {"待Review", "已通过"}:
             if PEND_RE.fullmatch(evidence) is None:
                 errors.append(f"reviewable gate requires PEND Review evidence: {name}")
-            else:
-                trusted_evidence = trusted_review_pass(nova_root, evidence)
-            if state == "已通过" and not trusted_evidence:
-                errors.append(f"gate Review evidence is not a trusted PASS: {name}")
         elif evidence != "无":
             errors.append(f"unconfirmed gate must use 无 Review evidence: {name}")
-        if ready and needed == "是" and not trusted_evidence:
-            errors.append(f"parallel development gate is not ready: {name}")
 
     root = path.parent.resolve()
     referenced: set[Path] = set()
@@ -274,22 +368,40 @@ def validate(path: Path, ready: bool) -> list[str]:
             errors.extend(f"{link}: {error}" for error in validate_foundation_contract(target))
         elif contract_type == "数据":
             errors.extend(f"{link}: {error}" for error in validate_data_contract(target))
-        elif contract_type == "API" and (target.suffix not in {".yaml", ".yml", ".json"} or not structured_contract_root(target, "openapi")):
-            errors.append(f"API contract must contain a valid OpenAPI root: {link}")
-        elif contract_type == "事件" and (target.suffix not in {".yaml", ".yml", ".json"} or not structured_contract_root(target, "asyncapi")):
-            errors.append(f"event contract must contain a valid AsyncAPI root: {link}")
+        elif contract_type == "API":
+            root_version = structured_contract_root(target, "openapi")
+            if target.suffix not in {".yaml", ".yml", ".json"} or root_version is None or OPENAPI_VERSION_RE.fullmatch(root_version) is None:
+                errors.append(f"API contract must contain a supported OpenAPI 3.0.x or 3.1.x root: {link}")
+        elif contract_type == "事件":
+            root_version = structured_contract_root(target, "asyncapi")
+            if target.suffix not in {".yaml", ".yml", ".json"} or root_version is None or ASYNCAPI_VERSION_RE.fullmatch(root_version) is None:
+                errors.append(f"event contract must contain a supported AsyncAPI 2.x or 3.x root: {link}")
         elif contract_type == "Mock":
             if target.suffix != ".json":
                 errors.append(f"Mock contract must use JSON: {link}")
             else:
                 errors.extend(f"{link}: {error}" for error in validate_mock(target, root, referenced))
-    for directory in ("api", "data", "events", "mocks"):
+    for directory in ("foundation", "api", "data", "events", "mocks"):
         candidate = path.parent / directory
         if candidate.is_dir() and not any(file.is_file() for file in candidate.rglob("*")):
             errors.append(f"empty architecture directory is forbidden: {directory}")
         for file in candidate.rglob("*") if candidate.is_dir() else ():
             if file.is_file() and file.resolve() not in referenced:
                 errors.append(f"architecture file is not indexed: {file.relative_to(path.parent)}")
+    targets_by_type: dict[str, set[Path]] = {contract_type: set() for contract_type in CONTRACT_TYPES}
+    for contract_type, _, target in contract_targets:
+        targets_by_type[contract_type].add(target)
+    for name, needed, state, evidence in gates:
+        if state not in {"待Review", "已通过"} or PEND_RE.fullmatch(evidence) is None:
+            if ready and needed == "是":
+                errors.append(f"parallel development gate is not ready: {name}")
+            continue
+        required_paths = {path.resolve()} | targets_by_type.get(GATE_TYPES.get(name, ""), set())
+        trusted = trusted_review_pass(nova_root, evidence, required_paths)
+        if state == "已通过" and not trusted:
+            errors.append(f"gate Review evidence is not a trusted PASS covering current contracts: {name}")
+        if ready and needed == "是" and not trusted:
+            errors.append(f"parallel development gate is not ready: {name}")
     for requirement, dependency, reason, order in dependencies:
         if dependency == "无" and (reason != "无" or order != "并行"):
             errors.append(f"dependency-free requirement must be marked 无/并行: {requirement}")

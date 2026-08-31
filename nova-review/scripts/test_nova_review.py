@@ -417,6 +417,86 @@ class NovaReviewTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_unarchived_legacy_designed_commit_closes_after_layout_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            blueprint, design = self.designed_documents()
+            legacy_blueprint = blueprint.replace(
+                "design/2026-08-27_x.md#wp-01-x",
+                "docs/design/2026-08-27_x.md#wp-01-x",
+            )
+            (repo / "PROJECT_BLUEPRINT.md").write_text(legacy_blueprint, encoding="utf-8")
+            legacy_design = repo / "docs/design/2026-08-27_x.md"
+            legacy_design.parent.mkdir(parents=True)
+            legacy_design.write_text(design, encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "add", "PROJECT_BLUEPRINT.md", "docs/design/2026-08-27_x.md"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+                input=message(
+                    "PEND-001", "designed", "docs/design/2026-08-27_x.md#wp-01-x"
+                ),
+                text=True,
+                check=True,
+            )
+            feature_commit = NOVA_TOOL.run_git(repo, "rev-parse", "HEAD").strip()
+            (repo / ".nova/design").mkdir(parents=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "mv", "PROJECT_BLUEPRINT.md", ".nova/PROJECT_BLUEPRINT.md"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "mv", "docs/design/2026-08-27_x.md", ".nova/design/2026-08-27_x.md"],
+                check=True,
+            )
+            current_blueprint = (repo / ".nova/PROJECT_BLUEPRINT.md").read_text(encoding="utf-8")
+            (repo / ".nova/PROJECT_BLUEPRINT.md").write_text(
+                current_blueprint.replace(
+                    "docs/design/2026-08-27_x.md#wp-01-x",
+                    "design/2026-08-27_x.md#wp-01-x",
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "migrate docs to .nova"], check=True)
+            manifest = {
+                "schema": 1,
+                "batch_id": "NR-20260827-legacy-pending",
+                "reviewed_at": "2026-08-27T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [{
+                    "work_item": "PEND-001",
+                    "change_class": "designed",
+                    "commits": [feature_commit],
+                    "validation": "legacy migration fixture (pass)",
+                    "design_ref": "docs/design/2026-08-27_x.md#wp-01-x",
+                    "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                    "design_file": ".nova/design/2026-08-27_x.md",
+                    "package_ids": ["WP-01", "WP-02"],
+                }],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            checked = self.run_tool(
+                "check-manifest", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            self.assertNotIn(
+                "PEND-001", (repo / ".nova/PROJECT_BLUEPRINT.md").read_text(encoding="utf-8")
+            )
+            self.assertTrue(
+                (repo / ".nova/audit/reviews/2026/08/NR-20260827-legacy-pending.yaml").is_file()
+            )
+
     def test_review_selection_preserves_uuid7_work_item(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
@@ -1109,6 +1189,71 @@ class NovaReviewTests(unittest.TestCase):
             )
             queried = self.run_tool("query", "--repo", str(repo), "--work-item", "PEND-001")
             self.assertEqual(queried.returncode, 0, queried.stdout + queried.stderr)
+
+    def test_newer_requirement_reference_rejects_without_any_write(self) -> None:
+        requirement = "REQ-019a1234-5678-7abc-8def-0123456789ab"
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            blueprint, design = self.designed_documents(requirement_ref=f"{requirement}@v2")
+            (repo / ".nova").mkdir()
+            blueprint_path = repo / ".nova/PROJECT_BLUEPRINT.md"
+            blueprint_path.write_text(blueprint, encoding="utf-8")
+            design_path = repo / ".nova/design/2026-08-27_x.md"
+            design_path.parent.mkdir(parents=True)
+            design_path.write_text(design, encoding="utf-8")
+            product_path = repo / ".nova/PRODUCT_REQUIREMENTS.md"
+            product_path.write_text(
+                "| Requirement Key | 版本 | 状态 | 业务模块 | 需求块 | 已实现版本 | 实现依据 |\n"
+                "|-----------------|------|------|----------|--------|------------|----------|\n"
+                f"| {requirement} | v1 | 待实现 | 订单 | [创建](requirements/{requirement}_创建.md) | 无 | 无 |\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "-C", str(repo), "add", ".nova"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+                input=message(
+                    "PEND-001", "designed", ".nova/design/2026-08-27_x.md#wp-01-x"
+                ),
+                text=True,
+                check=True,
+            )
+            commit_hash = NOVA_TOOL.run_git(repo, "rev-parse", "HEAD").strip()
+            manifest = {
+                "schema": 1,
+                "batch_id": "NR-20260827-version-ahead",
+                "reviewed_at": "2026-08-27T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [{
+                    "work_item": "PEND-001",
+                    "change_class": "designed",
+                    "commits": [commit_hash],
+                    "validation": "requirement version fixture (pass)",
+                    "design_ref": ".nova/design/2026-08-27_x.md#wp-01-x",
+                    "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                    "design_file": ".nova/design/2026-08-27_x.md",
+                    "package_ids": ["WP-01", "WP-02"],
+                }],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            before = {
+                path: path.read_bytes()
+                for path in (product_path, blueprint_path, design_path)
+            }
+            for command in ("check-manifest", "record-pass"):
+                result = self.run_tool(
+                    command, "--repo", str(repo), "--manifest", str(manifest_path)
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("newer than current index", result.stderr)
+                self.assertEqual(
+                    {path: path.read_bytes() for path in before},
+                    before,
+                )
+                self.assertFalse((repo / ".nova/audit").exists())
 
     def test_design_without_closure_map_rejects_multiple_ready_packages(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

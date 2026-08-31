@@ -5,14 +5,17 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import os
 import posixpath
 import re
 import stat
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from types import ModuleType
 
 
 ROOT_MAPPINGS = (
@@ -57,6 +60,7 @@ class Move:
 class Rewrite:
     source_path: str
     target_path: str
+    mode: int
     before: bytes
     after: bytes
     replacements: int
@@ -220,7 +224,35 @@ def rewrite_text(relative: str, target_relative: str, text: str, moves: tuple[Mo
             text, count = pattern.subn(new, text)
             replacements += count
     text = text.replace(".nova/.nova/", ".nova/")
+    if replacements and relative.startswith(DESIGN_PREFIXES) and re.search(
+        r"^>\s*设计规范版本[：:]\s*5\s*$", text, re.MULTILINE
+    ):
+        confirmation = re.search(
+            r"^>\s*收敛确认[：:]\s*用户明确确认@sha256:[0-9a-f]{64}\s*$",
+            text,
+            re.MULTILINE,
+        )
+        if confirmation is not None:
+            validator = load_blueprint_validator()
+            fingerprint = validator.design_semantic_fingerprint(
+                Path(target_relative), text_snapshot=text
+            )
+            replacement = f"> 收敛确认：用户明确确认@sha256:{fingerprint}"
+            if confirmation.group(0) != replacement:
+                text = text[: confirmation.start()] + replacement + text[confirmation.end() :]
+                replacements += 1
     return text, replacements
+
+
+def load_blueprint_validator() -> ModuleType:
+    script = Path(__file__).with_name("validate_blueprint.py")
+    spec = importlib.util.spec_from_file_location("nova_migration_blueprint_validator", script)
+    if spec is None or spec.loader is None:
+        raise MigrationError("cannot load blueprint validator for convergence refresh")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def plan(repo: Path) -> tuple[tuple[Move, ...], tuple[Rewrite, ...]]:
@@ -284,7 +316,16 @@ def plan(repo: Path) -> tuple[tuple[Move, ...], tuple[Rewrite, ...]]:
         target_relative = target_for(relative, move_tuple)
         after_text, count = rewrite_text(relative, target_relative, text, move_tuple)
         if count:
-            rewrites.append(Rewrite(relative, target_relative, before, after_text.encode("utf-8"), count))
+            rewrites.append(
+                Rewrite(
+                    relative,
+                    target_relative,
+                    stat.S_IMODE(info.st_mode),
+                    before,
+                    after_text.encode("utf-8"),
+                    count,
+                )
+            )
     return move_tuple, tuple(rewrites)
 
 
@@ -295,7 +336,9 @@ def snapshot_token(moves: tuple[Move, ...], rewrites: tuple[Rewrite, ...]) -> st
             f"M\0{move.source}\0{move.target}\0{move.kind}\0{move.mode:o}\0{move.content_sha256}\0".encode()
         )
     for rewrite in rewrites:
-        hasher.update(f"R\0{rewrite.source_path}\0{rewrite.target_path}\0".encode())
+        hasher.update(
+            f"R\0{rewrite.source_path}\0{rewrite.target_path}\0{rewrite.mode:o}\0".encode()
+        )
         hasher.update(hashlib.sha256(rewrite.before).digest())
         hasher.update(hashlib.sha256(rewrite.after).digest())
     return hasher.hexdigest()
@@ -330,6 +373,39 @@ def created_parent_directories(repo: Path, target: Path) -> list[Path]:
     return missing
 
 
+def _write_all(descriptor: int, content: bytes) -> None:
+    offset = 0
+    while offset < len(content):
+        written = os.write(descriptor, content[offset:])
+        if written <= 0:
+            raise OSError("short write while creating migration replacement")
+        offset += written
+
+
+def atomic_replace_bytes(path: Path, content: bytes, mode: int) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".nova-migrate-", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, mode)
+        _write_all(descriptor, content)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, path)
+        directory_descriptor = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def validate_documents(repo: Path) -> None:
     skills_root = Path(__file__).resolve().parents[2]
     checks: list[tuple[Path, list[str], str]] = []
@@ -361,6 +437,21 @@ def apply(repo: Path, moves: tuple[Move, ...], rewrites: tuple[Rewrite, ...]) ->
         for move in moves:
             if entity_snapshot(repo / move.source) != (move.kind, move.mode, move.content_sha256):
                 raise MigrationError(f"source changed after approved dry-run: {move.source}")
+        for rewrite in rewrites:
+            source = repo / rewrite.source_path
+            try:
+                source_info = source.lstat()
+                source_bytes = source.read_bytes()
+            except OSError as source_exc:
+                raise MigrationError(
+                    f"source changed after approved dry-run: {rewrite.source_path}: {source_exc}"
+                ) from source_exc
+            if (
+                not stat.S_ISREG(source_info.st_mode)
+                or stat.S_IMODE(source_info.st_mode) != rewrite.mode
+                or source_bytes != rewrite.before
+            ):
+                raise MigrationError(f"source changed after approved dry-run: {rewrite.source_path}")
         for move in moves:
             created_dirs.extend(created_parent_directories(repo, repo / move.target))
             run_git(repo, "mv", "--", move.source, move.target)
@@ -368,10 +459,11 @@ def apply(repo: Path, moves: tuple[Move, ...], rewrites: tuple[Rewrite, ...]) ->
         for rewrite in rewrites:
             target = repo / rewrite.target_path
             current = target.read_bytes()
-            if current != rewrite.before:
+            current_mode = stat.S_IMODE(target.lstat().st_mode)
+            if current != rewrite.before or current_mode != rewrite.mode:
                 raise MigrationError(f"source changed after approved dry-run: {rewrite.source_path}")
-            target.write_bytes(rewrite.after)
             written.append(rewrite)
+            atomic_replace_bytes(target, rewrite.after, rewrite.mode)
         for move in moves:
             if lexists(repo / move.source) or not lexists(repo / move.target):
                 raise MigrationError(f"post-migration entity check failed: {move.source}")
@@ -380,7 +472,7 @@ def apply(repo: Path, moves: tuple[Move, ...], rewrites: tuple[Rewrite, ...]) ->
         rollback_errors: list[str] = []
         for rewrite in reversed(written):
             try:
-                (repo / rewrite.target_path).write_bytes(rewrite.before)
+                atomic_replace_bytes(repo / rewrite.target_path, rewrite.before, rewrite.mode)
             except OSError as rollback_exc:
                 rollback_errors.append(f"restore {rewrite.target_path}: {rollback_exc}")
         for move in reversed(applied_moves):

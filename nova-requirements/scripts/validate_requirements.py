@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
+import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
+from types import ModuleType
 
 
 REQ_RE = re.compile(r"^REQ-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
@@ -159,33 +163,74 @@ def validate_block(path: Path) -> tuple[list[str], dict[str, str]]:
     return errors, fields
 
 
-def trusted_review_pass(nova_root: Path, work_item: str) -> bool:
-    index_files = list((nova_root / "audit/index").glob(f"*/{work_item}.json"))
-    if len(index_files) != 1:
+@lru_cache(maxsize=1)
+def nova_review_module() -> ModuleType | None:
+    tool = Path(__file__).resolve().parents[2] / "nova-review/scripts/nova_review.py"
+    if not tool.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("nova_review_requirements_evidence", tool)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+    except (ImportError, OSError):
+        return None
+
+
+def git_repo_for_nova(nova_root: Path) -> Path | None:
+    result = subprocess.run(
+        ["git", "-C", str(nova_root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        return None
+    repo = Path(result.stdout.strip()).resolve()
+    return repo if (repo / ".nova").resolve() == nova_root.resolve() else None
+
+
+def trusted_review_pass(
+    nova_root: Path, work_item: str, requirement_key: str, implemented_version: str
+) -> bool:
+    module = nova_review_module()
+    repo = git_repo_for_nova(nova_root)
+    if module is None or repo is None:
         return False
     try:
-        index = json.loads(index_files[0].read_text(encoding="utf-8"))
-        if index.get("schema") != 1 or index.get("work_item") != work_item:
-            return False
-        review_path = index.get("review_path")
-        if not isinstance(review_path, str):
-            return False
-        if review_path.startswith(".nova/"):
-            review = nova_root / review_path.removeprefix(".nova/")
-        elif review_path.startswith("docs/audit/"):
-            review = nova_root / review_path.removeprefix("docs/audit/")
-        else:
-            return False
-        review = review.resolve()
-        review.relative_to((nova_root / "audit/reviews").resolve())
-        record = json.loads(review.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+        completed = module.load_completed_item(repo, work_item)
+    except (module.NovaError, OSError, UnicodeError, json.JSONDecodeError):
         return False
-    if record.get("schema") != 1 or record.get("batch_id") != index.get("review_batch"):
+    if completed is None:
         return False
-    if record.get("conclusion") not in {"PASS", "PASS WITH NOTES"}:
+    feature, _ = completed
+    design_ref = feature.get("design_ref")
+    if feature.get("change_class") != "designed" or not isinstance(design_ref, str):
         return False
-    return any(item.get("work_item") == work_item for item in record.get("items", []) if isinstance(item, dict))
+    design_path = design_ref.split("#", 1)[0]
+    design_bytes = None
+    for commit_ref in reversed(feature.get("commits", [])):
+        if not isinstance(commit_ref, dict) or commit_ref.get("repository") != "main":
+            continue
+        commit_hash = commit_ref.get("commit")
+        if not isinstance(commit_hash, str):
+            continue
+        design_bytes = module.run_git_bytes(
+            repo, "show", f"{commit_hash}:{design_path}", allow_missing=True
+        )
+        if design_bytes is not None:
+            break
+    if design_bytes is None:
+        return False
+    try:
+        design = design_bytes.decode("utf-8")
+    except UnicodeError:
+        return False
+    refs = re.findall(r"^>\s*Requirement-Ref[：:]\s*(.+?)\s*$", design, re.MULTILINE)
+    return refs == [f"{requirement_key}@{implemented_version}"]
 
 
 def validate_index(path: Path) -> list[str]:
@@ -251,14 +296,14 @@ def validate_index(path: Path) -> list[str]:
         elif status == "已实现":
             if implemented != version or PEND_RE.fullmatch(evidence) is None:
                 errors.append(f"{key}: 已实现 requires current implemented version and PEND evidence")
-            elif not trusted_review_pass(path.parent, evidence):
+            elif not trusted_review_pass(path.parent, evidence, key, implemented):
                 errors.append(f"{key}: implementation evidence is not a trusted Review PASS: {evidence}")
         elif status == "已更新":
             current = int(version_match.group(1)) if version_match else 0
             implemented_match = VERSION_RE.fullmatch(implemented)
             if implemented_match is None or int(implemented_match.group(1)) >= current or PEND_RE.fullmatch(evidence) is None:
                 errors.append(f"{key}: 已更新 requires an older implemented version and PEND evidence")
-            elif not trusted_review_pass(path.parent, evidence):
+            elif not trusted_review_pass(path.parent, evidence, key, implemented):
                 errors.append(f"{key}: implementation evidence is not a trusted Review PASS: {evidence}")
     return errors
 

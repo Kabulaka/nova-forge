@@ -7,20 +7,20 @@
 
 | 门禁 | 是否需要 | 状态 | Review 依据 |
 |------|----------|------|-------------|
-| 共享工程骨架 | 是 | 已通过 | PEND-100 |
-| 数据所有权与契约 | 是 | 已通过 | PEND-100 |
-| 公共 API 契约 | 是 | 已通过 | PEND-100 |
+| 共享工程骨架 | 是 | 待Review | PEND-100 |
+| 数据所有权与契约 | 是 | 待Review | PEND-100 |
+| 公共 API 契约 | 是 | 待Review | PEND-100 |
 | 事件契约 | 否 | 不适用 | 无 |
-| Mock 与测试夹具 | 是 | 已通过 | PEND-100 |
+| Mock 与测试夹具 | 是 | 待Review | PEND-100 |
 
 ## 2. 契约索引
 
 | 契约类型 | 业务范围 | 路径 | 状态 | 所有者 |
 |----------|----------|------|------|--------|
-| 工程骨架 | 全项目 | [工程骨架契约](foundation/project-skeleton.md) | 已通过 | 架构负责人 |
-| 数据 | 订单 | [订单数据契约](data/order-data.md) | 已通过 | 订单模块 |
-| API | 订单提交与履约查询 | [OpenAPI](api/openapi.yaml) | 已通过 | 订单模块 |
-| Mock | 订单 API | [订单响应夹具](mocks/order-created.json) | 已通过 | 订单模块 |
+| 工程骨架 | 全项目 | [工程骨架契约](foundation/project-skeleton.md) | 待Review | 架构负责人 |
+| 数据 | 订单 | [订单数据契约](data/order-data.md) | 待Review | 订单模块 |
+| API | 订单提交与履约查询 | [OpenAPI](api/openapi.yaml) | 待Review | 订单模块 |
+| Mock | 订单 API | [订单响应夹具](mocks/order-created.json) | 待Review | 订单模块 |
 
 ## 3. 硬依赖
 

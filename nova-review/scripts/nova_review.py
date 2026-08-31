@@ -522,6 +522,23 @@ def legacy_design_ref_allowed(repo: Path, commit_hash: str, design_ref: str) -> 
     )
 
 
+def validate_committed_message(
+    repo: Path, commit_hash: str, message: str, diff: str
+) -> tuple[dict[str, str], list[str]]:
+    values, errors = parse_message(message)
+    if not errors:
+        errors.extend(
+            validate_metadata(
+                values,
+                diff,
+                allow_legacy_design_ref=legacy_design_ref_allowed(
+                    repo, commit_hash, values.get("Design-Ref", "")
+                ),
+            )
+        )
+    return values, errors
+
+
 def scan_commits(
     repo: Path, work_item: str | None = None, revision: str | None = None
 ) -> list[dict[str, Any]]:
@@ -1663,7 +1680,9 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                 commit_repo, "show", "--format=", "--binary", "--no-ext-diff", commit_hash
             )
             reviewed_diffs[(commit_ref["repository"], commit_hash)] = diff
-            metadata, errors = validate_message(message, diff)
+            metadata, errors = validate_committed_message(
+                commit_repo, commit_hash, message, diff
+            )
             if errors:
                 raise NovaError(f"invalid commit {commit_hash}: " + "; ".join(errors))
             expected = (work_item, change_class, design_ref)
@@ -1732,7 +1751,10 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
             }
             if set(item) != expected_fields:
                 raise NovaError(f"designed item has missing or unknown fields: {work_item}")
-            if not isinstance(design_ref, str) or not DESIGN_REF_RE.fullmatch(design_ref):
+            if not isinstance(design_ref, str) or (
+                DESIGN_REF_RE.fullmatch(design_ref) is None
+                and LEGACY_DESIGN_REF_RE.fullmatch(design_ref) is None
+            ):
                 raise NovaError(f"invalid design_ref for {work_item}")
             for field in ("blueprint", "design_file"):
                 if not isinstance(item.get(field), str) or not item[field]:
