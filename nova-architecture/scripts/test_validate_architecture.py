@@ -245,6 +245,96 @@ class ArchitectureValidatorTests(unittest.TestCase):
             result = self.run_validator("--ready", str(path))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_same_contract_type_can_be_owned_by_independent_reviewed_items(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.audited_example(temporary)
+            repo = path.parents[2]
+            blueprint_path = repo / ".nova/PROJECT_BLUEPRINT.md"
+            blueprint = blueprint_path.read_text(encoding="utf-8").replace(
+                "|------|--------|------|------|----------|----------|----------|----------|",
+                "|------|--------|------|------|----------|----------|----------|----------|\n"
+                "| PEND-200 | P0 | 用户提出 | 客户 API | [WP-01](design/2026-08-31_customer-api.md#wp-01-customer-api) | 无 | 客户 API 契约通过 Review | 无 |",
+            )
+            blueprint_path.write_text(blueprint, encoding="utf-8")
+            design = textwrap.dedent(
+                """
+                # 客户 API 契约设计
+
+                > 设计规范版本：3
+                > 设计状态：已确认
+                > 演进来源：无
+                > 工作包：WP-01
+
+                ## 2. 工作包地图
+
+                | 工作包 | 状态 | 交付结果 | 前置依赖 | 设计章节 |
+                |--------|------|----------|----------|----------|
+                | WP-01 | 待Review | 新增客户 API 契约 | 无 | [客户 API](#wp-01-customer-api) |
+
+                ### 2.1 工作项关闭映射
+
+                | 工作项 | 工作包 |
+                |--------|--------|
+                | PEND-200 | WP-01 |
+
+                <a id="wp-01-customer-api"></a>
+                ## WP-01 客户 API
+                """
+            ).lstrip()
+            design_path = repo / ".nova/design/2026-08-31_customer-api.md"
+            design_path.write_text(design, encoding="utf-8")
+            index = path.read_text(encoding="utf-8").replace(
+                "| 公共 API 契约 | 是 | 待Review | PEND-100 |",
+                "| 公共 API 契约 | 是 | 待Review | PEND-200 |",
+            ).replace(
+                "| Mock | 订单 API |",
+                "| API | 客户查询 | [客户 OpenAPI](api/customer.yaml) | 待Review | 客户模块 |\n"
+                "| Mock | 订单 API |",
+            )
+            path.write_text(index, encoding="utf-8")
+            customer_api = path.parent / "api/customer.yaml"
+            customer_api.write_text(
+                "openapi: 3.1.0\ninfo:\n  title: Customer API\n  version: 1.0.0\npaths: {}\n",
+                encoding="utf-8",
+            )
+            self.record_designed_pass(
+                repo,
+                "PEND-200",
+                ".nova/design/2026-08-31_customer-api.md",
+                "wp-01-customer-api",
+                "WP-01",
+                "NR-20260831-customer-api",
+            )
+            result = self.run_validator("--ready", str(path))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_hard_dependency_change_requires_its_own_reviewed_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.audited_example(temporary)
+            repo = path.parents[2]
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "REQ-019a2234-5678-7abc-8def-0123456789ab",
+                    "REQ-019a2234-5678-7abc-8def-0123456789ac",
+                ),
+                encoding="utf-8",
+            )
+            uncommitted = self.run_validator("--ready", str(path))
+            self.assertNotEqual(uncommitted.returncode, 0)
+            self.assertIn("hard dependency row lacks trusted PASS evidence", uncommitted.stdout)
+
+            subprocess.run(
+                ["git", "-C", str(repo), "add", ".nova/architecture/ARCHITECTURE_CONTRACTS.md"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-m", "chore: edit dependency order"],
+                check=True,
+            )
+            unreviewed = self.run_validator("--ready", str(path))
+            self.assertNotEqual(unreviewed.returncode, 0)
+            self.assertIn("hard dependency row lacks trusted PASS evidence", unreviewed.stdout)
+
     def test_missing_review_evidence_is_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = self.audited_example(temporary)

@@ -57,7 +57,9 @@ def sections(text: str) -> tuple[str, ...]:
     return tuple(result)
 
 
-def table(text: str, section: str, headers: tuple[str, ...]) -> tuple[list[list[str]], list[str]]:
+def table_with_lines(
+    text: str, section: str, headers: tuple[str, ...]
+) -> tuple[list[tuple[list[str], int]], list[str]]:
     lines = text.splitlines()
     heading = next((i for i, line in enumerate(lines) if re.match(rf"^##\s+(?:[0-9]+[.、]?\s+)?{re.escape(section)}\s*$", line)), None)
     if heading is None:
@@ -72,7 +74,7 @@ def table(text: str, section: str, headers: tuple[str, ...]) -> tuple[list[list[
             continue
         if index + 1 >= len(lines) or not re.fullmatch(r"\|(?:\s*:?-+:?\s*\|)+", lines[index + 1].strip()):
             return [], [f"invalid table separator in {section}"]
-        rows = []
+        rows: list[tuple[list[str], int]] = []
         cursor = index + 2
         while cursor < len(lines) and lines[cursor].lstrip().startswith("|"):
             row = [cell.strip() for cell in lines[cursor].strip().strip("|").split("|")]
@@ -80,10 +82,15 @@ def table(text: str, section: str, headers: tuple[str, ...]) -> tuple[list[list[
                 return rows, [f"invalid column count in {section}"]
             if any(not cell for cell in row):
                 return rows, [f"empty table cell in {section}"]
-            rows.append(row)
+            rows.append((row, cursor + 1))
             cursor += 1
         return rows, [] if rows else [f"table must contain rows: {section}"]
     return [], [f"missing exact table header in {section}"]
+
+
+def table(text: str, section: str, headers: tuple[str, ...]) -> tuple[list[list[str]], list[str]]:
+    rows, errors = table_with_lines(text, section, headers)
+    return [row for row, _ in rows], errors
 
 
 def validate_data_contract(path: Path) -> list[str]:
@@ -227,105 +234,153 @@ def git_repo_for_nova(nova_root: Path) -> Path | None:
     return repo if (repo / ".nova").resolve() == nova_root.resolve() else None
 
 
-def reviewed_blob(module: ModuleType, repo: Path, feature: dict[str, object], relative: str) -> bytes | None:
-    commits = feature.get("commits", [])
-    if not isinstance(commits, list):
-        return None
-    for commit_ref in reversed(commits):
-        if not isinstance(commit_ref, dict) or commit_ref.get("repository") != "main":
-            continue
-        commit_hash = commit_ref.get("commit")
-        if not isinstance(commit_hash, str):
-            continue
-        blob = module.run_git_bytes(
-            repo, "show", f"{commit_hash}:{relative}", allow_missing=True
-        )
-        if blob is not None:
-            return blob
-    return None
-
-
-def trusted_review_pass(
-    nova_root: Path,
+def trusted_review_item(
+    module: ModuleType,
+    repo: Path,
     work_item: str,
-    index_path: Path,
-    current_index: str,
-    gate_name: str,
-    contract_type: str,
-    required_contracts: set[Path],
-) -> bool:
-    module = nova_review_module()
-    repo = git_repo_for_nova(nova_root)
-    if module is None or repo is None:
-        return False
+    cache: dict[str, tuple[dict[str, object], dict[str, object]] | None],
+    audit_cache: dict[str, dict[str, tuple[dict[str, object], dict[str, object]]]],
+) -> tuple[dict[str, object], dict[str, object]] | None:
+    if work_item in cache:
+        return cache[work_item]
     try:
-        completed = module.load_completed_item(repo, work_item)
+        completed = module.load_completed_item(repo, work_item, audit_cache=audit_cache)
     except (module.NovaError, OSError, UnicodeError, json.JSONDecodeError):
-        return False
+        completed = None
+    if completed is None or completed[0].get("change_class") != "designed":
+        cache[work_item] = None
+    else:
+        feature, _ = completed
+        try:
+            reviewed_at = module.parse_reviewed_at(feature["completed_at"], "completed_at")
+            review_path = module.review_path_for_values(
+                repo, reviewed_at, feature["review_batch"]
+            )
+            review_relative = review_path.relative_to(repo).as_posix()
+            review_bytes = module.git_blob(repo, "HEAD", review_relative)
+            if review_bytes is None:
+                raise ValueError("missing Review record")
+            review = module.validate_review_record(
+                json.loads(review_bytes.decode("utf-8")), review_path
+            )
+        except (
+            module.NovaError,
+            OSError,
+            UnicodeError,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            cache[work_item] = None
+        else:
+            cache[work_item] = (feature, review)
+    return cache[work_item]
+
+
+def trusted_commit_owner(
+    module: ModuleType,
+    repo: Path,
+    commit_hash: str,
+    relative: str,
+    cache: dict[str, tuple[dict[str, object], dict[str, object]] | None],
+    audit_cache: dict[str, dict[str, tuple[dict[str, object], dict[str, object]]]],
+) -> str | None:
+    try:
+        message = module.run_git(repo, "show", "-s", "--format=%B", commit_hash)
+        metadata, message_errors = module.parse_message(message)
+    except (module.NovaError, OSError, UnicodeError):
+        return None
+    work_item = metadata.get("Work-Item", "")
+    if message_errors or PEND_RE.fullmatch(work_item) is None:
+        return None
+    completed = trusted_review_item(module, repo, work_item, cache, audit_cache)
     if completed is None:
-        return False
-    feature, _ = completed
-    if feature.get("change_class") != "designed":
-        return False
-    try:
-        reviewed_at = module.parse_reviewed_at(feature["completed_at"], "completed_at")
-        review_path = module.review_path_for_values(
-            repo, reviewed_at, feature["review_batch"]
-        )
-        review_relative = review_path.relative_to(repo).as_posix()
-        review_bytes = module.git_blob(repo, "HEAD", review_relative)
-        if review_bytes is None:
-            return False
-        review = module.validate_review_record(
-            json.loads(review_bytes.decode("utf-8")), review_path
-        )
-    except (module.NovaError, OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
-        return False
-    scope = set(review.get("review_scope", []))
-    try:
-        index_relative = index_path.resolve().relative_to(repo).as_posix()
-    except ValueError:
-        return False
-    if f"main:{index_relative}" not in scope:
-        return False
-    reviewed_index_bytes = reviewed_blob(module, repo, feature, index_relative)
-    if reviewed_index_bytes is None:
-        return False
-    try:
-        reviewed_index = reviewed_index_bytes.decode("utf-8")
-    except UnicodeError:
-        return False
-    current_gates, current_gate_errors = table(current_index, "并行开发门禁", GATE_HEADERS)
-    reviewed_gates, reviewed_gate_errors = table(reviewed_index, "并行开发门禁", GATE_HEADERS)
-    current_contracts, current_contract_errors = table(current_index, "契约索引", INDEX_HEADERS)
-    reviewed_contracts, reviewed_contract_errors = table(reviewed_index, "契约索引", INDEX_HEADERS)
-    if current_gate_errors or reviewed_gate_errors or current_contract_errors or reviewed_contract_errors:
-        return False
-    current_gate_rows = [row for row in current_gates if row[0] == gate_name]
-    reviewed_gate_rows = [row for row in reviewed_gates if row[0] == gate_name]
-    if len(current_gate_rows) != 1 or current_gate_rows != reviewed_gate_rows:
-        return False
-    if (
-        [row for row in current_contracts if row[0] == contract_type]
-        != [row for row in reviewed_contracts if row[0] == contract_type]
+        return None
+    feature, review = completed
+    commits = feature.get("commits", [])
+    if not isinstance(commits, list) or not any(
+        isinstance(commit_ref, dict)
+        and commit_ref.get("repository") == "main"
+        and commit_ref.get("commit") == commit_hash
+        for commit_ref in commits
     ):
-        return False
-    for required in required_contracts:
-        try:
-            relative = required.resolve().relative_to(repo).as_posix()
-        except ValueError:
-            return False
-        if f"main:{relative}" not in scope:
-            return False
-        expected = reviewed_blob(module, repo, feature, relative)
-        if expected is None:
-            return False
-        try:
-            if required.read_bytes() != expected:
-                return False
-        except OSError:
-            return False
-    return True
+        return None
+    scope = review.get("review_scope", [])
+    if not isinstance(scope, list) or f"main:{relative}" not in scope:
+        return None
+    return work_item
+
+
+def blamed_commit(repo: Path, relative: str, line_number: int) -> str | None:
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "blame",
+            "--line-porcelain",
+            "-L",
+            f"{line_number},{line_number}",
+            "--",
+            relative,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        return None
+    first = result.stdout.partition("\n")[0]
+    match = re.match(r"\^?([0-9a-f]{40,64})\s", first)
+    if match is None or set(match.group(1)) == {"0"}:
+        return None
+    return match.group(1)
+
+
+def trusted_line_owner(
+    module: ModuleType,
+    repo: Path,
+    path: Path,
+    line_number: int,
+    cache: dict[str, tuple[dict[str, object], dict[str, object]] | None],
+    audit_cache: dict[str, dict[str, tuple[dict[str, object], dict[str, object]]]],
+) -> str | None:
+    try:
+        relative = path.resolve().relative_to(repo).as_posix()
+    except ValueError:
+        return None
+    commit_hash = blamed_commit(repo, relative, line_number)
+    if commit_hash is None:
+        return None
+    return trusted_commit_owner(module, repo, commit_hash, relative, cache, audit_cache)
+
+
+def trusted_file_owner(
+    module: ModuleType,
+    repo: Path,
+    path: Path,
+    cache: dict[str, tuple[dict[str, object], dict[str, object]] | None],
+    audit_cache: dict[str, dict[str, tuple[dict[str, object], dict[str, object]]]],
+) -> str | None:
+    try:
+        relative = path.resolve().relative_to(repo).as_posix()
+        current = path.read_bytes()
+    except (ValueError, OSError):
+        return None
+    head = module.git_blob(repo, "HEAD", relative)
+    if head is None or current != head:
+        return None
+    result = subprocess.run(
+        ["git", "-C", str(repo), "log", "-1", "--format=%H", "--", relative],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    commit_hash = result.stdout.strip() if result.returncode == 0 else ""
+    if not re.fullmatch(r"[0-9a-f]{40,64}", commit_hash):
+        return None
+    return trusted_commit_owner(module, repo, commit_hash, relative, cache, audit_cache)
 
 
 def validate(path: Path, ready: bool) -> list[str]:
@@ -346,19 +401,24 @@ def validate(path: Path, ready: bool) -> list[str]:
     elif not (path.parent / blueprint_refs[0]).resolve().is_file():
         errors.append("referenced .nova/PROJECT_BLUEPRINT.md does not exist")
 
-    gates, gate_errors = table(text, "并行开发门禁", GATE_HEADERS)
-    contracts, contract_errors = table(text, "契约索引", INDEX_HEADERS)
-    dependencies, dependency_errors = table(text, "硬依赖", DEPENDENCY_HEADERS)
+    gate_entries, gate_errors = table_with_lines(text, "并行开发门禁", GATE_HEADERS)
+    contract_entries, contract_errors = table_with_lines(text, "契约索引", INDEX_HEADERS)
+    dependency_entries, dependency_errors = table_with_lines(text, "硬依赖", DEPENDENCY_HEADERS)
     errors.extend(gate_errors + contract_errors + dependency_errors)
+    gates = [row for row, _ in gate_entries]
+    contracts = [row for row, _ in contract_entries]
+    dependencies = [row for row, _ in dependency_entries]
     gate_names = [row[0] for row in gates]
     if tuple(gate_names) != REQUIRED_GATES:
         errors.append("parallel gates must be exactly: " + " | ".join(REQUIRED_GATES))
-    contracts_by_type: dict[str, list[list[str]]] = {contract_type: [] for contract_type in CONTRACT_TYPES}
-    for row in contracts:
+    contracts_by_type: dict[str, list[tuple[list[str], int]]] = {
+        contract_type: [] for contract_type in CONTRACT_TYPES
+    }
+    for row, line_number in contract_entries:
         if row[0] not in CONTRACT_TYPES:
             errors.append(f"invalid architecture contract type: {row[0]}")
         else:
-            contracts_by_type[row[0]].append(row)
+            contracts_by_type[row[0]].append((row, line_number))
     nova_root = path.parent.parent.resolve()
     for name, needed, state, evidence in gates:
         if needed not in {"是", "否"}:
@@ -375,7 +435,7 @@ def validate(path: Path, ready: bool) -> list[str]:
         if needed == "否" and contract_rows:
             errors.append(f"unneeded gate must not have indexed contracts: {name}")
         if contract_rows:
-            states = [row[3] for row in contract_rows]
+            states = [row[3] for row, _ in contract_rows]
             derived = "待确认" if "待确认" in states else "待Review" if "待Review" in states else "已通过"
             if state != derived:
                 errors.append(f"gate state conflicts with indexed contracts: {name}")
@@ -387,8 +447,8 @@ def validate(path: Path, ready: bool) -> list[str]:
 
     root = path.parent.resolve()
     referenced: set[Path] = set()
-    contract_targets: list[tuple[str, str, Path]] = []
-    for contract_type, scope, link, state, owner in contracts:
+    contract_targets: list[tuple[str, str, Path, int]] = []
+    for (contract_type, scope, link, state, owner), line_number in contract_entries:
         if state not in STATUS - {"不适用"}:
             errors.append(f"invalid contract status for {scope}: {state}")
         match = re.fullmatch(r"\[[^]\n]+\]\(([^)\s]+)\)", link)
@@ -405,8 +465,8 @@ def validate(path: Path, ready: bool) -> list[str]:
             errors.append(f"architecture contract file not found: {link}")
             continue
         referenced.add(target)
-        contract_targets.append((contract_type, link, target))
-    for contract_type, link, target in contract_targets:
+        contract_targets.append((contract_type, link, target, line_number))
+    for contract_type, link, target, _ in contract_targets:
         if contract_type == "工程骨架":
             errors.extend(f"{link}: {error}" for error in validate_foundation_contract(target))
         elif contract_type == "数据":
@@ -431,33 +491,59 @@ def validate(path: Path, ready: bool) -> list[str]:
         for file in candidate.rglob("*") if candidate.is_dir() else ():
             if file.is_file() and file.resolve() not in referenced:
                 errors.append(f"architecture file is not indexed: {file.relative_to(path.parent)}")
-    targets_by_type: dict[str, set[Path]] = {contract_type: set() for contract_type in CONTRACT_TYPES}
-    for contract_type, _, target in contract_targets:
-        targets_by_type[contract_type].add(target)
-    for name, needed, state, evidence in gates:
+    module = nova_review_module()
+    repo = git_repo_for_nova(nova_root)
+    review_cache: dict[str, tuple[dict[str, object], dict[str, object]] | None] = {}
+    audit_cache: dict[str, dict[str, tuple[dict[str, object], dict[str, object]]]] = {}
+    for (name, needed, state, evidence), gate_line in gate_entries:
         if state not in {"待Review", "已通过"} or PEND_RE.fullmatch(evidence) is None:
             if ready and needed == "是":
                 errors.append(f"parallel development gate is not ready: {name}")
             continue
         contract_type = GATE_TYPES.get(name, "")
-        trusted = trusted_review_pass(
-            nova_root,
-            evidence,
-            path,
-            text,
-            name,
-            contract_type,
-            targets_by_type.get(contract_type, set()),
-        )
+        relevant_targets = [
+            (target, line_number)
+            for indexed_type, _, target, line_number in contract_targets
+            if indexed_type == contract_type
+        ]
+        trusted = module is not None and repo is not None
+        if trusted:
+            trusted = (
+                trusted_line_owner(
+                    module, repo, path, gate_line, review_cache, audit_cache
+                )
+                == evidence
+            )
+        if trusted:
+            trusted = all(
+                trusted_line_owner(
+                    module, repo, path, line_number, review_cache, audit_cache
+                )
+                is not None
+                and trusted_file_owner(
+                    module, repo, target, review_cache, audit_cache
+                )
+                is not None
+                for target, line_number in relevant_targets
+            )
         if state == "已通过" and not trusted:
             errors.append(f"gate Review evidence is not a trusted PASS covering current contracts: {name}")
         if ready and needed == "是" and not trusted:
             errors.append(f"parallel development gate is not ready: {name}")
-    for requirement, dependency, reason, order in dependencies:
+    for (requirement, dependency, reason, order), line_number in dependency_entries:
         if dependency == "无" and (reason != "无" or order != "并行"):
             errors.append(f"dependency-free requirement must be marked 无/并行: {requirement}")
         if dependency != "无" and (reason == "无" or order == "并行"):
             errors.append(f"hard dependency requires a reason and serial order: {requirement}")
+        if ready and (
+            module is None
+            or repo is None
+            or trusted_line_owner(
+                module, repo, path, line_number, review_cache, audit_cache
+            )
+            is None
+        ):
+            errors.append(f"hard dependency row lacks trusted PASS evidence: {requirement}")
     return errors
 
 

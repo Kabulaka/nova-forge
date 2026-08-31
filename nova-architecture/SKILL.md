@@ -39,4 +39,4 @@ python3 scripts/validate_architecture.py /absolute/path/to/.nova/architecture/AR
 python3 scripts/validate_architecture.py --ready /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
 ```
 
-架构交付在提交前把需要项及对应契约标记为`待Review`，并把 Review 依据写为本次架构交付的 `PEND-*`。`--ready` 只有共享工程骨架、数据所有权、所需 API/事件/Mock 契约均存在、状态一致，且 `nova-review` 的可信审计证明各门禁行、对应契约索引行和独立契约正文仍等于各自 PEND 被审内容时通过；增量架构允许未变化门禁保留原 PEND，新门禁使用新 PEND。PASS 后直接由不可变审计派生就绪，无需递归改写架构文档；不得用无关 PASS、伪造审计、相关内容在 PASS 后修改、文档状态或手填批次名解锁。
+架构交付在提交前把需要项及对应契约标记为`待Review`，并把 Review 依据写为本次架构交付的 `PEND-*`。`--ready` 只有共享工程骨架、数据所有权、所需 API/事件/Mock 契约均存在且状态一致，并能从 Git 归属重建可信审计时通过：门禁行必须属于其所写 PEND，每条契约索引行、每个契约文件和每条硬依赖行分别属于某个已归档 PASS 的 PEND，契约文件当前字节还必须等于被审 commit。增量架构允许未变化门禁和契约保留原 PEND，同一类型新增契约可由新 PEND 独立负责。PASS 后直接由不可变审计派生就绪，无需递归改写架构文档；不得用无关 PASS、伪造审计、未提交或未审 commit、PASS 后修改、文档状态或手填批次名解锁。
