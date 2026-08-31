@@ -14,7 +14,7 @@
 | L1 | L0 客观条件与流程 | `nova-review/references/commit-contract.md#1-身份与分类`、`#2-豁免白名单` | 显式替换为 designed/adhoc/maintenance 与更严格客观豁免 |
 | L2 | 项目管理文档脚注 | `nova-review/references/commit-contract.md#2-豁免白名单` | 保留为 EX-DOC 的完整 diff 双侧路径规则 |
 | L3 | 禁止主观降级 | 同上 | 保留并 fail closed |
-| L4 | plan mode 前后阶段 | `nova-brainstorming/references/implementation-sop.md#6-plan-mode-追加约束` | 保留；Review 改为人工触发 |
+| L4 | plan mode 前后阶段 | `nova-development/references/implementation-sop.md#6-plan-mode-追加约束` | 保留；Review 改为人工触发 |
 | K1 | plan 审批后编码 | `implementation-sop.md#6-plan-mode-追加约束` | 保留 |
 | K2 | 测试不得迁就代码 | `implementation-sop.md#3-编码约束` | 保留 |
 | K3 | 同一失败三次停止 | `implementation-sop.md#3-编码约束` | 保留 |

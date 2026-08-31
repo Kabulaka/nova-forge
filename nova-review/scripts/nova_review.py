@@ -51,7 +51,10 @@ WORK_ITEM_PATTERNS = {
     change_class: re.compile(rf"^{prefix}-(?:[0-9]+|{UUID7_PATTERN})$")
     for change_class, prefix in WORK_ITEM_PREFIXES.items()
 }
-DESIGN_REF_RE = re.compile(r"^docs/design/[^#\s]+\.md#[A-Za-z0-9][A-Za-z0-9._-]*$")
+DESIGN_REF_RE = re.compile(r"^(?:\.nova/design|docs/design)/[^#\s]+\.md#[A-Za-z0-9][A-Za-z0-9._-]*$")
+REQUIREMENT_REF_RE = re.compile(
+    r"^REQ-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}@v[1-9][0-9]*$"
+)
 BATCH_ID_RE = re.compile(r"^NR-[0-9]{8}-[A-Za-z0-9._-]+$")
 REPOSITORY_ALIAS_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 DOC_SUFFIXES = {".md", ".txt", ".rst"}
@@ -119,6 +122,74 @@ def new_work_item(change_class: str) -> str:
         | secrets.randbits(62)
     )
     return f"{prefix}-{uuid.UUID(int=value)}"
+
+
+def new_requirement_id() -> str:
+    """Generate a stable requirement identity without sharing PEND state."""
+    timestamp_ms = time.time_ns() // 1_000_000
+    value = (
+        (timestamp_ms & ((1 << 48) - 1)) << 80
+        | 0x7 << 76
+        | secrets.randbits(12) << 64
+        | 0b10 << 62
+        | secrets.randbits(62)
+    )
+    return f"REQ-{uuid.UUID(int=value)}"
+
+
+def normalize_nova_path(value: str) -> str:
+    """Map pre-.nova persisted paths to their current deterministic location."""
+    exact = {
+        "PROJECT_BLUEPRINT.md": ".nova/PROJECT_BLUEPRINT.md",
+        "PRODUCT_REQUIREMENTS.md": ".nova/PRODUCT_REQUIREMENTS.md",
+    }
+    if value in exact:
+        return exact[value]
+    prefixes = {
+        "docs/design/": ".nova/design/",
+        "docs/audit/": ".nova/audit/",
+        "docs/requirements/": ".nova/requirements/",
+        "docs/architecture/": ".nova/architecture/",
+    }
+    for legacy, current in prefixes.items():
+        if value.startswith(legacy):
+            return current + value[len(legacy):]
+    return value
+
+
+def normalize_design_ref(value: str) -> str:
+    if "#" not in value:
+        return normalize_nova_path(value)
+    path, anchor = value.split("#", 1)
+    return f"{normalize_nova_path(path)}#{anchor}"
+
+
+def blueprint_design_ref(value: str) -> str:
+    normalized = normalize_design_ref(value)
+    return normalized[len(".nova/") :] if normalized.startswith(".nova/") else normalized
+
+
+def nova_path_candidates(value: str) -> tuple[str, ...]:
+    normalized = normalize_nova_path(value)
+    candidates = [normalized]
+    exact = {
+        ".nova/PROJECT_BLUEPRINT.md": "PROJECT_BLUEPRINT.md",
+        ".nova/PRODUCT_REQUIREMENTS.md": "PRODUCT_REQUIREMENTS.md",
+    }
+    if normalized in exact:
+        candidates.append(exact[normalized])
+    else:
+        prefixes = {
+            ".nova/design/": "docs/design/",
+            ".nova/audit/": "docs/audit/",
+            ".nova/requirements/": "docs/requirements/",
+            ".nova/architecture/": "docs/architecture/",
+        }
+        for current, legacy in prefixes.items():
+            if normalized.startswith(current):
+                candidates.append(legacy + normalized[len(current):])
+                break
+    return tuple(dict.fromkeys(candidates))
 
 
 def trailing_fields(text: str) -> list[tuple[str, str]]:
@@ -370,7 +441,7 @@ def validate_metadata(values: dict[str, str], diff: str | None = None) -> list[s
     design_ref = values.get("Design-Ref", "")
     if change_class == "designed":
         if not DESIGN_REF_RE.fullmatch(design_ref):
-            errors.append("designed changes require docs/design/*.md#anchor Design-Ref")
+            errors.append("designed changes require .nova/design/*.md#anchor Design-Ref")
     elif design_ref != "none":
         errors.append("adhoc and maintenance changes require Design-Ref: none")
 
@@ -465,7 +536,7 @@ def feature_index_path(repo: Path, work_item: str) -> Path:
     if not valid_work_item(work_item):
         raise NovaError(f"invalid work item: {work_item}")
     shard = hashlib.sha256(work_item.encode("utf-8")).hexdigest()[:2]
-    return repo / "docs" / "audit" / "index" / shard / f"{work_item}.json"
+    return repo / ".nova" / "audit" / "index" / shard / f"{work_item}.json"
 
 
 def read_json_object(path: Path, label: str) -> dict[str, Any]:
@@ -500,12 +571,11 @@ def capture_snapshot(snapshots: dict[Path, bytes | None], path: Path) -> bytes |
 def git_blob(repo: Path, revision: str, relative: str) -> bytes | None:
     if relative.startswith("/") or ".." in Path(relative).parts:
         raise NovaError(f"invalid Git blob path: {relative}")
-    return run_git_bytes(
-        repo,
-        "show",
-        f"{revision}:{relative}",
-        allow_missing=True,
-    )
+    for candidate in nova_path_candidates(relative):
+        value = run_git_bytes(repo, "show", f"{revision}:{candidate}", allow_missing=True)
+        if value is not None:
+            return value
+    return None
 
 
 def compute_review_evidence(
@@ -656,8 +726,11 @@ def validate_review_record(record: Any, path: Path) -> dict[str, Any]:
         if item["work_item"] in seen:
             raise NovaError(f"duplicate Review item: {item['work_item']}")
         seen.add(item["work_item"])
-    expected_path = Path("docs/audit/reviews") / f"{reviewed_at.year:04d}" / f"{reviewed_at.month:02d}" / f"{batch_id}.yaml"
-    if tuple(path.parts[-len(expected_path.parts) :]) != tuple(expected_path.parts):
+    expected_paths = (
+        Path(".nova/audit/reviews") / f"{reviewed_at.year:04d}" / f"{reviewed_at.month:02d}" / f"{batch_id}.yaml",
+        Path("docs/audit/reviews") / f"{reviewed_at.year:04d}" / f"{reviewed_at.month:02d}" / f"{batch_id}.yaml",
+    )
+    if not any(tuple(path.parts[-len(expected.parts) :]) == tuple(expected.parts) for expected in expected_paths):
         raise NovaError(f"Review record path does not match its timestamp and batch: {path}")
     return record
 
@@ -691,7 +764,7 @@ def load_completed_from_reader(
     ):
         raise NovaError(f"invalid feature index values for {work_item}")
 
-    archive_relative = f"docs/audit/features/{index['feature_year']:04d}.jsonl"
+    archive_relative = f".nova/audit/features/{index['feature_year']:04d}.jsonl"
     archive = safe_repo_path(repo, archive_relative, "feature archive")
     if feature_override is None:
         feature_matches: list[dict[str, Any]] = []
@@ -722,11 +795,12 @@ def load_completed_from_reader(
     if feature["review_batch"] != index["review_batch"]:
         raise NovaError(f"feature index batch mismatch for {work_item}")
 
-    review_path = safe_repo_path(repo, index["review_path"], "review_path")
+    normalized_review_path = normalize_nova_path(index["review_path"])
+    review_path = safe_repo_path(repo, normalized_review_path, "review_path")
     expected_review_path = review_path_for_values(repo, completed_at, index["review_batch"])
     if review_path != expected_review_path:
         raise NovaError(f"feature index Review path mismatch for {work_item}")
-    review_bytes = reader(index["review_path"])
+    review_bytes = reader(normalized_review_path)
     if review_bytes is None:
         raise NovaError(f"Review record is missing for {work_item}")
     review = validate_review_record(
@@ -869,12 +943,15 @@ def expected_audit_snapshot(
 ) -> dict[str, bytes]:
     """Derive the only valid closure bytes from the audit commit's parent."""
     text_updates: dict[str, str] = {}
+    legacy_layout = review_relative.startswith("docs/audit/")
 
     for item in review["items"]:
         if item["change_class"] != "designed":
             continue
-        blueprint_relative = "PROJECT_BLUEPRINT.md"
+        blueprint_relative = "PROJECT_BLUEPRINT.md" if legacy_layout else ".nova/PROJECT_BLUEPRINT.md"
         design_relative = item["design_ref"].split("#", 1)[0]
+        if not legacy_layout:
+            design_relative = normalize_nova_path(design_relative)
         blueprint = text_updates.get(blueprint_relative)
         if blueprint is None:
             blueprint_bytes = parent_reader(blueprint_relative)
@@ -901,6 +978,20 @@ def expected_audit_snapshot(
                 f"{item['work_item']}; expected={authoritative}; "
                 f"actual={item['package_ids']}"
             )
+        requirement_ref = blueprint_requirement_ref(blueprint, item["work_item"])
+        if requirement_ref != "无":
+            product_relative = ".nova/PRODUCT_REQUIREMENTS.md"
+            product = text_updates.get(product_relative)
+            if product is None:
+                product_bytes = parent_reader(product_relative)
+                if product_bytes is None:
+                    raise NovaError(
+                        f"audit parent lacks product requirements for {item['work_item']}"
+                    )
+                product = product_bytes.decode("utf-8")
+            text_updates[product_relative] = update_product_requirement_status(
+                product, requirement_ref, item["work_item"]
+            )
         text_updates[blueprint_relative] = remove_blueprint_row(
             blueprint, item["work_item"], item["design_ref"]
         )
@@ -909,7 +1000,11 @@ def expected_audit_snapshot(
         )
 
     reviewed_at = parse_reviewed_at(review["reviewed_at"], "reviewed_at")
-    archive_relative = f"docs/audit/features/{reviewed_at.year:04d}.jsonl"
+    archive_relative = (
+        f"docs/audit/features/{reviewed_at.year:04d}.jsonl"
+        if legacy_layout
+        else f".nova/audit/features/{reviewed_at.year:04d}.jsonl"
+    )
     archive_bytes = parent_reader(archive_relative)
     archive = archive_bytes.decode("utf-8") if archive_bytes is not None else ""
     records = [
@@ -933,7 +1028,12 @@ def expected_audit_snapshot(
         json.dumps(review, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     )
     for item in review["items"]:
-        index_relative = str(feature_index_path(repo, item["work_item"]).relative_to(repo))
+        current_index = str(feature_index_path(repo, item["work_item"]).relative_to(repo))
+        index_relative = (
+            current_index.replace(".nova/audit/", "docs/audit/", 1)
+            if legacy_layout
+            else current_index
+        )
         if parent_reader(index_relative) is not None:
             raise NovaError(f"feature index already existed in audit parent: {item['work_item']}")
         index = {
@@ -951,20 +1051,24 @@ def expected_audit_snapshot(
 
 def git_path_mode(repo: Path, revision: str | None, relative: str) -> str | None:
     if revision is None:
-        output = run_git(repo, "ls-files", "--stage", "--", relative)
+        for candidate in nova_path_candidates(relative):
+            output = run_git(repo, "ls-files", "--stage", "--", candidate)
+            lines = [line for line in output.splitlines() if line]
+            if not lines:
+                continue
+            if len(lines) != 1 or " 0\t" not in lines[0]:
+                raise NovaError(f"audit index has unresolved stages for {candidate}")
+            return lines[0].split(" ", 1)[0]
+        return None
+    for candidate in nova_path_candidates(relative):
+        output = run_git(repo, "ls-tree", revision, "--", candidate)
         lines = [line for line in output.splitlines() if line]
         if not lines:
-            return None
-        if len(lines) != 1 or " 0\t" not in lines[0]:
-            raise NovaError(f"audit index has unresolved stages for {relative}")
+            continue
+        if len(lines) != 1:
+            raise NovaError(f"audit tree has ambiguous path: {candidate}")
         return lines[0].split(" ", 1)[0]
-    output = run_git(repo, "ls-tree", revision, "--", relative)
-    lines = [line for line in output.splitlines() if line]
-    if not lines:
-        return None
-    if len(lines) != 1:
-        raise NovaError(f"audit tree has ambiguous path: {relative}")
-    return lines[0].split(" ", 1)[0]
+    return None
 
 
 def validate_audit_snapshot(
@@ -981,7 +1085,7 @@ def validate_audit_snapshot(
         path
         for path in changed
         if re.fullmatch(
-            rf"docs/audit/reviews/[0-9]{{4}}/[0-9]{{2}}/{re.escape(batch_id)}\.yaml",
+            rf"(?:\.nova/audit|docs/audit)/reviews/[0-9]{{4}}/[0-9]{{2}}/{re.escape(batch_id)}\.yaml",
             path,
         )
     )
@@ -1023,12 +1127,14 @@ def validate_audit_snapshot(
             )
 
     reviewed_at = parse_reviewed_at(review["reviewed_at"], "reviewed_at")
-    archive_relative = f"docs/audit/features/{reviewed_at.year:04d}.jsonl"
+    legacy_layout = review_paths[0].startswith("docs/audit/")
+    archive_relative = (
+        f"docs/audit/features/{reviewed_at.year:04d}.jsonl"
+        if legacy_layout
+        else f".nova/audit/features/{reviewed_at.year:04d}.jsonl"
+    )
     added_features = added_feature_records(diff, archive_relative)
-    expected = {
-        review_paths[0],
-        archive_relative,
-    }
+    expected = set(expected_bytes)
     designed = False
     completed_items: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     for item in review["items"]:
@@ -1046,14 +1152,22 @@ def validate_audit_snapshot(
         if completed is None or completed[1] != item:
             raise NovaError(f"audit records are incomplete for {work_item}")
         completed_items[work_item] = completed
-        expected.add(str(feature_index_path(repo, work_item).relative_to(repo)))
+        current_index = str(feature_index_path(repo, work_item).relative_to(repo))
+        expected.add(
+            current_index.replace(".nova/audit/", "docs/audit/", 1)
+            if legacy_layout
+            else current_index
+        )
         if item["change_class"] != "designed":
             continue
         designed = True
         design_relative = item["design_ref"].split("#", 1)[0]
+        if not legacy_layout:
+            design_relative = normalize_nova_path(design_relative)
         expected.add(design_relative)
         design_bytes = reader(design_relative)
-        blueprint_bytes = reader("PROJECT_BLUEPRINT.md")
+        blueprint_relative = "PROJECT_BLUEPRINT.md" if legacy_layout else ".nova/PROJECT_BLUEPRINT.md"
+        blueprint_bytes = reader(blueprint_relative)
         if design_bytes is None or blueprint_bytes is None:
             raise NovaError(f"closed design documents are missing for {work_item}")
         blueprint = blueprint_bytes.decode("utf-8")
@@ -1064,7 +1178,7 @@ def validate_audit_snapshot(
             if design_package_state(design, package_id) != "已完成":
                 raise NovaError(f"audit snapshot package is not complete: {package_id}")
     if designed:
-        expected.add("PROJECT_BLUEPRINT.md")
+        expected.add("PROJECT_BLUEPRINT.md" if legacy_layout else ".nova/PROJECT_BLUEPRINT.md")
     if changed != expected:
         raise NovaError(
             f"audit diff path mismatch; missing={sorted(expected - changed)}; "
@@ -1090,16 +1204,25 @@ def load_completed_item(
     revision: str = "HEAD",
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
     index_relative = str(feature_index_path(repo, work_item).relative_to(repo))
-    commits = run_git(
-        repo, "log", "-1", "--format=%H", revision, "--", index_relative
-    ).splitlines()
-    if not commits:
-        return None
-    audit_commit = commits[0].strip()
+    commits: list[str] = []
+    for candidate in nova_path_candidates(index_relative):
+        found = run_git(
+            repo, "log", "--follow", "--format=%H", revision, "--", candidate
+        ).splitlines()
+        commits.extend(value.strip() for value in found if value.strip())
+    audit_commit = ""
+    values: dict[str, str] = {}
+    errors: list[str] = []
+    for candidate in dict.fromkeys(commits):
+        message = run_git(repo, "show", "-s", "--format=%B", candidate)
+        candidate_values, candidate_errors = parse_audit_message(message)
+        if not candidate_errors and candidate_values.get("Nova-Audit-Schema") == SCHEMA:
+            audit_commit = candidate
+            values = candidate_values
+            errors = []
+            break
     if not audit_commit:
         return None
-    message = run_git(repo, "show", "-s", "--format=%B", audit_commit)
-    values, errors = parse_audit_message(message)
     if not errors:
         if values.get("Nova-Audit-Schema") != SCHEMA:
             errors.append(f"Nova-Audit-Schema must be {SCHEMA}")
@@ -1159,7 +1282,7 @@ def validate_audit_message(
 
 def reviewed_commits(repo: Path, work_items: set[str] | None = None) -> set[str]:
     if work_items is None:
-        index_root = safe_repo_path(repo, "docs/audit/index", "feature index directory")
+        index_root = safe_repo_path(repo, ".nova/audit/index", "feature index directory")
         work_items = {path.stem for path in index_root.glob("[0-9a-f][0-9a-f]/*.json")}
     result: set[str] = set()
     for work_item in work_items:
@@ -1356,11 +1479,11 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 
 def review_path_for_values(repo: Path, reviewed_at: datetime, batch_id: str) -> Path:
-    return repo / "docs" / "audit" / "reviews" / f"{reviewed_at.year:04d}" / f"{reviewed_at.month:02d}" / f"{batch_id}.yaml"
+    return repo / ".nova" / "audit" / "reviews" / f"{reviewed_at.year:04d}" / f"{reviewed_at.month:02d}" / f"{batch_id}.yaml"
 
 
 def feature_path(repo: Path, reviewed_at: datetime) -> Path:
-    return repo / "docs" / "audit" / "features" / f"{reviewed_at.year:04d}.jsonl"
+    return repo / ".nova" / "audit" / "features" / f"{reviewed_at.year:04d}.jsonl"
 
 
 def feature_record(item: dict[str, Any], batch_id: str, completed_at: str) -> dict[str, Any]:
@@ -1590,12 +1713,16 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
             ):
                 raise NovaError(f"package_ids must contain unique WP-* values for {work_item}")
             expected_ref = f"{item['design_file']}#{design_ref.split('#', 1)[1]}"
-            if design_ref != expected_ref:
+            if normalize_design_ref(design_ref) != normalize_design_ref(expected_ref):
                 raise NovaError(f"design_ref and design_file mismatch for {work_item}")
-            if item["blueprint"] != "PROJECT_BLUEPRINT.md":
-                raise NovaError(f"blueprint must be PROJECT_BLUEPRINT.md for {work_item}")
-            normalized["blueprint_path"] = safe_repo_path(repo, item["blueprint"], "blueprint")
-            normalized["design_path"] = safe_repo_path(repo, item["design_file"], "design_file")
+            if normalize_nova_path(item["blueprint"]) != ".nova/PROJECT_BLUEPRINT.md":
+                raise NovaError(f"blueprint must be .nova/PROJECT_BLUEPRINT.md for {work_item}")
+            normalized["blueprint_path"] = safe_repo_path(
+                repo, normalize_nova_path(item["blueprint"]), "blueprint"
+            )
+            normalized["design_path"] = safe_repo_path(
+                repo, normalize_nova_path(item["design_file"]), "design_file"
+            )
             if existing_batch:
                 # The first successful close already removed the blueprint row. The
                 # immutable Review/feature records below are the authority for an
@@ -1621,6 +1748,16 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                         f"expected={authoritative}; actual={package_ids}"
                     )
                 normalized["package_ids"] = authoritative
+                requirement_ref = blueprint_requirement_ref(blueprint, work_item)
+                if requirement_ref != "无":
+                    product_path = safe_repo_path(
+                        repo, ".nova/PRODUCT_REQUIREMENTS.md", "product requirements"
+                    )
+                    product_bytes = capture_snapshot(snapshots, product_path)
+                    if product_bytes is None:
+                        raise NovaError(
+                            f"product requirements must exist for {work_item} requirement reference"
+                        )
         else:
             expected_fields = {
                 "work_item",
@@ -1699,7 +1836,7 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
             if capture_snapshot(snapshots, index_path) is not None:
                 raise NovaError(f"work item already archived: {item['work_item']}")
         feature_root = safe_repo_path(
-            repo, "docs/audit/features", "feature archive directory"
+            repo, ".nova/audit/features", "feature archive directory"
         )
         for historical in feature_root.glob("[0-9][0-9][0-9][0-9].jsonl"):
             reject_symlink_components(repo, historical, "historical feature archive")
@@ -1733,9 +1870,60 @@ def remove_blueprint_row(text: str, work_item: str, design_ref: str) -> str:
     matches = [index for index, line in enumerate(lines) if re.match(rf"^\|\s*{re.escape(work_item)}\s*\|", line)]
     if len(matches) != 1:
         raise NovaError(f"blueprint must contain exactly one row for {work_item}")
-    if f"]({design_ref})" not in lines[matches[0]]:
+    if f"]({blueprint_design_ref(design_ref)})" not in lines[matches[0]]:
         raise NovaError(f"blueprint design reference mismatch for {work_item}")
     del lines[matches[0]]
+    return "".join(lines)
+
+
+def blueprint_requirement_ref(text: str, work_item: str) -> str:
+    matches = [
+        line
+        for line in text.splitlines()
+        if re.match(rf"^\|\s*{re.escape(work_item)}\s*\|", line)
+    ]
+    if len(matches) != 1:
+        raise NovaError(f"blueprint must contain exactly one row for {work_item}")
+    cells = [cell.strip() for cell in matches[0].strip().strip("|").split("|")]
+    if len(cells) == 7:
+        return "无"
+    if len(cells) != 8:
+        raise NovaError(f"blueprint pending row has invalid columns for {work_item}")
+    value = cells[7]
+    if value != "无" and REQUIREMENT_REF_RE.fullmatch(value) is None:
+        raise NovaError(f"invalid requirement reference for {work_item}: {value}")
+    return value
+
+
+def update_product_requirement_status(text: str, requirement_ref: str, work_item: str) -> str:
+    key, referenced_version_text = requirement_ref.split("@v", 1)
+    referenced_version = int(referenced_version_text)
+    lines = text.splitlines(keepends=True)
+    matches: list[tuple[int, list[str]]] = []
+    for index, line in enumerate(lines):
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 7 and cells[0] == key:
+            matches.append((index, cells))
+    if len(matches) != 1:
+        raise NovaError(f"product requirements index must contain exactly one row for {key}")
+    index, cells = matches[0]
+    current_match = re.fullmatch(r"v([1-9][0-9]*)", cells[1])
+    if current_match is None:
+        raise NovaError(f"invalid current requirement version for {key}: {cells[1]}")
+    current_version = int(current_match.group(1))
+    if referenced_version > current_version:
+        raise NovaError(f"reviewed requirement version is newer than current index for {key}")
+    implemented_match = re.fullmatch(r"v([1-9][0-9]*)", cells[5])
+    implemented_version = int(implemented_match.group(1)) if implemented_match else 0
+    if referenced_version >= implemented_version:
+        implemented_version = referenced_version
+        cells[6] = work_item
+    cells[5] = f"v{implemented_version}"
+    cells[2] = "已实现" if implemented_version == current_version else "已更新"
+    ending = "\n" if lines[index].endswith("\n") else ""
+    lines[index] = "| " + " | ".join(cells) + " |" + ending
     return "".join(lines)
 
 
@@ -1754,13 +1942,14 @@ def blueprint_items_for_design(text: str, design_file: str) -> set[str]:
         if not line.lstrip().startswith("|"):
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) != 7 or WORK_ITEM_PATTERNS["designed"].fullmatch(cells[0]) is None:
+        if len(cells) not in {7, 8} or WORK_ITEM_PATTERNS["designed"].fullmatch(cells[0]) is None:
             continue
         links = re.findall(
-            r"\[[^]\n]+\]\((docs/design/[^#\s]+\.md)#[A-Za-z0-9][A-Za-z0-9._-]*\)",
+            r"\[[^]\n]+\]\(((?:design|\.nova/design|docs/design)/[^#\s]+\.md)#[A-Za-z0-9][A-Za-z0-9._-]*\)",
             cells[4],
         )
-        if design_file in links:
+        normalized_file = normalize_nova_path(design_file)
+        if any(normalize_nova_path(link if not link.startswith("design/") else ".nova/" + link) == normalized_file for link in links):
             items.add(cells[0])
     return items
 
@@ -1964,6 +2153,22 @@ def build_updates(
                 raise NovaError(f"design disappeared before closure: {design_path}")
             design = expected[design_path].decode("utf-8")
         anchor = item["design_ref"].split("#", 1)[1]
+        requirement_ref = blueprint_requirement_ref(blueprint, item["work_item"])
+        if requirement_ref != "无":
+            product_path = safe_repo_path(
+                repo, ".nova/PRODUCT_REQUIREMENTS.md", "product requirements"
+            )
+            product = text_updates.get(product_path)
+            if product is None:
+                expected[product_path] = validated["snapshots"].get(product_path)
+                if expected[product_path] is None:
+                    raise NovaError(
+                        f"product requirements disappeared before closure: {product_path}"
+                    )
+                product = expected[product_path].decode("utf-8")
+            text_updates[product_path] = update_product_requirement_status(
+                product, requirement_ref, item["work_item"]
+            )
         text_updates[blueprint_path] = remove_blueprint_row(
             blueprint, item["work_item"], item["design_ref"]
         )
@@ -2359,7 +2564,7 @@ def query(repo: Path, work_item: str | None, year: int | None, month: int | None
         audit_cache: dict[
             str, dict[str, tuple[dict[str, Any], dict[str, Any]]]
         ] = {}
-        archive_relative = f"docs/audit/features/{year:04d}.jsonl"
+        archive_relative = f".nova/audit/features/{year:04d}.jsonl"
         archive = safe_repo_path(repo, archive_relative, "feature archive")
         archive_bytes = git_blob(repo, "HEAD", archive_relative)
         if archive_bytes is not None:
@@ -2409,6 +2614,7 @@ def parser() -> argparse.ArgumentParser:
     new_id.add_argument(
         "--class", dest="change_class", choices=tuple(WORK_ITEM_PREFIXES), required=True
     )
+    commands.add_parser("new-requirement-id")
 
     validate = commands.add_parser("validate-message")
     validate.add_argument("--repo", type=Path)
@@ -2444,6 +2650,8 @@ def main() -> int:
     try:
         if args.command == "new-id":
             print(new_work_item(args.change_class))
+        elif args.command == "new-requirement-id":
+            print(new_requirement_id())
         elif args.command == "validate-message":
             message = args.message_file.read_text(encoding="utf-8")
             diff = args.diff_file.read_text(encoding="utf-8") if args.diff_file else None

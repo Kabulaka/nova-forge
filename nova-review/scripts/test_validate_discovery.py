@@ -21,7 +21,7 @@ class DiscoveryTests(unittest.TestCase):
         (workspace / "codex/AGENTS.global.md").write_text("# global\n", encoding="utf-8")
         (codex_home / "skills").mkdir(parents=True)
         (codex_home / "AGENTS.md").symlink_to(workspace / "codex/AGENTS.global.md")
-        for name in ("nova-brainstorming", "nova-review"):
+        for name in ("nova-requirements", "nova-architecture", "nova-development", "nova-review"):
             (workspace / name).mkdir()
             (workspace / name / "SKILL.md").write_text(
                 f"---\nname: {name}\ndescription: test\n---\n",
@@ -57,7 +57,7 @@ class DiscoveryTests(unittest.TestCase):
             (codex_home / "AGENTS.md").unlink()
             (codex_home / "AGENTS.md").write_text("duplicate\n", encoding="utf-8")
             (codex_home / "skills/project-brainstorming").symlink_to(
-                workspace / "nova-brainstorming"
+                workspace / "nova-development"
             )
             result = self.run_validator(workspace, codex_home)
             self.assertNotEqual(result.returncode, 0)
@@ -75,7 +75,7 @@ class DiscoveryTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (codex_home / "skills/broken").symlink_to(workspace / "missing")
-            (workspace / "nova-brainstorming/SKILL.md").write_text(
+            (workspace / "nova-development/SKILL.md").write_text(
                 "---\nname: wrong-name\ndescription: wrong\n---\n",
                 encoding="utf-8",
             )

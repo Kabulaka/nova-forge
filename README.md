@@ -1,24 +1,26 @@
 # Nova Skills
 
-一套面向 Codex 的项目治理技能，覆盖“需求澄清 → 蓝图与设计 → 实施与本地提交 → 人工 Review → 审计关闭”的完整工作流。
+一套面向 Codex 的项目治理技能，覆盖“总体需求 → 并行架构契约 → 功能开发与本地提交 → 人工 Review → 审计关闭”的完整工作流。
 
-本仓库坚持三层事实来源：项目公共约束以 [PROJECT_BLUEPRINT.md](./PROJECT_BLUEPRINT.md) 为准，目标方案以 `docs/design/` 为准，当前实现以技能源码、脚本和测试为准。
+本仓库坚持分层事实来源：总体业务以 `.nova/PRODUCT_REQUIREMENTS.md` 与需求块为准，公共技术约束以 [.nova/PROJECT_BLUEPRINT.md](.nova/PROJECT_BLUEPRINT.md) 与架构契约为准，目标方案以 `.nova/design/` 为准，当前实现以技能源码、脚本和测试为准。
 
 ## 核心技能
 
 | 技能 | 用途 | 触发边界 |
 |------|------|----------|
-| [`nova-brainstorming`](./nova-brainstorming/) | 单问题需求澄清、项目蓝图、史诗设计、`PEND-*` / `FIX-*` / `MAINT-*` 的实施、测试与本地提交 | 需求、设计和默认开发流程 |
+| [`nova-requirements`](./nova-requirements/) | 总体业务、业务模块和可独立交付需求块 | 绿地项目、新需求或业务语义变化 |
+| [`nova-architecture`](./nova-architecture/) | 技术栈、七章蓝图与 API/数据/事件/Mock 并行契约 | 绿地初始化或共享架构变化 |
+| [`nova-development`](./nova-development/) | 功能设计、`PEND-*` / `FIX-*` / `MAINT-*` 的实施、测试与本地提交 | 已确认需求下的功能和普通开发 |
 | [`nova-review`](./nova-review/) | 按稳定工作项选择已提交变更，复用测试证据，执行独立 Review，并在 PASS 后写入分片审计 | 仅在用户明确提出 Review、复审、补审、全部未审项或查询 Review 状态时触发 |
 
 默认流程：
 
 ```text
-需求澄清
+总体需求与独立需求块
    ↓
-项目蓝图 / 史诗设计
+项目蓝图与并行架构契约
    ↓
-编码 → 测试 → 精确范围本地提交
+功能设计 → 编码 → 测试 → 精确范围本地提交
    ↓
 用户明确启动 Review
    ↓
@@ -31,13 +33,18 @@
 
 ```text
 .
-├── PROJECT_BLUEPRINT.md       # 工作区公共契约与待办索引
+├── .nova/
+│   ├── PRODUCT_REQUIREMENTS.md # 总体业务与需求索引（按需）
+│   ├── PROJECT_BLUEPRINT.md    # 公共技术契约与待办索引
+│   ├── requirements/           # 长期需求块（按需）
+│   ├── architecture/           # 并行开发前置契约（按需）
+│   ├── design/                 # 功能设计与稳定工作包锚点
+│   └── audit/                  # 功能、Review 与工作项索引审计
 ├── codex/
-│   └── AGENTS.global.md       # Codex 全局治理权威文件
-├── docs/
-│   ├── design/                # 史诗设计与稳定工作包锚点
-│   └── audit/                 # 功能、Review 与工作项索引审计
-├── nova-brainstorming/
+│   └── AGENTS.global.md        # Codex 全局治理权威文件
+├── nova-requirements/          # 需求访谈、模板、示例和校验
+├── nova-architecture/          # 架构访谈、模板、示例和校验
+├── nova-development/
 │   ├── SKILL.md               # 需求、设计与实施入口
 │   ├── references/            # 条件性 SOP 与完整示例
 │   ├── assets/                # 蓝图和设计模板
@@ -63,7 +70,9 @@ cd skills
 
 ```bash
 mkdir -p ~/.codex/skills
-ln -s "$PWD/nova-brainstorming" ~/.codex/skills/nova-brainstorming
+ln -s "$PWD/nova-development" ~/.codex/skills/nova-development
+ln -s "$PWD/nova-requirements" ~/.codex/skills/nova-requirements
+ln -s "$PWD/nova-architecture" ~/.codex/skills/nova-architecture
 ln -s "$PWD/nova-review" ~/.codex/skills/nova-review
 ln -s "$PWD/codex/AGENTS.global.md" ~/.codex/AGENTS.md
 ```
@@ -83,11 +92,15 @@ python3 nova-review/scripts/validate_discovery.py \
 可以在 Codex 中直接描述目标，也可以显式点名技能：
 
 ```text
-使用 $nova-brainstorming，帮我逐步澄清这个项目并生成项目蓝图。
+使用 $nova-requirements，帮我逐步澄清这个项目的总体业务和需求块。
 ```
 
 ```text
-使用 $nova-brainstorming，实施 PEND-001。
+使用 $nova-architecture，基于已确认需求生成最小架构和并行开发契约。
+```
+
+```text
+使用 $nova-development，实施 PEND-001。
 ```
 
 ```text
@@ -102,10 +115,12 @@ python3 nova-review/scripts/validate_discovery.py \
 
 ```bash
 # 校验版本 3 项目蓝图
-python3 nova-brainstorming/scripts/validate_blueprint.py PROJECT_BLUEPRINT.md
+python3 nova-development/scripts/validate_blueprint.py .nova/PROJECT_BLUEPRINT.md
 
-# 运行两项技能的测试
-python3 -m unittest discover -s nova-brainstorming/scripts -p 'test_*.py'
+# 运行各技能测试
+python3 -m unittest discover -s nova-requirements/scripts -p 'test_*.py'
+python3 -m unittest discover -s nova-architecture/scripts -p 'test_*.py'
+python3 -m unittest discover -s nova-development/scripts -p 'test_*.py'
 python3 -m unittest discover -s nova-review/scripts -p 'test_*.py'
 
 # 校验技能与全局治理文件的发现链接
@@ -117,8 +132,8 @@ python3 nova-review/scripts/validate_discovery.py \
 设计文档可单独校验：
 
 ```bash
-python3 nova-brainstorming/scripts/validate_blueprint.py \
-  --design docs/design/YYYY-MM-DD_example.md
+python3 nova-development/scripts/validate_blueprint.py \
+  --design .nova/design/YYYY-MM-DD_example.md
 ```
 
 ## 关键约束
@@ -129,4 +144,4 @@ python3 nova-brainstorming/scripts/validate_blueprint.py \
 - 本地提交必须包含 Nova trailers；人工 Review 结论不得伪造进不可变开发提交。
 - 校验器必须只读、确定性执行，并在失败时返回非零状态。
 
-详细项目边界见 [PROJECT_BLUEPRINT.md](./PROJECT_BLUEPRINT.md)。
+详细项目边界见 [.nova/PROJECT_BLUEPRINT.md](.nova/PROJECT_BLUEPRINT.md)。

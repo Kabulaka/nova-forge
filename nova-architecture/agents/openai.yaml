@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nova Architecture"
+  short_description: "并行开发前的精简技术架构与共享契约"
+  default_prompt: "Use $nova-architecture to clarify the minimum shared architecture and contracts required for parallel development."

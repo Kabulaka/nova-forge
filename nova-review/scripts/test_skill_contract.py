@@ -13,7 +13,7 @@ COMMIT = (ROOT / "references/commit-contract.md").read_text(encoding="utf-8")
 REVIEW = (ROOT / "references/review-sop.md").read_text(encoding="utf-8")
 AUDIT = (ROOT / "references/audit-contract.md").read_text(encoding="utf-8")
 IMPLEMENTATION = (
-    ROOT.parent / "nova-brainstorming" / "references" / "implementation-sop.md"
+    ROOT.parent / "nova-development" / "references" / "implementation-sop.md"
 ).read_text(encoding="utf-8")
 
 

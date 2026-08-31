@@ -3,7 +3,7 @@
 ## 1. 分片布局
 
 ```text
-docs/audit/
+.nova/audit/
 ├── features/
 │   └── YYYY.jsonl
 ├── reviews/
@@ -41,9 +41,9 @@ docs/audit/
         {"repository": "codex", "commit": "<full commit hash>"}
       ],
       "validation": "pytest tests/example.py (pass)",
-      "design_ref": "docs/design/2026-08-27_example.md#wp-01-example",
-      "blueprint": "PROJECT_BLUEPRINT.md",
-      "design_file": "docs/design/2026-08-27_example.md",
+      "design_ref": ".nova/design/2026-08-27_example.md#wp-01-example",
+      "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+      "design_file": ".nova/design/2026-08-27_example.md",
       "package_ids": ["WP-01", "WP-02"]
     }
   ]

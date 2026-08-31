@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nova Requirements"
+  short_description: "总体业务与可独立交付需求块访谈"
+  default_prompt: "Use $nova-requirements to clarify the product flow and maintain concise requirement contracts one question at a time."

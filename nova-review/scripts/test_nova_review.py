@@ -141,7 +141,7 @@ class NovaReviewTests(unittest.TestCase):
             assert isinstance(item, dict)
             paths.add(str(NOVA_TOOL.feature_index_path(repo, item["work_item"]).relative_to(repo)))
             if item["change_class"] == "designed":
-                paths.add("PROJECT_BLUEPRINT.md")
+                paths.add(".nova/PROJECT_BLUEPRINT.md")
                 paths.add(str(item["design_file"]))
         subprocess.run(["git", "-C", str(repo), "add", "--", *sorted(paths)], check=True)
         digest = NOVA_TOOL.hashlib.sha256(NOVA_TOOL.canonical_manifest(manifest)).hexdigest()
@@ -228,18 +228,19 @@ class NovaReviewTests(unittest.TestCase):
 
     def record_designed_pass(self, repo: Path, suffix: str = "designed") -> str:
         blueprint, design = self.designed_documents()
-        (repo / "PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
-        design_path = repo / "docs/design/2026-08-27_x.md"
+        (repo / ".nova").mkdir(exist_ok=True)
+        (repo / ".nova/PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
+        design_path = repo / ".nova/design/2026-08-27_x.md"
         design_path.parent.mkdir(parents=True, exist_ok=True)
         design_path.write_text(design, encoding="utf-8")
         subprocess.run(
-            ["git", "-C", str(repo), "add", "PROJECT_BLUEPRINT.md", str(design_path.relative_to(repo))],
+            ["git", "-C", str(repo), "add", ".nova/PROJECT_BLUEPRINT.md", str(design_path.relative_to(repo))],
             check=True,
         )
         subprocess.run(
             ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
             input=message(
-                "PEND-001", "designed", "docs/design/2026-08-27_x.md#wp-01-x"
+                "PEND-001", "designed", ".nova/design/2026-08-27_x.md#wp-01-x"
             ),
             text=True,
             check=True,
@@ -257,9 +258,9 @@ class NovaReviewTests(unittest.TestCase):
                     "change_class": "designed",
                     "commits": [commit_hash],
                     "validation": "python3 -m unittest (pass)",
-                    "design_ref": "docs/design/2026-08-27_x.md#wp-01-x",
-                    "blueprint": "PROJECT_BLUEPRINT.md",
-                    "design_file": "docs/design/2026-08-27_x.md",
+                    "design_ref": ".nova/design/2026-08-27_x.md#wp-01-x",
+                    "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                    "design_file": ".nova/design/2026-08-27_x.md",
                     "package_ids": ["WP-01", "WP-02"],
                 }
             ],
@@ -298,7 +299,7 @@ class NovaReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             cases = (
-                (message("PEND-001", "designed", "docs/design/2026-08-27_x.md#wp-01-x"), None),
+                (message("PEND-001", "designed", ".nova/design/2026-08-27_x.md#wp-01-x"), None),
                 (message("FIX-001", "adhoc"), None),
                 (message("MAINT-001", "maintenance"), None),
                 (message("MAINT-002", "maintenance", policy="exempt", exemption="EX-DOC"), doc_diff),
@@ -340,7 +341,7 @@ class NovaReviewTests(unittest.TestCase):
             for change_class in NOVA_TOOL.WORK_ITEM_PREFIXES:
                 work_item = NOVA_TOOL.new_work_item(change_class)
                 design_ref = (
-                    "docs/design/2026-08-27_x.md#wp-01-x"
+                    ".nova/design/2026-08-27_x.md#wp-01-x"
                     if change_class == "designed"
                     else "none"
                 )
@@ -357,7 +358,7 @@ class NovaReviewTests(unittest.TestCase):
             for work_item, change_class in invalid:
                 with self.subTest(work_item=work_item):
                     design_ref = (
-                        "docs/design/2026-08-27_x.md#wp-01-x"
+                        ".nova/design/2026-08-27_x.md#wp-01-x"
                         if change_class == "designed"
                         else "none"
                     )
@@ -402,9 +403,10 @@ class NovaReviewTests(unittest.TestCase):
             blueprint, design = self.designed_documents(role_column=True)
             blueprint = blueprint.replace("PEND-001", work_item)
             design = design.replace("PEND-001", work_item)
-            blueprint_path = repo / "PROJECT_BLUEPRINT.md"
+            blueprint_path = repo / ".nova/PROJECT_BLUEPRINT.md"
+            blueprint_path.parent.mkdir(exist_ok=True)
             blueprint_path.write_text(blueprint, encoding="utf-8")
-            design_path = repo / "docs/design/2026-08-27_x.md"
+            design_path = repo / ".nova/design/2026-08-27_x.md"
             design_path.parent.mkdir(parents=True)
             design_path.write_text(design, encoding="utf-8")
             subprocess.run(
@@ -413,8 +415,8 @@ class NovaReviewTests(unittest.TestCase):
                     "-C",
                     str(repo),
                     "add",
-                    "PROJECT_BLUEPRINT.md",
-                    "docs/design/2026-08-27_x.md",
+                    ".nova/PROJECT_BLUEPRINT.md",
+                    ".nova/design/2026-08-27_x.md",
                 ],
                 check=True,
             )
@@ -423,7 +425,7 @@ class NovaReviewTests(unittest.TestCase):
                 input=message(
                     work_item,
                     "designed",
-                    "docs/design/2026-08-27_x.md#wp-01-x",
+                    ".nova/design/2026-08-27_x.md#wp-01-x",
                 ),
                 text=True,
                 check=True,
@@ -441,9 +443,9 @@ class NovaReviewTests(unittest.TestCase):
                         "change_class": "designed",
                         "commits": [commit_hash],
                         "validation": "python3 -m unittest (pass)",
-                        "design_ref": "docs/design/2026-08-27_x.md#wp-01-x",
-                        "blueprint": "PROJECT_BLUEPRINT.md",
-                        "design_file": "docs/design/2026-08-27_x.md",
+                        "design_ref": ".nova/design/2026-08-27_x.md#wp-01-x",
+                        "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                        "design_file": ".nova/design/2026-08-27_x.md",
                         "package_ids": ["WP-01", "WP-02"],
                     }
                 ],
@@ -468,10 +470,10 @@ class NovaReviewTests(unittest.TestCase):
             self.assertIn("| WP-01 | 能力 | 已完成 |", closed_design)
             self.assertIn("| WP-02 | 收口 | 已完成 |", closed_design)
 
-            feature_path = repo / "docs/audit/features/2026.jsonl"
+            feature_path = repo / ".nova/audit/features/2026.jsonl"
             feature = json.loads(feature_path.read_text(encoding="utf-8"))
             self.assertEqual(feature["work_item"], work_item)
-            review_path = repo / "docs/audit/reviews/2026/08/NR-20260827-uuid7.yaml"
+            review_path = repo / ".nova/audit/reviews/2026/08/NR-20260827-uuid7.yaml"
             review = json.loads(review_path.read_text(encoding="utf-8"))
             self.assertEqual(review["items"][0]["work_item"], work_item)
             index_path = NOVA_TOOL.feature_index_path(repo, work_item)
@@ -554,7 +556,7 @@ class NovaReviewTests(unittest.TestCase):
             self.assertIn("Validation must end with (pass)", rejected.stderr)
 
     def test_git_c_quoted_utf8_paths_are_decoded_and_invalid_bytes_rejected(self) -> None:
-        relative = "docs/design/中文路径.md"
+        relative = ".nova/design/中文路径.md"
 
         def git_quote(value: str) -> str:
             return "".join(
@@ -645,7 +647,7 @@ class NovaReviewTests(unittest.TestCase):
                     message(
                         "PEND-002",
                         "designed",
-                        "docs/design/2026-08-29_x.md#wp-01-x",
+                        ".nova/design/2026-08-29_x.md#wp-01-x",
                         related_work_item="PEND-001",
                     ),
                     "Related-Work-Item is allowed only for adhoc FIX changes",
@@ -673,7 +675,7 @@ class NovaReviewTests(unittest.TestCase):
             self.record_designed_pass(repo, "archived-pend")
 
             reused_message = message(
-                "PEND-001", "designed", "docs/design/2026-08-27_x.md#wp-01-x"
+                "PEND-001", "designed", ".nova/design/2026-08-27_x.md#wp-01-x"
             )
             validation = self.validate(repo, reused_message, repo=repo)
             self.assertNotEqual(validation.returncode, 0)
@@ -723,7 +725,7 @@ class NovaReviewTests(unittest.TestCase):
                 message(
                     "PEND-001",
                     "designed",
-                    "docs/design/2026-08-29_pending.md#wp-01-pending",
+                    ".nova/design/2026-08-29_pending.md#wp-01-pending",
                 ),
             )
             result = self.validate(
@@ -769,7 +771,7 @@ class NovaReviewTests(unittest.TestCase):
                 message(
                     "PEND-001",
                     "designed",
-                    "docs/design/2026-08-29_pending.md#wp-01-pending",
+                    ".nova/design/2026-08-29_pending.md#wp-01-pending",
                 ),
             )
             commit_hash = self.commit(
@@ -822,7 +824,7 @@ class NovaReviewTests(unittest.TestCase):
                 message(
                     "PEND-001",
                     "designed",
-                    "docs/design/2026-08-27_feature.md#wp-01-feature",
+                    ".nova/design/2026-08-27_feature.md#wp-01-feature",
                 ),
             )
             pending_designed_fix = self.commit(
@@ -832,7 +834,7 @@ class NovaReviewTests(unittest.TestCase):
                 message(
                     "PEND-001",
                     "designed",
-                    "docs/design/2026-08-27_feature.md#wp-01-feature",
+                    ".nova/design/2026-08-27_feature.md#wp-01-feature",
                 ),
             )
             pending_maintenance = self.commit(
@@ -919,7 +921,7 @@ class NovaReviewTests(unittest.TestCase):
 
             | 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |
             |------|--------|------|------|----------|----------|----------|
-            | PEND-001 | P1 | 用户提出 | Nova | [WP-01](docs/design/2026-08-27_x.md#wp-01-x) | 无 | pass |
+            | PEND-001 | P1 | 用户提出 | Nova | [WP-01](design/2026-08-27_x.md#wp-01-x) | 无 | pass |
             """
         ).lstrip()
         design = textwrap.dedent(
@@ -968,13 +970,14 @@ class NovaReviewTests(unittest.TestCase):
             repo = Path(directory)
             self.init_repo(repo)
             blueprint, design = self.designed_documents()
-            blueprint_path = repo / "PROJECT_BLUEPRINT.md"
+            blueprint_path = repo / ".nova/PROJECT_BLUEPRINT.md"
+            blueprint_path.parent.mkdir(exist_ok=True)
             blueprint_path.write_text(blueprint, encoding="utf-8")
-            design_path = repo / "docs/design/2026-08-27_x.md"
+            design_path = repo / ".nova/design/2026-08-27_x.md"
             design_path.parent.mkdir(parents=True)
             design_path.write_text(design, encoding="utf-8")
             subprocess.run(
-                ["git", "-C", str(repo), "add", "PROJECT_BLUEPRINT.md", "docs/design/2026-08-27_x.md"],
+                ["git", "-C", str(repo), "add", ".nova/PROJECT_BLUEPRINT.md", ".nova/design/2026-08-27_x.md"],
                 check=True,
             )
             subprocess.run(
@@ -982,7 +985,7 @@ class NovaReviewTests(unittest.TestCase):
                 input=message(
                     "PEND-001",
                     "designed",
-                    "docs/design/2026-08-27_x.md#wp-01-x",
+                    ".nova/design/2026-08-27_x.md#wp-01-x",
                 ),
                 text=True,
                 check=True,
@@ -1005,9 +1008,9 @@ class NovaReviewTests(unittest.TestCase):
                         "change_class": "designed",
                         "commits": [commit_hash],
                         "validation": "python3 -m unittest (pass)",
-                        "design_ref": "docs/design/2026-08-27_x.md#wp-01-x",
-                        "blueprint": "PROJECT_BLUEPRINT.md",
-                        "design_file": "docs/design/2026-08-27_x.md",
+                        "design_ref": ".nova/design/2026-08-27_x.md#wp-01-x",
+                        "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                        "design_file": ".nova/design/2026-08-27_x.md",
                         "package_ids": ["WP-01"],
                     }
                 ],
@@ -1025,7 +1028,7 @@ class NovaReviewTests(unittest.TestCase):
 
             self.assertEqual(blueprint_path.read_text(encoding="utf-8"), blueprint)
             self.assertEqual(design_path.read_text(encoding="utf-8"), design)
-            self.assertFalse((repo / "docs/audit").exists())
+            self.assertFalse((repo / ".nova/audit").exists())
 
     def test_design_without_closure_map_rejects_multiple_ready_packages(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1039,18 +1042,19 @@ class NovaReviewTests(unittest.TestCase):
                 "| PEND-001 | WP-01、WP-02 |\n\n",
                 "",
             )
-            (repo / "PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
-            design_path = repo / "docs/design/2026-08-27_x.md"
+            (repo / ".nova").mkdir(exist_ok=True)
+            (repo / ".nova/PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
+            design_path = repo / ".nova/design/2026-08-27_x.md"
             design_path.parent.mkdir(parents=True)
             design_path.write_text(design, encoding="utf-8")
             subprocess.run(
-                ["git", "-C", str(repo), "add", "PROJECT_BLUEPRINT.md", str(design_path.relative_to(repo))],
+                ["git", "-C", str(repo), "add", ".nova/PROJECT_BLUEPRINT.md", str(design_path.relative_to(repo))],
                 check=True,
             )
             subprocess.run(
                 ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
                 input=message(
-                    "PEND-001", "designed", "docs/design/2026-08-27_x.md#wp-01-x"
+                    "PEND-001", "designed", ".nova/design/2026-08-27_x.md#wp-01-x"
                 ),
                 text=True,
                 check=True,
@@ -1068,9 +1072,9 @@ class NovaReviewTests(unittest.TestCase):
                         "change_class": "designed",
                         "commits": [commit_hash],
                         "validation": "tests (pass)",
-                        "design_ref": "docs/design/2026-08-27_x.md#wp-01-x",
-                        "blueprint": "PROJECT_BLUEPRINT.md",
-                        "design_file": "docs/design/2026-08-27_x.md",
+                        "design_ref": ".nova/design/2026-08-27_x.md#wp-01-x",
+                        "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                        "design_file": ".nova/design/2026-08-27_x.md",
                         "package_ids": ["WP-01"],
                     }
                 ],
@@ -1089,7 +1093,7 @@ class NovaReviewTests(unittest.TestCase):
             """
             | 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |
             |------|--------|------|------|----------|----------|----------|
-            | PEND-002 | P1 | 用户提出 | second | [WP-02](docs/design/2026-08-27_x.md#wp-02-x) | 无 | pass |
+            | PEND-002 | P1 | 用户提出 | second | [WP-02](design/2026-08-27_x.md#wp-02-x) | 无 | pass |
             """
         ).lstrip()
         design = textwrap.dedent(
@@ -1112,7 +1116,7 @@ class NovaReviewTests(unittest.TestCase):
             NOVA_TOOL.authoritative_package_ids(
                 blueprint,
                 design,
-                "docs/design/2026-08-27_x.md",
+                ".nova/design/2026-08-27_x.md",
                 "PEND-002",
                 "wp-02-x",
             ),
@@ -1137,17 +1141,18 @@ class NovaReviewTests(unittest.TestCase):
             repo = Path(directory)
             self.init_repo(repo)
             blueprint, design = self.designed_documents()
-            (repo / "PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
-            design_path = repo / "docs/design/2026-08-27_x.md"
+            (repo / ".nova").mkdir(exist_ok=True)
+            (repo / ".nova/PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
+            design_path = repo / ".nova/design/2026-08-27_x.md"
             design_path.parent.mkdir(parents=True)
             design_path.write_text(design, encoding="utf-8")
             subprocess.run(
-                ["git", "-C", str(repo), "add", "PROJECT_BLUEPRINT.md", "docs/design/2026-08-27_x.md"],
+                ["git", "-C", str(repo), "add", ".nova/PROJECT_BLUEPRINT.md", ".nova/design/2026-08-27_x.md"],
                 check=True,
             )
             subprocess.run(
                 ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
-                input=message("PEND-001", "designed", "docs/design/2026-08-27_x.md#wp-01-x"),
+                input=message("PEND-001", "designed", ".nova/design/2026-08-27_x.md#wp-01-x"),
                 text=True,
                 check=True,
             )
@@ -1167,7 +1172,7 @@ class NovaReviewTests(unittest.TestCase):
                 message(
                     "PEND-001",
                     "designed",
-                    "docs/design/2026-08-27_x.md#wp-01-x",
+                    ".nova/design/2026-08-27_x.md#wp-01-x",
                 ),
             )
             fix_commit = self.commit(repo, "fix.py", "fixed\n", message("FIX-001", "adhoc"))
@@ -1188,9 +1193,9 @@ class NovaReviewTests(unittest.TestCase):
                             {"repository": "codex", "commit": secondary_commit},
                         ],
                         "validation": "python3 -m unittest (pass)",
-                        "design_ref": "docs/design/2026-08-27_x.md#wp-01-x",
-                        "blueprint": "PROJECT_BLUEPRINT.md",
-                        "design_file": "docs/design/2026-08-27_x.md",
+                        "design_ref": ".nova/design/2026-08-27_x.md#wp-01-x",
+                        "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                        "design_file": ".nova/design/2026-08-27_x.md",
                         "package_ids": ["WP-01", "WP-02"],
                     },
                     {
@@ -1210,8 +1215,8 @@ class NovaReviewTests(unittest.TestCase):
                 "check-manifest", "--repo", str(repo), "--manifest", str(manifest_path)
             )
             self.assertEqual(check.returncode, 0, check.stderr)
-            self.assertFalse((repo / "docs/audit/features/2026.jsonl").exists())
-            self.assertIn("PEND-001", (repo / "PROJECT_BLUEPRINT.md").read_text(encoding="utf-8"))
+            self.assertFalse((repo / ".nova/audit/features/2026.jsonl").exists())
+            self.assertIn("PEND-001", (repo / ".nova/PROJECT_BLUEPRINT.md").read_text(encoding="utf-8"))
             before_review = design_path.read_text(encoding="utf-8")
             self.assertIn("| WP-01 | 待Review |", before_review)
             self.assertIn("| WP-02 | 待Review |", before_review)
@@ -1220,20 +1225,20 @@ class NovaReviewTests(unittest.TestCase):
                 "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
             )
             self.assertEqual(record.returncode, 0, record.stderr)
-            self.assertNotIn("PEND-001", (repo / "PROJECT_BLUEPRINT.md").read_text(encoding="utf-8"))
+            self.assertNotIn("PEND-001", (repo / ".nova/PROJECT_BLUEPRINT.md").read_text(encoding="utf-8"))
             closed_design = design_path.read_text(encoding="utf-8")
             self.assertIn("设计状态：已实现", closed_design)
             self.assertIn("| WP-01 | 已完成 |", closed_design)
             self.assertIn("| WP-02 | 已完成 |", closed_design)
 
-            archive_path = repo / "docs/audit/features/2026.jsonl"
+            archive_path = repo / ".nova/audit/features/2026.jsonl"
             records = [json.loads(line) for line in archive_path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual([entry["work_item"] for entry in records], ["PEND-001", "FIX-001"])
             self.assertEqual(
                 [entry["repository"] for entry in records[0]["commits"]],
                 ["main", "codex"],
             )
-            review_path = repo / "docs/audit/reviews/2026/08/NR-20260827-01.yaml"
+            review_path = repo / ".nova/audit/reviews/2026/08/NR-20260827-01.yaml"
             self.assertTrue(review_path.is_file())
             review_record = json.loads(review_path.read_text(encoding="utf-8"))
             self.assertIn(
@@ -1269,7 +1274,7 @@ class NovaReviewTests(unittest.TestCase):
             self.assertEqual(by_month.returncode, 0, by_month.stderr)
             self.assertEqual(
                 json.loads(by_month.stdout)["reviews"],
-                ["docs/audit/reviews/2026/08/NR-20260827-01.yaml"],
+                [".nova/audit/reviews/2026/08/NR-20260827-01.yaml"],
             )
 
     def test_invalid_manifest_has_no_audit_or_closure_side_effects(self) -> None:
@@ -1277,8 +1282,9 @@ class NovaReviewTests(unittest.TestCase):
             repo = Path(directory)
             self.init_repo(repo)
             blueprint, design = self.designed_documents()
-            (repo / "PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
-            design_path = repo / "docs/design/2026-08-27_x.md"
+            (repo / ".nova").mkdir(exist_ok=True)
+            (repo / ".nova/PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
+            design_path = repo / ".nova/design/2026-08-27_x.md"
             design_path.parent.mkdir(parents=True)
             design_path.write_text(design, encoding="utf-8")
             commit_hash = self.commit(repo, "fix.py", "fixed\n", message("FIX-001", "adhoc"))
@@ -1305,9 +1311,9 @@ class NovaReviewTests(unittest.TestCase):
                 "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertEqual((repo / "PROJECT_BLUEPRINT.md").read_text(encoding="utf-8"), blueprint)
+            self.assertEqual((repo / ".nova/PROJECT_BLUEPRINT.md").read_text(encoding="utf-8"), blueprint)
             self.assertEqual(design_path.read_text(encoding="utf-8"), design)
-            self.assertFalse((repo / "docs/audit").exists())
+            self.assertFalse((repo / ".nova/audit").exists())
 
     def test_manifest_review_hash_and_scope_must_match_declared_commits(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1357,7 +1363,7 @@ class NovaReviewTests(unittest.TestCase):
             self.init_repo(repo)
             commit_hash = self.commit(repo, "fix.py", "fixed\n", message("FIX-001", "adhoc"))
             self.record_fix_pass(repo, "FIX-001", commit_hash, "strict")
-            review_path = repo / "docs/audit/reviews/2026/08/NR-20260827-strict.yaml"
+            review_path = repo / ".nova/audit/reviews/2026/08/NR-20260827-strict.yaml"
             review = json.loads(review_path.read_text(encoding="utf-8"))
             review["items"][0]["commits"][0]["commit"] = "0" * 40
             review_path.write_text(json.dumps(review), encoding="utf-8")
@@ -1369,7 +1375,7 @@ class NovaReviewTests(unittest.TestCase):
             review_path.write_text(json.dumps(review), encoding="utf-8")
             index_path = NOVA_TOOL.feature_index_path(repo, "FIX-001")
             index = json.loads(index_path.read_text(encoding="utf-8"))
-            index["review_path"] = "docs/audit/reviews/2026/09/NR-20260827-strict.yaml"
+            index["review_path"] = ".nova/audit/reviews/2026/09/NR-20260827-strict.yaml"
             index_path.write_text(json.dumps(index), encoding="utf-8")
             result = self.run_tool("query", "--repo", str(repo), "--work-item", "FIX-001")
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -1393,7 +1399,7 @@ class NovaReviewTests(unittest.TestCase):
             repo = Path(directory)
             self.init_repo(repo)
             commit_hash = self.commit(repo, "fix.py", "fixed\n", message("FIX-001", "adhoc"))
-            old_archive = repo / "docs/audit/features/2025.jsonl"
+            old_archive = repo / ".nova/audit/features/2025.jsonl"
             old_archive.parent.mkdir(parents=True)
             old_archive.write_text('{"work_item":"FIX-001"}\n', encoding="utf-8")
             manifest_path = repo / "review.json"
@@ -1420,7 +1426,7 @@ class NovaReviewTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("work item already archived: FIX-001", result.stderr)
-            self.assertFalse((repo / "docs/audit/features/2026.jsonl").exists())
+            self.assertFalse((repo / ".nova/audit/features/2026.jsonl").exists())
 
     def test_manifest_rejects_archived_id_after_worktree_audit_files_are_deleted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1496,7 +1502,7 @@ class NovaReviewTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("manifest commit coverage mismatch for FIX-001", result.stderr)
-            self.assertFalse((repo / "docs/audit").exists())
+            self.assertFalse((repo / ".nova/audit").exists())
 
     def test_year_and_month_queries_ignore_non_target_malformed_sentinels(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1504,8 +1510,8 @@ class NovaReviewTests(unittest.TestCase):
             self.init_repo(repo)
             commit_hash = self.commit(repo, "fix.py", "fixed\n", message("FIX-001", "adhoc"))
             self.record_fix_pass(repo, "FIX-001", commit_hash, "target")
-            (repo / "docs/audit/features/2025.jsonl").write_text("not-json\n", encoding="utf-8")
-            other_year = repo / "docs/audit/reviews/2025/09/bad.yaml"
+            (repo / ".nova/audit/features/2025.jsonl").write_text("not-json\n", encoding="utf-8")
+            other_year = repo / ".nova/audit/reviews/2025/09/bad.yaml"
             other_year.parent.mkdir(parents=True)
             other_year.write_text("not-json\n", encoding="utf-8")
             by_year = self.run_tool(
@@ -1514,7 +1520,7 @@ class NovaReviewTests(unittest.TestCase):
             self.assertEqual(by_year.returncode, 0, by_year.stderr)
             self.assertEqual(len(json.loads(by_year.stdout)["features"]), 1)
 
-            sentinel = repo / "docs/audit/reviews/2026/09/bad.yaml"
+            sentinel = repo / ".nova/audit/reviews/2026/09/bad.yaml"
             sentinel.parent.mkdir(parents=True)
             sentinel.write_text("not-json\n", encoding="utf-8")
             result = self.run_tool(
@@ -1525,7 +1531,7 @@ class NovaReviewTests(unittest.TestCase):
             self.assertEqual(len(value["features"]), 1)
             self.assertEqual(
                 value["reviews"],
-                ["docs/audit/reviews/2026/08/NR-20260827-target.yaml"],
+                [".nova/audit/reviews/2026/08/NR-20260827-target.yaml"],
             )
 
     def test_year_query_reads_the_head_annual_archive_once(self) -> None:
@@ -1551,9 +1557,9 @@ class NovaReviewTests(unittest.TestCase):
                 [
                     entry
                     for entry in reads
-                    if entry == ("HEAD", "docs/audit/features/2026.jsonl")
+                    if entry == ("HEAD", ".nova/audit/features/2026.jsonl")
                 ],
-                [("HEAD", "docs/audit/features/2026.jsonl")],
+                [("HEAD", ".nova/audit/features/2026.jsonl")],
             )
 
     def test_generated_audit_commit_message_validates_without_work_item_recursion(self) -> None:
@@ -1563,7 +1569,7 @@ class NovaReviewTests(unittest.TestCase):
             commit_hash = self.commit(repo, "fix.py", "fixed\n", message("FIX-001", "adhoc"))
             self.record_fix_pass(repo, "FIX-001", commit_hash, "audit", commit_audit=False)
             subprocess.run(
-                ["git", "-C", str(repo), "add", "docs/audit"], check=True
+                ["git", "-C", str(repo), "add", ".nova/audit"], check=True
             )
             diff = subprocess.run(
                 ["git", "-C", str(repo), "diff", "--cached", "--binary", "--no-ext-diff"],
@@ -1572,7 +1578,7 @@ class NovaReviewTests(unittest.TestCase):
                 text=True,
             ).stdout
             review = json.loads(
-                (repo / "docs/audit/reviews/2026/08/NR-20260827-audit.yaml").read_text(
+                (repo / ".nova/audit/reviews/2026/08/NR-20260827-audit.yaml").read_text(
                     encoding="utf-8"
                 )
             )
@@ -1599,7 +1605,7 @@ class NovaReviewTests(unittest.TestCase):
             self.assertNotEqual(mismatch.returncode, 0)
             self.assertIn("exactly match the repository staged diff", mismatch.stderr)
 
-            review_path = repo / "docs/audit/reviews/2026/08/NR-20260827-audit.yaml"
+            review_path = repo / ".nova/audit/reviews/2026/08/NR-20260827-audit.yaml"
             review_path.write_text("corrupt worktree copy\n", encoding="utf-8")
             diff_path.write_text(diff, encoding="utf-8")
             result = self.run_tool(
@@ -1621,13 +1627,13 @@ class NovaReviewTests(unittest.TestCase):
             self.record_fix_pass(
                 repo, "FIX-001", commit_hash, "exact", commit_audit=False
             )
-            review_path = repo / "docs/audit/reviews/2026/08/NR-20260827-exact.yaml"
+            review_path = repo / ".nova/audit/reviews/2026/08/NR-20260827-exact.yaml"
             review = json.loads(review_path.read_text(encoding="utf-8"))
             review_path.write_text(
                 json.dumps(review, ensure_ascii=False, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-            subprocess.run(["git", "-C", str(repo), "add", "docs/audit"], check=True)
+            subprocess.run(["git", "-C", str(repo), "add", ".nova/audit"], check=True)
             diff = NOVA_TOOL.run_git(
                 repo, "diff", "--cached", "--binary", "--no-ext-diff"
             )
@@ -1652,8 +1658,9 @@ class NovaReviewTests(unittest.TestCase):
             repo = Path(directory)
             self.init_repo(repo)
             blueprint, design = self.designed_documents()
-            (repo / "PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
-            design_path = repo / "docs/design/2026-08-27_x.md"
+            (repo / ".nova").mkdir(exist_ok=True)
+            (repo / ".nova/PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
+            design_path = repo / ".nova/design/2026-08-27_x.md"
             design_path.parent.mkdir(parents=True)
             design_path.write_text(design, encoding="utf-8")
             subprocess.run(
@@ -1662,8 +1669,8 @@ class NovaReviewTests(unittest.TestCase):
                     "-C",
                     str(repo),
                     "add",
-                    "PROJECT_BLUEPRINT.md",
-                    "docs/design/2026-08-27_x.md",
+                    ".nova/PROJECT_BLUEPRINT.md",
+                    ".nova/design/2026-08-27_x.md",
                 ],
                 check=True,
             )
@@ -1672,7 +1679,7 @@ class NovaReviewTests(unittest.TestCase):
                 input=message(
                     "PEND-001",
                     "designed",
-                    "docs/design/2026-08-27_x.md#wp-01-x",
+                    ".nova/design/2026-08-27_x.md#wp-01-x",
                 ),
                 text=True,
                 check=True,
@@ -1690,9 +1697,9 @@ class NovaReviewTests(unittest.TestCase):
                         "change_class": "designed",
                         "commits": [commit_hash],
                         "validation": "tests (pass)",
-                        "design_ref": "docs/design/2026-08-27_x.md#wp-01-x",
-                        "blueprint": "PROJECT_BLUEPRINT.md",
-                        "design_file": "docs/design/2026-08-27_x.md",
+                        "design_ref": ".nova/design/2026-08-27_x.md#wp-01-x",
+                        "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                        "design_file": ".nova/design/2026-08-27_x.md",
                         "package_ids": ["WP-01", "WP-02"],
                     }
                 ],
@@ -1707,7 +1714,7 @@ class NovaReviewTests(unittest.TestCase):
 
             review_path = (
                 repo
-                / "docs/audit/reviews/2026/08/NR-20260827-forged-packages.yaml"
+                / ".nova/audit/reviews/2026/08/NR-20260827-forged-packages.yaml"
             )
             review = json.loads(review_path.read_text(encoding="utf-8"))
             review["items"][0]["package_ids"] = ["WP-01"]
@@ -1715,7 +1722,7 @@ class NovaReviewTests(unittest.TestCase):
                 json.dumps(review, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-            archive_path = repo / "docs/audit/features/2026.jsonl"
+            archive_path = repo / ".nova/audit/features/2026.jsonl"
             feature = json.loads(archive_path.read_text(encoding="utf-8"))
             feature["package_ids"] = ["WP-01"]
             archive_path.write_text(
@@ -1732,9 +1739,9 @@ class NovaReviewTests(unittest.TestCase):
                     "-C",
                     str(repo),
                     "add",
-                    "PROJECT_BLUEPRINT.md",
-                    "docs/design/2026-08-27_x.md",
-                    "docs/audit",
+                    ".nova/PROJECT_BLUEPRINT.md",
+                    ".nova/design/2026-08-27_x.md",
+                    ".nova/audit",
                 ],
                 check=True,
             )
@@ -1784,8 +1791,8 @@ class NovaReviewTests(unittest.TestCase):
             repo = Path(directory)
             self.init_repo(repo)
             commit_hash = self.commit(repo, "fix.py", "fixed\n", message("FIX-001", "adhoc"))
-            (repo / "docs").mkdir()
-            (repo / "docs/audit").symlink_to(Path(outside), target_is_directory=True)
+            (repo / ".nova").mkdir()
+            (repo / ".nova/audit").symlink_to(Path(outside), target_is_directory=True)
             manifest = {
                 "schema": 1,
                 "batch_id": "NR-20260827-symlink",

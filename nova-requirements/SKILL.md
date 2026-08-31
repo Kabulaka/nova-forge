@@ -1,0 +1,45 @@
+---
+name: nova-requirements
+description: 通过单问题访谈把绿地项目或新的业务需求收敛为精简的总体产品需求与可由一名全栈工程师独立交付的 REQ 需求块。用于从零项目、总体业务流程、业务模块、新需求或修改既有需求；不用于技术选型、API/数据设计、普通功能实现、局部 FIX 或 Review。
+---
+
+# Nova 需求
+
+只定义业务要达到什么结果，不描述语言、框架、API、表、缓存、MQ、目录或实现步骤。
+
+## 路由与有限加载
+
+1. 首轮只检查用户表达、`.nova/PRODUCT_REQUIREMENTS.md` 的标题/总体流程/业务模块/需求索引，以及 `.nova/PROJECT_BLUEPRINT.md` 是否存在；不得扫描需求块、设计正文或代码树。
+2. 无需求文档且无代码/蓝图时按绿地项目推进；由一名产品负责人先确认总体业务，再拆需求块。需求确认后转交 `nova-architecture`，不直接进入业务开发。
+3. 有代码和蓝图但无需求文档时，先问是否补建；用户拒绝时不阻断普通开发。
+4. 新增或改变业务结果、参与者、流程、权限、状态、规则或范围时进入本技能。已确认需求下的具体功能实现交给 `nova-development`；既有契约内局部缺陷直接交给 FIX。
+5. 用户指明既有 `REQ-*` 时，只读取索引和该需求块。无法确定是需求变化还是局部实现问题时，只问一个会改变路由的问题。
+
+## 访谈
+
+首次提问前完整读取 [统一访谈 SOP](../nova-development/references/conversation-sop.md)，需求访谈与架构、开发保持相同的单问题、整份摘要确认和中断恢复语义。
+
+先收敛产品定位、角色、端到端流程、业务模块职责、关键对象生命周期、本期范围与明确不做；再按业务能力形成需求块。业务模块只用于归类，需求块才是交付单位。
+
+需求块必须满足：一名全栈工程师能独立完成前端、后端、数据与测试；业务输入、结果和验收完整；不依赖另一个工程师同步修改才能成立。能通过稳定业务边界消除的依赖必须消除；确有共享技术契约或硬依赖时记录为架构前置，不把技术层拆成多个需求块。
+
+## 文档与状态
+
+创建或更新前完整读取 [需求文档规范](references/requirements-standard.md)：
+
+- 总体契约固定为 `.nova/PRODUCT_REQUIREMENTS.md`，新建时严格使用 [总体需求模板](assets/PRODUCT_REQUIREMENTS.template.md)。
+- 每个需求块固定为 `.nova/requirements/REQ-<uuidv7>_具体名称.md`，新建时严格使用 [需求块模板](assets/REQUIREMENT_BLOCK.template.md)。
+- 新 Key 用 `python3 ../nova-review/scripts/nova_review.py new-requirement-id` 生成；Key 永久不变，需求块原地更新完整定义并递增版本，不创建日期副本或差量文档。
+- 状态只允许 `待实现 / 已实现 / 已更新`。新需求为待实现；已实现需求的业务定义改变后为已更新；Review PASS 只按蓝图中的需求引用元数据更新索引状态，不读取需求正文。
+- 普通规则调整只更新目标需求块和索引；只有总体流程、业务模块或项目范围改变时才更新总体章节。
+
+首次创建需求体系时可读取 [完整示例](references/examples/equipment-rental/.nova/PRODUCT_REQUIREMENTS.md) 及其目标需求块；已有体系时不加载示例或无关需求块。
+
+写入后运行：
+
+```bash
+python3 scripts/validate_requirements.py --index /absolute/path/to/.nova/PRODUCT_REQUIREMENTS.md
+python3 scripts/validate_requirements.py --block /absolute/path/to/.nova/requirements/REQ-..._name.md
+```
+
+需求确认只授权写需求契约。需要从零初始化时继续进入 `nova-architecture`；新的单个需求确认后，让用户选择是否进入 `nova-development` 澄清具体实现。

@@ -34,6 +34,7 @@ REJECT 时主代理统一修复全部 Blocker 与 Observation-Fix；只重跑被
 PASS 或按 SOP 合法的 PASS WITH NOTES 后，读取 [审计与关闭契约](references/audit-contract.md)。用 `scripts/nova_review.py record-pass` 对同批一个或多个工作项执行确定性关闭：
 
 - `PEND-*`：从蓝图删除，工作包改为已完成，按需把设计置为已实现；
+- 活动蓝图行含 `需求引用` 时：只解析 `.nova/PRODUCT_REQUIREMENTS.md` 的需求索引行并更新已实现版本、状态和 PEND 实现依据，不读取需求块正文；Review 版本落后于当前需求版本时保持“已更新”；
 - `FIX-*` / `MAINT-*`：不要求蓝图条目，只记录提交与 Review 批次；
 - 所有项：年度功能 JSONL 追加完成记录，月度目录新增一份严格 JSON-in-YAML Review 记录，并写入工作项哈希索引。
 

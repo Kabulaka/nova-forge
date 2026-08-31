@@ -13,7 +13,7 @@ WORKSPACE = Path(__file__).resolve().parents[2]
 GLOBAL = (WORKSPACE / "codex" / "AGENTS.global.md").read_text(encoding="utf-8")
 MIGRATION = (WORKSPACE / "codex" / "AGENTS.migration-map.md").read_text(encoding="utf-8")
 IMPLEMENTATION = (
-    WORKSPACE / "nova-brainstorming" / "references" / "implementation-sop.md"
+    WORKSPACE / "nova-development" / "references" / "implementation-sop.md"
 ).read_text(encoding="utf-8")
 FLOW_PROBE = WORKSPACE / "nova-review" / "scripts" / "probe_default_flow.py"
 SPEC = importlib.util.spec_from_file_location("nova_default_flow_probe", FLOW_PROBE)
@@ -26,7 +26,7 @@ class GlobalGovernanceTests(unittest.TestCase):
     def test_global_file_is_small_router_not_review_sop(self) -> None:
         self.assertLessEqual(len(GLOBAL.splitlines()), 100)
         self.assertLessEqual(len(GLOBAL.encode("utf-8")), 10_000)
-        self.assertIn("使用 `nova-brainstorming`", GLOBAL)
+        self.assertIn("使用 `nova-development`", GLOBAL)
         self.assertIn("使用 `nova-review`", GLOBAL)
         self.assertIn("不得以“保持全局文件简短”为由删除", GLOBAL)
         self.assertNotIn("Observation-Fix", GLOBAL)
@@ -70,7 +70,7 @@ class GlobalGovernanceTests(unittest.TestCase):
             "### 测试结果",
             "### 提交结果",
             "### Review 结果",
-            "### PROJECT_BLUEPRINT.md 与设计更新",
+            "### .nova/PROJECT_BLUEPRINT.md 与设计更新",
             "### 基线与清理",
             "### 遗留事项",
         ):

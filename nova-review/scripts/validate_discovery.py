@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 
-EXPECTED_SKILLS = ("nova-brainstorming", "nova-review")
+EXPECTED_SKILLS = ("nova-requirements", "nova-architecture", "nova-development", "nova-review")
 
 
 def skill_name(path: Path) -> str | None:
@@ -79,9 +79,10 @@ def validate(workspace: Path, codex_home: Path) -> list[str]:
         elif matching[0] != link:
             errors.append(f"{name} discoverable entity must use canonical link: {matching[0]}")
 
-    legacy = skill_home / "project-brainstorming"
-    if legacy.exists() or legacy.is_symlink():
-        errors.append(f"legacy discovery entry must be absent: {legacy}")
+    for legacy_name in ("project-brainstorming", "nova-brainstorming"):
+        legacy = skill_home / legacy_name
+        if legacy.exists() or legacy.is_symlink():
+            errors.append(f"legacy discovery entry must be absent: {legacy}")
 
     return errors
 

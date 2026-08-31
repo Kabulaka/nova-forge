@@ -20,6 +20,8 @@ python3 nova-review/scripts/nova_review.py new-id --class designed
 
 `--class` 可取 `designed`、`adhoc`、`maintenance`，分别生成 `PEND-*`、`FIX-*`、`MAINT-*`。既有纯数字 ID 继续合法且不得改写，但不得因蓝图删除活动行而重新分配；Review、归档前原范围修复提交和后续证据必须逐字沿用原 ID。生成器不读取登记表，不依赖锁、计数器、工作树、分支或主机状态。
 
+长期需求身份使用独立命令 `python3 nova-review/scripts/nova_review.py new-requirement-id` 生成 `REQ-<UUIDv7>`；它不是工作项，不进入 commit trailers 或 Review 选择。
+
 归档后发现既有契约缺陷时创建新 FIX；新增能力或改变公共契约时创建新 PEND 并以新设计的“演进来源”链接终态设计；纯维护创建新 MAINT。明确源于已归档 PEND 的新 FIX 必须增加单值 `Related-Work-Item: PEND-*`，且该值必须与新 FIX 不同并能通过可信审计索引验证；无关任务不得伪造关联。
 
 ## 2. 豁免白名单
@@ -39,7 +41,7 @@ python3 nova-review/scripts/nova_review.py new-id --class designed
 Nova-Schema: 1
 Work-Item: PEND-018f22e2-79b0-7abc-8123-456789abcdef
 Change-Class: designed
-Design-Ref: docs/design/2026-08-27_example.md#wp-01-example
+Design-Ref: .nova/design/2026-08-27_example.md#wp-01-example
 Review-Policy: required
 Exemption-Rule: none
 Validation: pytest tests/example.py (pass)
@@ -47,7 +49,8 @@ Validation: pytest tests/example.py (pass)
 
 规则：
 
-- `Design-Ref` 对 `designed` 必须是 `docs/design/*.md#<anchor>`，其余类别必须为 `none`；
+- `Design-Ref` 对 `designed` 必须是 `.nova/design/*.md#<anchor>`，其余类别必须为 `none`；
+- 迁移前不可变 commit 中的 `docs/design/*.md#<anchor>` 只作读取兼容，确定性映射到 `.nova/design/`；新提交不得继续使用旧路径；
 - `Review-Policy` 只允许 `required` 或 `exempt`；
 - required 时 `Exemption-Rule: none`；exempt 时只能为上节白名单；
 - 只解析提交消息尾部连续且完整的 trailer block；正文中的示例字段不算 trailers；

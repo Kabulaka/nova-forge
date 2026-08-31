@@ -1,0 +1,28 @@
+openapi: 3.1.0
+info:
+  title: Order API
+  version: 1.0.0
+paths:
+  /orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotencyKey]
+              properties:
+                idempotencyKey: {type: string, minLength: 1}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orderId, status]
+                properties:
+                  orderId: {type: string}
+                  status: {const: CREATED}
