@@ -227,7 +227,33 @@ def git_repo_for_nova(nova_root: Path) -> Path | None:
     return repo if (repo / ".nova").resolve() == nova_root.resolve() else None
 
 
-def trusted_review_pass(nova_root: Path, work_item: str, required_paths: set[Path]) -> bool:
+def reviewed_blob(module: ModuleType, repo: Path, feature: dict[str, object], relative: str) -> bytes | None:
+    commits = feature.get("commits", [])
+    if not isinstance(commits, list):
+        return None
+    for commit_ref in reversed(commits):
+        if not isinstance(commit_ref, dict) or commit_ref.get("repository") != "main":
+            continue
+        commit_hash = commit_ref.get("commit")
+        if not isinstance(commit_hash, str):
+            continue
+        blob = module.run_git_bytes(
+            repo, "show", f"{commit_hash}:{relative}", allow_missing=True
+        )
+        if blob is not None:
+            return blob
+    return None
+
+
+def trusted_review_pass(
+    nova_root: Path,
+    work_item: str,
+    index_path: Path,
+    current_index: str,
+    gate_name: str,
+    contract_type: str,
+    required_contracts: set[Path],
+) -> bool:
     module = nova_review_module()
     repo = git_repo_for_nova(nova_root)
     if module is None or repo is None:
@@ -255,32 +281,49 @@ def trusted_review_pass(nova_root: Path, work_item: str, required_paths: set[Pat
         )
     except (module.NovaError, OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
         return False
-    reviewed_commits = {
-        item["commit"]
-        for item in feature.get("commits", [])
-        if isinstance(item, dict) and item.get("repository") == "main"
-    }
     scope = set(review.get("review_scope", []))
-    for required in required_paths:
+    try:
+        index_relative = index_path.resolve().relative_to(repo).as_posix()
+    except ValueError:
+        return False
+    if f"main:{index_relative}" not in scope:
+        return False
+    reviewed_index_bytes = reviewed_blob(module, repo, feature, index_relative)
+    if reviewed_index_bytes is None:
+        return False
+    try:
+        reviewed_index = reviewed_index_bytes.decode("utf-8")
+    except UnicodeError:
+        return False
+    current_gates, current_gate_errors = table(current_index, "并行开发门禁", GATE_HEADERS)
+    reviewed_gates, reviewed_gate_errors = table(reviewed_index, "并行开发门禁", GATE_HEADERS)
+    current_contracts, current_contract_errors = table(current_index, "契约索引", INDEX_HEADERS)
+    reviewed_contracts, reviewed_contract_errors = table(reviewed_index, "契约索引", INDEX_HEADERS)
+    if current_gate_errors or reviewed_gate_errors or current_contract_errors or reviewed_contract_errors:
+        return False
+    current_gate_rows = [row for row in current_gates if row[0] == gate_name]
+    reviewed_gate_rows = [row for row in reviewed_gates if row[0] == gate_name]
+    if len(current_gate_rows) != 1 or current_gate_rows != reviewed_gate_rows:
+        return False
+    if (
+        [row for row in current_contracts if row[0] == contract_type]
+        != [row for row in reviewed_contracts if row[0] == contract_type]
+    ):
+        return False
+    for required in required_contracts:
         try:
             relative = required.resolve().relative_to(repo).as_posix()
         except ValueError:
             return False
         if f"main:{relative}" not in scope:
             return False
-        dirty = subprocess.run(
-            ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
-            check=False,
-        )
-        if dirty.returncode != 0:
+        expected = reviewed_blob(module, repo, feature, relative)
+        if expected is None:
             return False
-        latest = subprocess.run(
-            ["git", "-C", str(repo), "log", "-1", "--format=%H", "--", relative],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if latest.returncode or latest.stdout.strip() not in reviewed_commits:
+        try:
+            if required.read_bytes() != expected:
+                return False
+        except OSError:
             return False
     return True
 
@@ -396,8 +439,16 @@ def validate(path: Path, ready: bool) -> list[str]:
             if ready and needed == "是":
                 errors.append(f"parallel development gate is not ready: {name}")
             continue
-        required_paths = {path.resolve()} | targets_by_type.get(GATE_TYPES.get(name, ""), set())
-        trusted = trusted_review_pass(nova_root, evidence, required_paths)
+        contract_type = GATE_TYPES.get(name, "")
+        trusted = trusted_review_pass(
+            nova_root,
+            evidence,
+            path,
+            text,
+            name,
+            contract_type,
+            targets_by_type.get(contract_type, set()),
+        )
         if state == "已通过" and not trusted:
             errors.append(f"gate Review evidence is not a trusted PASS covering current contracts: {name}")
         if ready and needed == "是" and not trusted:

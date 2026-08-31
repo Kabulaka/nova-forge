@@ -28,6 +28,94 @@ class ArchitectureValidatorTests(unittest.TestCase):
     def run_validator(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["python3", str(VALIDATOR), *args], text=True, capture_output=True, check=False)
 
+    def record_designed_pass(
+        self,
+        repo: Path,
+        work_item: str,
+        design_relative: str,
+        anchor: str,
+        package_id: str,
+        batch_id: str,
+    ) -> str:
+        subprocess.run(["git", "-C", str(repo), "add", ".nova"], check=True)
+        commit_message = textwrap.dedent(
+            f"""
+            feat: freeze architecture {work_item}
+
+            Nova-Schema: 1
+            Work-Item: {work_item}
+            Change-Class: designed
+            Design-Ref: {design_relative}#{anchor}
+            Review-Policy: required
+            Exemption-Rule: none
+            Validation: architecture fixture (pass)
+            """
+        ).strip() + "\n"
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+            input=commit_message,
+            text=True,
+            check=True,
+        )
+        commit_hash = NOVA_REVIEW.run_git(repo, "rev-parse", "HEAD").strip()
+        reviewed_diff = NOVA_REVIEW.run_git(
+            repo, "show", "--format=", "--binary", "--no-ext-diff", commit_hash
+        )
+        digest, scope = NOVA_REVIEW.compute_review_evidence({("main", commit_hash): reviewed_diff})
+        manifest = {
+            "schema": 1,
+            "batch_id": batch_id,
+            "reviewed_at": "2026-08-31T12:00:00+08:00",
+            "reviewer": "review-agent",
+            "conclusion": "PASS",
+            "review_round": 1,
+            "review_content_sha256": digest,
+            "review_scope": scope,
+            "items": [{
+                "work_item": work_item,
+                "change_class": "designed",
+                "commits": [commit_hash],
+                "validation": "architecture fixture (pass)",
+                "design_ref": f"{design_relative}#{anchor}",
+                "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                "design_file": design_relative,
+                "package_ids": [package_id],
+            }],
+        }
+        manifest_path = repo / f"{batch_id}.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        recorded = subprocess.run(
+            [sys.executable, str(REVIEW_TOOL), "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+        subprocess.run(["git", "-C", str(repo), "add", ".nova"], check=True)
+        manifest_digest = NOVA_REVIEW.hashlib.sha256(
+            NOVA_REVIEW.canonical_manifest(manifest)
+        ).hexdigest()
+        audit_message = textwrap.dedent(
+            f"""
+            audit: record architecture Review
+
+            Nova-Audit-Schema: 1
+            Review-Batch: {batch_id}
+            Manifest-SHA256: {manifest_digest}
+            Validation: nova-review audit validation (pass)
+            """
+        ).strip() + "\n"
+        staged = NOVA_REVIEW.run_git(repo, "diff", "--cached", "--binary", "--no-ext-diff")
+        _, errors = NOVA_REVIEW.validate_audit_message(repo, audit_message, staged)
+        self.assertEqual(errors, [])
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+            input=audit_message,
+            text=True,
+            check=True,
+        )
+        return commit_hash
+
     def audited_example(self, temporary: str) -> Path:
         repo = Path(temporary) / "repo"
         repo.mkdir()
@@ -37,10 +125,6 @@ class ArchitectureValidatorTests(unittest.TestCase):
         target = repo / ".nova"
         shutil.copytree(EXAMPLE_NOVA, target)
         architecture = target / "architecture/ARCHITECTURE_CONTRACTS.md"
-        architecture.write_text(
-            architecture.read_text(encoding="utf-8").replace("待Review", "已通过"),
-            encoding="utf-8",
-        )
         blueprint = (target / "PROJECT_BLUEPRINT.md").read_text(encoding="utf-8")
         blueprint = blueprint.replace(
             "|------|--------|------|------|----------|----------|----------|----------|",
@@ -76,85 +160,13 @@ class ArchitectureValidatorTests(unittest.TestCase):
         design_path = target / "design/2026-08-31_architecture.md"
         design_path.parent.mkdir(parents=True)
         design_path.write_text(design, encoding="utf-8")
-        subprocess.run(["git", "-C", str(repo), "add", ".nova"], check=True)
-        commit_message = textwrap.dedent(
-            """
-            feat: freeze architecture
-
-            Nova-Schema: 1
-            Work-Item: PEND-100
-            Change-Class: designed
-            Design-Ref: .nova/design/2026-08-31_architecture.md#wp-01-architecture
-            Review-Policy: required
-            Exemption-Rule: none
-            Validation: architecture fixture (pass)
-            """
-        ).strip() + "\n"
-        subprocess.run(
-            ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
-            input=commit_message,
-            text=True,
-            check=True,
-        )
-        commit_hash = NOVA_REVIEW.run_git(repo, "rev-parse", "HEAD").strip()
-        reviewed_diff = NOVA_REVIEW.run_git(
-            repo, "show", "--format=", "--binary", "--no-ext-diff", commit_hash
-        )
-        digest, scope = NOVA_REVIEW.compute_review_evidence({("main", commit_hash): reviewed_diff})
-        manifest = {
-            "schema": 1,
-            "batch_id": "NR-20260831-architecture",
-            "reviewed_at": "2026-08-31T12:00:00+08:00",
-            "reviewer": "review-agent",
-            "conclusion": "PASS",
-            "review_round": 1,
-            "review_content_sha256": digest,
-            "review_scope": scope,
-            "items": [{
-                "work_item": "PEND-100",
-                "change_class": "designed",
-                "commits": [commit_hash],
-                "validation": "architecture fixture (pass)",
-                "design_ref": ".nova/design/2026-08-31_architecture.md#wp-01-architecture",
-                "blueprint": ".nova/PROJECT_BLUEPRINT.md",
-                "design_file": ".nova/design/2026-08-31_architecture.md",
-                "package_ids": ["WP-01"],
-            }],
-        }
-        manifest_path = repo / "review.json"
-        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        recorded = subprocess.run(
-            [sys.executable, str(REVIEW_TOOL), "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
-        subprocess.run(
-            ["git", "-C", str(repo), "add", ".nova/PROJECT_BLUEPRINT.md", ".nova/design", ".nova/audit"],
-            check=True,
-        )
-        manifest_digest = NOVA_REVIEW.hashlib.sha256(
-            NOVA_REVIEW.canonical_manifest(manifest)
-        ).hexdigest()
-        audit_message = textwrap.dedent(
-            f"""
-            audit: record architecture Review
-
-            Nova-Audit-Schema: 1
-            Review-Batch: NR-20260831-architecture
-            Manifest-SHA256: {manifest_digest}
-            Validation: nova-review audit validation (pass)
-            """
-        ).strip() + "\n"
-        staged = NOVA_REVIEW.run_git(repo, "diff", "--cached", "--binary", "--no-ext-diff")
-        _, errors = NOVA_REVIEW.validate_audit_message(repo, audit_message, staged)
-        self.assertEqual(errors, [])
-        subprocess.run(
-            ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
-            input=audit_message,
-            text=True,
-            check=True,
+        self.record_designed_pass(
+            repo,
+            "PEND-100",
+            ".nova/design/2026-08-31_architecture.md",
+            "wp-01-architecture",
+            "WP-01",
+            "NR-20260831-architecture",
         )
         return architecture
 
@@ -166,6 +178,70 @@ class ArchitectureValidatorTests(unittest.TestCase):
     def test_pending_document_becomes_ready_from_immutable_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = self.audited_example(temporary)
+            result = self.run_validator("--ready", str(path))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_incremental_architecture_reviews_keep_independent_gate_evidence_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.audited_example(temporary)
+            repo = path.parents[2]
+            blueprint_path = repo / ".nova/PROJECT_BLUEPRINT.md"
+            blueprint = blueprint_path.read_text(encoding="utf-8").replace(
+                "|------|--------|------|------|----------|----------|----------|----------|",
+                "|------|--------|------|------|----------|----------|----------|----------|\n"
+                "| PEND-200 | P0 | 用户提出 | 事件契约 | [WP-01](design/2026-08-31_event.md#wp-01-event) | 无 | 事件契约通过 Review | 无 |",
+            )
+            blueprint_path.write_text(blueprint, encoding="utf-8")
+            design = textwrap.dedent(
+                """
+                # 事件契约设计
+
+                > 设计规范版本：3
+                > 设计状态：已确认
+                > 演进来源：无
+                > 工作包：WP-01
+
+                ## 2. 工作包地图
+
+                | 工作包 | 状态 | 交付结果 | 前置依赖 | 设计章节 |
+                |--------|------|----------|----------|----------|
+                | WP-01 | 待Review | 新增事件契约 | 无 | [事件契约](#wp-01-event) |
+
+                ### 2.1 工作项关闭映射
+
+                | 工作项 | 工作包 |
+                |--------|--------|
+                | PEND-200 | WP-01 |
+
+                <a id="wp-01-event"></a>
+                ## WP-01 事件契约
+                """
+            ).lstrip()
+            design_path = repo / ".nova/design/2026-08-31_event.md"
+            design_path.write_text(design, encoding="utf-8")
+            index = path.read_text(encoding="utf-8").replace(
+                "| 事件契约 | 否 | 不适用 | 无 |",
+                "| 事件契约 | 是 | 待Review | PEND-200 |",
+            ).replace(
+                "| Mock | 订单 API |",
+                "| 事件 | 订单 | [订单事件](events/order-created.yaml) | 待Review | 订单模块 |\n"
+                "| Mock | 订单 API |",
+            )
+            path.write_text(index, encoding="utf-8")
+            event = path.parent / "events/order-created.yaml"
+            event.parent.mkdir()
+            event.write_text(
+                "asyncapi: 3.0.0\ninfo:\n  title: Order events\n  version: 1.0.0\nchannels: {}\n",
+                encoding="utf-8",
+            )
+            self.record_designed_pass(
+                repo,
+                "PEND-200",
+                ".nova/design/2026-08-31_event.md",
+                "wp-01-event",
+                "WP-01",
+                "NR-20260831-event",
+            )
             result = self.run_validator("--ready", str(path))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -203,11 +279,11 @@ class ArchitectureValidatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = self.audited_example(temporary)
             text = path.read_text(encoding="utf-8").replace("PEND-100", "PEND-999")
-            text = text.replace("[OpenAPI](api/openapi.yaml) | 已通过", "[OpenAPI](api/openapi.yaml) | 待Review")
+            text = text.replace("[OpenAPI](api/openapi.yaml) | 待Review", "[OpenAPI](api/openapi.yaml) | 已通过")
             path.write_text(text, encoding="utf-8")
             result = self.run_validator("--ready", str(path))
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("not a trusted PASS", result.stdout)
+            self.assertIn("parallel development gate is not ready", result.stdout)
             self.assertIn("gate state conflicts", result.stdout)
 
     def test_invalid_openapi_and_mock_contract_fail(self) -> None:
@@ -251,7 +327,7 @@ class ArchitectureValidatorTests(unittest.TestCase):
             api.write_text(api.read_text(encoding="utf-8") + "\n# changed after PASS\n", encoding="utf-8")
             result = self.run_validator("--ready", str(path))
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("not a trusted PASS covering current contracts", result.stdout)
+            self.assertIn("parallel development gate is not ready", result.stdout)
 
     def test_invalid_asyncapi_and_incomplete_foundation_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
