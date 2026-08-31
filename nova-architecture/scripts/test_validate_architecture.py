@@ -116,7 +116,7 @@ class ArchitectureValidatorTests(unittest.TestCase):
         )
         return commit_hash
 
-    def audited_example(self, temporary: str) -> Path:
+    def audited_example(self, temporary: str, *, second_api: bool = False) -> Path:
         repo = Path(temporary) / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -160,6 +160,17 @@ class ArchitectureValidatorTests(unittest.TestCase):
         design_path = target / "design/2026-08-31_architecture.md"
         design_path.parent.mkdir(parents=True)
         design_path.write_text(design, encoding="utf-8")
+        if second_api:
+            index = architecture.read_text(encoding="utf-8").replace(
+                "| Mock | 订单 API |",
+                "| API | 客户查询 | [客户 OpenAPI](api/customer.yaml) | 待Review | 客户模块 |\n"
+                "| Mock | 订单 API |",
+            )
+            architecture.write_text(index, encoding="utf-8")
+            (architecture.parent / "api/customer.yaml").write_text(
+                "openapi: 3.1.0\ninfo:\n  title: Customer API\n  version: 1.0.0\npaths: {}\n",
+                encoding="utf-8",
+            )
         self.record_designed_pass(
             repo,
             "PEND-100",
@@ -334,6 +345,61 @@ class ArchitectureValidatorTests(unittest.TestCase):
             unreviewed = self.run_validator("--ready", str(path))
             self.assertNotEqual(unreviewed.returncode, 0)
             self.assertIn("hard dependency row lacks trusted PASS evidence", unreviewed.stdout)
+
+    def test_contract_deletion_requires_its_own_reviewed_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.audited_example(temporary, second_api=True)
+            repo = path.parents[2]
+            index = "\n".join(
+                line
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if "[客户 OpenAPI]" not in line
+            ) + "\n"
+            path.write_text(index, encoding="utf-8")
+            (path.parent / "api/customer.yaml").unlink()
+
+            uncommitted = self.run_validator("--ready", str(path))
+            self.assertNotEqual(uncommitted.returncode, 0)
+            self.assertIn("architecture index history contains changes", uncommitted.stdout)
+
+            subprocess.run(
+                ["git", "-C", str(repo), "add", "-A", ".nova/architecture"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-m", "chore: remove customer contract"],
+                check=True,
+            )
+            unreviewed = self.run_validator("--ready", str(path))
+            self.assertNotEqual(unreviewed.returncode, 0)
+            self.assertIn("architecture index history contains changes", unreviewed.stdout)
+
+    def test_hard_dependency_deletion_requires_its_own_reviewed_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.audited_example(temporary)
+            repo = path.parents[2]
+            index = "\n".join(
+                line
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if "REQ-019a2234-5678-7abc-8def-0123456789ab" not in line
+            ) + "\n"
+            path.write_text(index, encoding="utf-8")
+
+            uncommitted = self.run_validator("--ready", str(path))
+            self.assertNotEqual(uncommitted.returncode, 0)
+            self.assertIn("architecture index history contains changes", uncommitted.stdout)
+
+            subprocess.run(
+                ["git", "-C", str(repo), "add", ".nova/architecture/ARCHITECTURE_CONTRACTS.md"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-m", "chore: remove dependency"],
+                check=True,
+            )
+            unreviewed = self.run_validator("--ready", str(path))
+            self.assertNotEqual(unreviewed.returncode, 0)
+            self.assertIn("architecture index history contains changes", unreviewed.stdout)
 
     def test_missing_review_evidence_is_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

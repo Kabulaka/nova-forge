@@ -383,6 +383,41 @@ def trusted_file_owner(
     return trusted_commit_owner(module, repo, commit_hash, relative, cache, audit_cache)
 
 
+def trusted_index_history(
+    module: ModuleType,
+    repo: Path,
+    path: Path,
+    cache: dict[str, tuple[dict[str, object], dict[str, object]] | None],
+    audit_cache: dict[str, dict[str, tuple[dict[str, object], dict[str, object]]]],
+) -> bool:
+    try:
+        relative = path.resolve().relative_to(repo).as_posix()
+        current = path.read_bytes()
+    except (ValueError, OSError):
+        return False
+    head = module.git_blob(repo, "HEAD", relative)
+    if head is None or current != head:
+        return False
+    result = subprocess.run(
+        ["git", "-C", str(repo), "log", "--follow", "--format=%H", "--", relative],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        return False
+    trusted_baseline = False
+    for commit_hash in reversed(result.stdout.splitlines()):
+        owner = trusted_commit_owner(
+            module, repo, commit_hash.strip(), relative, cache, audit_cache
+        )
+        if owner is not None:
+            trusted_baseline = True
+        elif trusted_baseline:
+            return False
+    return trusted_baseline
+
+
 def validate(path: Path, ready: bool) -> list[str]:
     text, errors = read(path)
     if text is None:
@@ -495,6 +530,15 @@ def validate(path: Path, ready: bool) -> list[str]:
     repo = git_repo_for_nova(nova_root)
     review_cache: dict[str, tuple[dict[str, object], dict[str, object]] | None] = {}
     audit_cache: dict[str, dict[str, tuple[dict[str, object], dict[str, object]]]] = {}
+    history_required = ready or any(state == "已通过" for _, _, state, _ in gates)
+    if history_required and (
+        module is None
+        or repo is None
+        or not trusted_index_history(
+            module, repo, path, review_cache, audit_cache
+        )
+    ):
+        errors.append("architecture index history contains changes outside trusted PASS work items")
     for (name, needed, state, evidence), gate_line in gate_entries:
         if state not in {"待Review", "已通过"} or PEND_RE.fullmatch(evidence) is None:
             if ready and needed == "是":
