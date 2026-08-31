@@ -1,0 +1,33 @@
+{
+  "batch_id": "NR-20260831-control-document-loading-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "adhoc",
+      "commits": [
+        {
+          "commit": "df7226678fefeb91c81282850344d50429f2c3ff",
+          "repository": "main"
+        },
+        {
+          "commit": "5ef4f0f6267279979a0017b8d4d81b1b5d28ddff",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "python3 -m unittest discover -s codex/scripts -p test_*.py (11 pass); python3 codex/scripts/test_agents_global.py (pass); git diff checks (pass)",
+      "work_item": "FIX-01a056d5-b744-708b-b2de-f4dfd5d36330"
+    }
+  ],
+  "manifest_sha256": "62dc0a5effaed86501d8c039f33dafcae236d16cd13d57f0a781f87d2f22ff0b",
+  "review_content_sha256": "c1a28ba50b4f30706a6ac3b610317e12f89fa91d602a92cc9f213b9350d6f9b3",
+  "review_round": 2,
+  "review_scope": [
+    "main:codex/AGENTS.global.md",
+    "main:codex/scripts/test_agents_global.py"
+  ],
+  "reviewed_at": "2026-08-31T17:01:56+08:00",
+  "reviewer": "/root/review_fix_control_loading",
+  "schema": 1
+}
