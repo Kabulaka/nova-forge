@@ -143,6 +143,8 @@ class NovaReviewTests(unittest.TestCase):
             if item["change_class"] == "designed":
                 paths.add(".nova/PROJECT_BLUEPRINT.md")
                 paths.add(str(item["design_file"]))
+                if (repo / ".nova/PRODUCT_REQUIREMENTS.md").is_file():
+                    paths.add(".nova/PRODUCT_REQUIREMENTS.md")
         subprocess.run(["git", "-C", str(repo), "add", "--", *sorted(paths)], check=True)
         digest = NOVA_TOOL.hashlib.sha256(NOVA_TOOL.canonical_manifest(manifest)).hexdigest()
         audit_message = textwrap.dedent(
@@ -226,15 +228,27 @@ class NovaReviewTests(unittest.TestCase):
         self.add_review_evidence(repo, review)
         return review
 
-    def record_designed_pass(self, repo: Path, suffix: str = "designed") -> str:
-        blueprint, design = self.designed_documents()
+    def record_designed_pass(
+        self, repo: Path, suffix: str = "designed", requirement_ref: str | None = None
+    ) -> str:
+        blueprint, design = self.designed_documents(requirement_ref=requirement_ref)
         (repo / ".nova").mkdir(exist_ok=True)
         (repo / ".nova/PROJECT_BLUEPRINT.md").write_text(blueprint, encoding="utf-8")
         design_path = repo / ".nova/design/2026-08-27_x.md"
         design_path.parent.mkdir(parents=True, exist_ok=True)
         design_path.write_text(design, encoding="utf-8")
+        tracked_paths = [".nova/PROJECT_BLUEPRINT.md", str(design_path.relative_to(repo))]
+        if requirement_ref is not None:
+            key = requirement_ref.split("@", 1)[0]
+            product = (
+                "| Requirement Key | 版本 | 状态 | 业务模块 | 需求块 | 已实现版本 | 实现依据 |\n"
+                "|-----------------|------|------|----------|--------|------------|----------|\n"
+                f"| {key} | v2 | 已更新 | 订单 | [创建](requirements/{key}_创建.md) | 无 | 无 |\n"
+            )
+            (repo / ".nova/PRODUCT_REQUIREMENTS.md").write_text(product, encoding="utf-8")
+            tracked_paths.append(".nova/PRODUCT_REQUIREMENTS.md")
         subprocess.run(
-            ["git", "-C", str(repo), "add", ".nova/PROJECT_BLUEPRINT.md", str(design_path.relative_to(repo))],
+            ["git", "-C", str(repo), "add", *tracked_paths],
             check=True,
         )
         subprocess.run(
@@ -365,6 +379,43 @@ class NovaReviewTests(unittest.TestCase):
                     result = self.validate(root, message(work_item, change_class, design_ref))
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("Work-Item does not match", result.stderr)
+
+    def test_new_commit_rejects_legacy_design_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.validate(
+                Path(directory),
+                message("PEND-001", "designed", "docs/design/legacy.md#wp-01"),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("require .nova/design", result.stdout + result.stderr)
+
+    def test_legacy_blueprint_reference_is_reconstructed_in_legacy_layout(self) -> None:
+        blueprint, _ = self.designed_documents()
+        legacy = blueprint.replace(
+            "design/2026-08-27_x.md#wp-01-x",
+            "docs/design/2026-08-27_x.md#wp-01-x",
+        )
+        closed = NOVA_TOOL.remove_blueprint_row(
+            legacy,
+            "PEND-001",
+            "docs/design/2026-08-27_x.md#wp-01-x",
+            legacy_layout=True,
+        )
+        self.assertNotIn("PEND-001", closed)
+
+    def test_migrated_workspace_historical_audits_remain_queryable(self) -> None:
+        workspace = SKILL_ROOT.parent
+        index_root = workspace / ".nova/audit/index"
+        if not (workspace / ".git").is_dir() or not index_root.is_dir():
+            self.skipTest("workspace migration history is unavailable")
+        work_items = sorted(path.stem for path in index_root.glob("*/*.json"))
+        self.assertTrue(work_items)
+        for work_item in work_items:
+            with self.subTest(work_item=work_item):
+                result = self.run_tool(
+                    "query", "--repo", str(workspace), "--work-item", work_item
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_review_selection_preserves_uuid7_work_item(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -912,7 +963,9 @@ class NovaReviewTests(unittest.TestCase):
                 ["FIX-002", "FIX-003", "MAINT-002", "PEND-001"],
             )
 
-    def designed_documents(self, *, role_column: bool = False) -> tuple[str, str]:
+    def designed_documents(
+        self, *, role_column: bool = False, requirement_ref: str | None = None
+    ) -> tuple[str, str]:
         blueprint = textwrap.dedent(
             """
             # Blueprint
@@ -924,6 +977,14 @@ class NovaReviewTests(unittest.TestCase):
             | PEND-001 | P1 | 用户提出 | Nova | [WP-01](design/2026-08-27_x.md#wp-01-x) | 无 | pass |
             """
         ).lstrip()
+        if requirement_ref is not None:
+            blueprint = blueprint.replace(
+                "| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |",
+                "| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 | 需求引用 |",
+            ).replace(
+                "|------|--------|------|------|----------|----------|----------|",
+                "|------|--------|------|------|----------|----------|----------|----------|",
+            ).replace("| 无 | pass |", f"| 无 | pass | {requirement_ref} |")
         design = textwrap.dedent(
             """
             # Design
@@ -1029,6 +1090,25 @@ class NovaReviewTests(unittest.TestCase):
             self.assertEqual(blueprint_path.read_text(encoding="utf-8"), blueprint)
             self.assertEqual(design_path.read_text(encoding="utf-8"), design)
             self.assertFalse((repo / ".nova/audit").exists())
+
+    def test_record_pass_atomically_updates_requirement_and_closure(self) -> None:
+        requirement = "REQ-019a1234-5678-7abc-8def-0123456789ab"
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            self.record_designed_pass(repo, "requirement", f"{requirement}@v1")
+            product = (repo / ".nova/PRODUCT_REQUIREMENTS.md").read_text(encoding="utf-8")
+            self.assertIn(f"| {requirement} | v2 | 已更新 |", product)
+            self.assertIn("| v1 | PEND-001 |", product)
+            self.assertNotIn(
+                "PEND-001", (repo / ".nova/PROJECT_BLUEPRINT.md").read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                "| WP-01 | 已完成 |",
+                (repo / ".nova/design/2026-08-27_x.md").read_text(encoding="utf-8"),
+            )
+            queried = self.run_tool("query", "--repo", str(repo), "--work-item", "PEND-001")
+            self.assertEqual(queried.returncode, 0, queried.stdout + queried.stderr)
 
     def test_design_without_closure_map_rejects_multiple_ready_packages(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

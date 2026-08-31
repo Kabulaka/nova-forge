@@ -34,7 +34,7 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 先从用户明确路径、当前请求指向的仓库或已确认会话状态确定目标项目。只因当前目录存在蓝图，不得把它当成目标项目。未能安全确定且不同路径会改变结果时，只问项目位置。项目治理蓝图固定为 `.nova/PROJECT_BLUEPRINT.md`。
 
-若检测到根目录 `PROJECT_BLUEPRINT.md`、`PRODUCT_REQUIREMENTS.md` 或 `docs/design/`、`docs/audit/`、`docs/requirements/`、`docs/architecture/` 等旧布局，完整读取“布局迁移”小节并先执行 `scripts/migrate_nova_layout.py --repo <根目录>` dry-run。展示精确移动、引用改写和冲突后必须再次取得用户明确批准，才能增加 `--apply`；不得覆盖、保留重复实体或把布局迁移与内容模板升级混为同一步骤。
+若检测到根目录 `PROJECT_BLUEPRINT.md`、`PRODUCT_REQUIREMENTS.md` 或 `docs/design/`、`docs/audit/`、`docs/requirements/`、`docs/architecture/` 等旧布局，完整读取“布局迁移”小节并先执行 `scripts/migrate_nova_layout.py --repo <根目录>` dry-run。展示精确移动、引用改写、冲突和 `Plan-SHA256` 后必须再次取得用户明确批准，才能执行 `--apply --plan-sha256 <已批准摘要>`；不得覆盖、保留重复实体或把布局迁移与内容模板升级混为同一步骤。
 
 会话内维护：目标根目录绝对路径、蓝图绝对路径、规范版本、蓝图 SHA-256、已加载的项目指令、访谈 SOP SHA-256，以及本路由已加载的项目文档和技能文档资源状态。资源状态按目标项目绝对路径、资源绝对路径和 SHA-256 隔离。用户无需管理这些状态。
 
@@ -149,4 +149,4 @@ docs/design/            -> .nova/design/
 docs/audit/             -> .nova/audit/
 ```
 
-默认 dry-run 必须零写入。`--apply` 只在同一份计划无冲突且用户已批准时使用 `git mv`，同步当前源码、配置与活动治理文档中的已知引用；可信历史审计和终态设计正文保持原字节，旧路径由校验器和 Review 的确定性映射解析。任一源变化、目标冲突、未跟踪源、引用无法解码或迁移后校验失败都整体失败，不留下部分移动。
+默认 dry-run 必须零写入。`--apply` 必须同时提供用户已批准的 `Plan-SHA256`；摘要覆盖移动实体的路径、类型、模式、内容树及全部引用改写，任一差异都拒绝执行。匹配后才使用 `git mv`，同步当前源码、配置与活动治理文档中的已知引用；可信历史审计和终态设计正文保持原字节，旧路径由校验器和 Review 的确定性映射解析。符号链接不作为文本跟随，任一源变化、目标冲突、未跟踪源、引用无法解码、越界或迁移后校验失败都整体回滚；回滚失败必须报告实际残留。

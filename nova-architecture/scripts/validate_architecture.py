@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -15,6 +16,15 @@ INDEX_HEADERS = ("契约类型", "业务范围", "路径", "状态", "所有者"
 DEPENDENCY_HEADERS = ("需求块", "依赖需求块", "无法解除的业务原因", "开发顺序")
 REQUIRED_GATES = ("共享工程骨架", "数据所有权与契约", "公共 API 契约", "事件契约", "Mock 与测试夹具")
 STATUS = {"待确认", "待Review", "已通过", "不适用"}
+CONTRACT_TYPES = {"工程骨架", "数据", "API", "事件", "Mock"}
+GATE_TYPES = {
+    "共享工程骨架": "工程骨架",
+    "数据所有权与契约": "数据",
+    "公共 API 契约": "API",
+    "事件契约": "事件",
+    "Mock 与测试夹具": "Mock",
+}
+PEND_RE = re.compile(r"^PEND-(?:[0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$")
 PLACEHOLDER_RE = re.compile(r"<(?!/?a\b)[^>\n]+>|\b(?:TODO|TBD)\b|\{\{[^}\n]+\}\}", re.IGNORECASE)
 
 
@@ -62,6 +72,8 @@ def table(text: str, section: str, headers: tuple[str, ...]) -> tuple[list[list[
             row = [cell.strip() for cell in lines[cursor].strip().strip("|").split("|")]
             if len(row) != len(headers):
                 return rows, [f"invalid column count in {section}"]
+            if any(not cell for cell in row):
+                return rows, [f"empty table cell in {section}"]
             rows.append(row)
             cursor += 1
         return rows, [] if rows else [f"table must contain rows: {section}"]
@@ -91,6 +103,87 @@ def validate_data_contract(path: Path) -> list[str]:
     return errors
 
 
+def validate_foundation_contract(path: Path) -> list[str]:
+    text, errors = read(path)
+    if text is None:
+        return errors
+    if sections(text) != ("技术与运行", "目录与依赖"):
+        errors.append("foundation contract sections must be exactly: 技术与运行 | 目录与依赖")
+    if re.findall(r"^>\s*工程骨架契约版本[：:]\s*(.+?)\s*$", text, re.MULTILINE) != ["1"]:
+        errors.append("foundation contract version must be 1")
+    for section, headers in (
+        ("技术与运行", ("语言", "框架", "运行形态", "持久化", "缓存", "消息", "鉴权", "部署")),
+        ("目录与依赖", ("代码区域", "职责", "允许依赖", "禁止依赖")),
+    ):
+        _, table_errors = table(text, section, headers)
+        errors.extend(table_errors)
+    return errors
+
+
+def structured_contract_root(path: Path, key: str) -> bool:
+    text, errors = read(path)
+    if text is None or errors:
+        return False
+    if path.suffix == ".json":
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(value, dict) and isinstance(value.get(key), str) and bool(value[key].strip())
+    return re.search(rf"(?m)^{re.escape(key)}\s*:\s*['\"]?[^\s'\"]+", text) is not None
+
+
+def validate_mock(path: Path, root: Path, indexed: set[Path]) -> list[str]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return [f"invalid Mock JSON: {exc}"]
+    if not isinstance(value, dict):
+        return ["Mock must be a JSON object"]
+    contract = value.get("_contract")
+    version = value.get("_contractVersion")
+    if not isinstance(contract, str) or not contract or not isinstance(version, str) or not version:
+        return ["Mock requires non-empty _contract and _contractVersion"]
+    target = (path.parent / contract).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return ["Mock contract reference escapes architecture directory"]
+    if target not in indexed:
+        return ["Mock contract reference must target an indexed contract"]
+    return []
+
+
+def trusted_review_pass(nova_root: Path, work_item: str) -> bool:
+    index_files = list((nova_root / "audit/index").glob(f"*/{work_item}.json"))
+    if len(index_files) != 1:
+        return False
+    try:
+        index = json.loads(index_files[0].read_text(encoding="utf-8"))
+        if index.get("schema") != 1 or index.get("work_item") != work_item:
+            return False
+        review_path = index.get("review_path")
+        if not isinstance(review_path, str):
+            return False
+        if review_path.startswith(".nova/"):
+            review = nova_root / review_path.removeprefix(".nova/")
+        elif review_path.startswith("docs/audit/"):
+            review = nova_root / review_path.removeprefix("docs/audit/")
+        else:
+            return False
+        review = review.resolve()
+        review.relative_to((nova_root / "audit/reviews").resolve())
+        record = json.loads(review.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+    return (
+        record.get("schema") == 1
+        and record.get("batch_id") == index.get("review_batch")
+        and record.get("conclusion") in {"PASS", "PASS WITH NOTES"}
+        and any(item.get("work_item") == work_item for item in record.get("items", []) if isinstance(item, dict))
+    )
+
+
 def validate(path: Path, ready: bool) -> list[str]:
     text, errors = read(path)
     if text is None:
@@ -116,6 +209,13 @@ def validate(path: Path, ready: bool) -> list[str]:
     gate_names = [row[0] for row in gates]
     if tuple(gate_names) != REQUIRED_GATES:
         errors.append("parallel gates must be exactly: " + " | ".join(REQUIRED_GATES))
+    contracts_by_type: dict[str, list[list[str]]] = {contract_type: [] for contract_type in CONTRACT_TYPES}
+    for row in contracts:
+        if row[0] not in CONTRACT_TYPES:
+            errors.append(f"invalid architecture contract type: {row[0]}")
+        else:
+            contracts_by_type[row[0]].append(row)
+    nova_root = path.parent.parent.resolve()
     for name, needed, state, evidence in gates:
         if needed not in {"是", "否"}:
             errors.append(f"invalid needed value for {name}: {needed}")
@@ -125,13 +225,32 @@ def validate(path: Path, ready: bool) -> list[str]:
             errors.append(f"unneeded gate must be 不适用 with 无 evidence: {name}")
         if needed == "是" and state == "不适用":
             errors.append(f"needed gate cannot be 不适用: {name}")
-        if state == "已通过" and evidence == "无":
-            errors.append(f"passed gate requires Review evidence: {name}")
-        if ready and needed == "是" and (state != "已通过" or evidence == "无"):
+        contract_rows = contracts_by_type.get(GATE_TYPES.get(name, ""), [])
+        if needed == "是" and not contract_rows:
+            errors.append(f"needed gate has no indexed contract: {name}")
+        if needed == "否" and contract_rows:
+            errors.append(f"unneeded gate must not have indexed contracts: {name}")
+        if contract_rows:
+            states = [row[3] for row in contract_rows]
+            derived = "待确认" if "待确认" in states else "待Review" if "待Review" in states else "已通过"
+            if state != derived:
+                errors.append(f"gate state conflicts with indexed contracts: {name}")
+        trusted_evidence = False
+        if state in {"待Review", "已通过"}:
+            if PEND_RE.fullmatch(evidence) is None:
+                errors.append(f"reviewable gate requires PEND Review evidence: {name}")
+            else:
+                trusted_evidence = trusted_review_pass(nova_root, evidence)
+            if state == "已通过" and not trusted_evidence:
+                errors.append(f"gate Review evidence is not a trusted PASS: {name}")
+        elif evidence != "无":
+            errors.append(f"unconfirmed gate must use 无 Review evidence: {name}")
+        if ready and needed == "是" and not trusted_evidence:
             errors.append(f"parallel development gate is not ready: {name}")
 
     root = path.parent.resolve()
     referenced: set[Path] = set()
+    contract_targets: list[tuple[str, str, Path]] = []
     for contract_type, scope, link, state, owner in contracts:
         if state not in STATUS - {"不适用"}:
             errors.append(f"invalid contract status for {scope}: {state}")
@@ -149,12 +268,21 @@ def validate(path: Path, ready: bool) -> list[str]:
             errors.append(f"architecture contract file not found: {link}")
             continue
         referenced.add(target)
-        if contract_type == "数据":
+        contract_targets.append((contract_type, link, target))
+    for contract_type, link, target in contract_targets:
+        if contract_type == "工程骨架":
+            errors.extend(f"{link}: {error}" for error in validate_foundation_contract(target))
+        elif contract_type == "数据":
             errors.extend(f"{link}: {error}" for error in validate_data_contract(target))
-        if contract_type == "API" and target.suffix not in {".yaml", ".yml", ".json"}:
-            errors.append(f"API contract must use OpenAPI YAML or JSON: {link}")
-        if contract_type == "事件" and target.suffix not in {".yaml", ".yml", ".json"}:
-            errors.append(f"event contract must use AsyncAPI YAML or JSON: {link}")
+        elif contract_type == "API" and (target.suffix not in {".yaml", ".yml", ".json"} or not structured_contract_root(target, "openapi")):
+            errors.append(f"API contract must contain a valid OpenAPI root: {link}")
+        elif contract_type == "事件" and (target.suffix not in {".yaml", ".yml", ".json"} or not structured_contract_root(target, "asyncapi")):
+            errors.append(f"event contract must contain a valid AsyncAPI root: {link}")
+        elif contract_type == "Mock":
+            if target.suffix != ".json":
+                errors.append(f"Mock contract must use JSON: {link}")
+            else:
+                errors.extend(f"{link}: {error}" for error in validate_mock(target, root, referenced))
     for directory in ("api", "data", "events", "mocks"):
         candidate = path.parent / directory
         if candidate.is_dir() and not any(file.is_file() for file in candidate.rglob("*")):

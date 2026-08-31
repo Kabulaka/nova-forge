@@ -14,7 +14,10 @@
 
 | 类别 | 当前事实或硬约束 | 事实来源 |
 |------|------------------|----------|
+| 语言与框架 | Python 3.13 / FastAPI，单体模块化服务 | `.nova/architecture/foundation/project-skeleton.md` |
+| 持久化与缓存 | PostgreSQL；本期不使用缓存和 MQ | `.nova/architecture/foundation/project-skeleton.md` |
 | API | OpenAPI 3.1 | `.nova/architecture/api/openapi.yaml` |
+| 鉴权与部署 | OIDC Bearer Token；OCI 容器单实例起步 | `.nova/architecture/foundation/project-skeleton.md` |
 
 ## 3. 代码结构
 

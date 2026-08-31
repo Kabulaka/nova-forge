@@ -45,6 +45,7 @@ def valid_design(
     include_staging: bool = False,
     replacement: bool = False,
     evolution: str = "无",
+    requirement_ref: str = "无",
     confirmation: str | None | object = AUTO_CONFIRMATION,
 ) -> str:
     if len(package_states) != len(package_ids):
@@ -117,6 +118,7 @@ def valid_design(
         > 设计规范版本：{version}
         > 设计状态：{state}
         > 演进来源：{evolution}
+        > Requirement-Ref：{requirement_ref}
         > 工作包：{"、".join(package_ids)}
         {replacement_line}
         <a id="shared-context"></a>
@@ -219,7 +221,13 @@ def legacy_terminal_design() -> str:
 
 
 def valid_blueprint(rows: str) -> str:
-    rows_for_template = rows.replace("\n", "\n            ")
+    normalized_rows: list[str] = []
+    for row in rows.splitlines():
+        cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
+        if len(cells) == 7:
+            row = row.rstrip().rstrip("|") + " | 无 |"
+        normalized_rows.append(row)
+    rows_for_template = "\n".join(normalized_rows).replace("\n", "\n            ")
     return (
         textwrap.dedent(
             f"""
@@ -282,8 +290,8 @@ def valid_blueprint(rows: str) -> str:
 
             ## 6. 待开发功能
 
-            | 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |
-            |------|--------|------|------|----------|----------|----------|
+            | 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 | 需求引用 |
+            |------|--------|------|------|----------|----------|----------|----------|
             {rows_for_template}
 
             ## 7. 系统架构
@@ -398,6 +406,57 @@ class ValidatorTests(unittest.TestCase):
             self.assertEqual(self.run_validator(design, design=True).returncode, 0)
             result = self.run_validator(blueprint)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_version_five_design_requires_requirement_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "2026-08-31_missing-requirement.md"
+            path.write_text(
+                re.sub(r"^> Requirement-Ref：.*\n", "", valid_confirmed_current_design(), flags=re.MULTILINE),
+                encoding="utf-8",
+            )
+            result = self.run_validator(path, design=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("exactly one Requirement-Ref", result.stdout)
+
+    def test_blueprint_requirement_must_match_referenced_design(self) -> None:
+        requirement_a = "REQ-019a1234-5678-7abc-8def-0123456789ab@v1"
+        requirement_b = "REQ-019a2234-5678-7abc-8def-0123456789ab@v1"
+        row = (
+            "| TASK-01 | P1 | 用户提出 | 第一项 | "
+            "[WP-01](design/2026-08-26_epic.md#wp-01-example) | 无 | 第一项可验收 | "
+            f"{requirement_b} |"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            blueprint, _ = self.write_project(
+                Path(directory), valid_blueprint(row), valid_design(requirement_ref=requirement_a)
+            )
+            result = self.run_validator(blueprint)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requirement reference does not match design", result.stdout)
+
+    def test_legacy_pending_header_requires_git_head_proof(self) -> None:
+        row = "| TASK-01 | P1 | 用户提出 | 第一项 | 待澄清 | 无 | 第一项可验收 |"
+        current = valid_blueprint(row)
+        lines = current.splitlines()
+        header_index = next(index for index, line in enumerate(lines) if "| 编号 | 优先级 | 来源 |" in line)
+        lines[header_index] = "| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |"
+        lines[header_index + 1] = "|------|--------|------|------|----------|----------|----------|"
+        row_index = next(index for index, line in enumerate(lines) if line.startswith("| TASK-01 |"))
+        lines[row_index] = lines[row_index].rsplit("| 无 |", 1)[0] + "|"
+        legacy = "\n".join(lines) + "\n"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blueprint, _ = self.write_project(root, legacy)
+            failed = self.run_validator(blueprint)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("legacy layout is allowed only from Git HEAD", failed.stdout)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "Nova Test"], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "legacy"], check=True)
+            passed = self.run_validator(blueprint)
+            self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
 
     def test_version_five_confirmed_design_requires_matching_confirmation(self) -> None:
         confirmed = valid_confirmed_current_design()

@@ -50,6 +50,12 @@ class RequirementStatusTests(unittest.TestCase):
         self.assertIn(f"| {REQ} | v2 | 已更新 |", updated)
         self.assertIn(f"| v1 | {PEND} |", updated)
 
+    def test_reviewed_version_newer_than_current_fails(self) -> None:
+        with self.assertRaisesRegex(NOVA.NovaError, "newer than current index"):
+            NOVA.update_product_requirement_status(
+                product_row("v1", "待实现", "无", "无"), f"{REQ}@v2", PEND
+            )
+
     def test_blueprint_requirement_ref_is_metadata_only(self) -> None:
         blueprint = (
             "| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 | 需求引用 |\n"

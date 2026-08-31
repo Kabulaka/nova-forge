@@ -51,7 +51,8 @@ WORK_ITEM_PATTERNS = {
     change_class: re.compile(rf"^{prefix}-(?:[0-9]+|{UUID7_PATTERN})$")
     for change_class, prefix in WORK_ITEM_PREFIXES.items()
 }
-DESIGN_REF_RE = re.compile(r"^(?:\.nova/design|docs/design)/[^#\s]+\.md#[A-Za-z0-9][A-Za-z0-9._-]*$")
+DESIGN_REF_RE = re.compile(r"^\.nova/design/[^#\s]+\.md#[A-Za-z0-9][A-Za-z0-9._-]*$")
+LEGACY_DESIGN_REF_RE = re.compile(r"^docs/design/[^#\s]+\.md#[A-Za-z0-9][A-Za-z0-9._-]*$")
 REQUIREMENT_REF_RE = re.compile(
     r"^REQ-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}@v[1-9][0-9]*$"
 )
@@ -164,7 +165,13 @@ def normalize_design_ref(value: str) -> str:
     return f"{normalize_nova_path(path)}#{anchor}"
 
 
-def blueprint_design_ref(value: str) -> str:
+def blueprint_design_ref(value: str, *, legacy_layout: bool = False) -> str:
+    if legacy_layout:
+        path, separator, anchor = value.partition("#")
+        normalized = normalize_nova_path(path)
+        if normalized.startswith(".nova/design/"):
+            normalized = "docs/design/" + normalized[len(".nova/design/"):]
+        return f"{normalized}{separator}{anchor}"
     normalized = normalize_design_ref(value)
     return normalized[len(".nova/") :] if normalized.startswith(".nova/") else normalized
 
@@ -416,7 +423,9 @@ def whitespace_only_diff(diff: str) -> bool:
     return all(bool(old) and bool(new) and normalize(old) == normalize(new) for old, new in files)
 
 
-def validate_metadata(values: dict[str, str], diff: str | None = None) -> list[str]:
+def validate_metadata(
+    values: dict[str, str], diff: str | None = None, *, allow_legacy_design_ref: bool = False
+) -> list[str]:
     errors: list[str] = []
     if values.get("Nova-Schema") != SCHEMA:
         errors.append(f"Nova-Schema must be {SCHEMA}")
@@ -440,7 +449,10 @@ def validate_metadata(values: dict[str, str], diff: str | None = None) -> list[s
 
     design_ref = values.get("Design-Ref", "")
     if change_class == "designed":
-        if not DESIGN_REF_RE.fullmatch(design_ref):
+        valid_design_ref = DESIGN_REF_RE.fullmatch(design_ref) is not None
+        if allow_legacy_design_ref and LEGACY_DESIGN_REF_RE.fullmatch(design_ref) is not None:
+            valid_design_ref = True
+        if not valid_design_ref:
             errors.append("designed changes require .nova/design/*.md#anchor Design-Ref")
     elif design_ref != "none":
         errors.append("adhoc and maintenance changes require Design-Ref: none")
@@ -501,6 +513,15 @@ def validate_message(
     return values, errors
 
 
+def legacy_design_ref_allowed(repo: Path, commit_hash: str, design_ref: str) -> bool:
+    legacy_path = design_ref.split("#", 1)[0]
+    return (
+        LEGACY_DESIGN_REF_RE.fullmatch(design_ref) is not None
+        and run_git_bytes(repo, "show", f"{commit_hash}:{legacy_path}", allow_missing=True) is not None
+        and run_git_bytes(repo, "show", f"{commit_hash}:.nova/PROJECT_BLUEPRINT.md", allow_missing=True) is None
+    )
+
+
 def scan_commits(
     repo: Path, work_item: str | None = None, revision: str | None = None
 ) -> list[dict[str, Any]]:
@@ -527,7 +548,9 @@ def scan_commits(
             diff = None
             if values.get("Review-Policy") == "exempt":
                 diff = run_git(repo, "show", "--format=", "--no-ext-diff", commit_hash)
-            errors.extend(validate_metadata(values, diff))
+            design_ref = values.get("Design-Ref", "")
+            legacy_allowed = legacy_design_ref_allowed(repo, commit_hash, design_ref)
+            errors.extend(validate_metadata(values, diff, allow_legacy_design_ref=legacy_allowed))
         commits.append({"commit": commit_hash, "metadata": values, "errors": errors})
     return commits
 
@@ -654,7 +677,11 @@ def validate_feature_record(record: Any, work_item: str) -> dict[str, Any]:
     ):
         raise NovaError(f"invalid feature record values for {work_item}")
     if change_class == "designed":
-        if not DESIGN_REF_RE.fullmatch(str(record.get("design_ref", ""))) or not package_ids:
+        design_ref = str(record.get("design_ref", ""))
+        if (
+            DESIGN_REF_RE.fullmatch(design_ref) is None
+            and LEGACY_DESIGN_REF_RE.fullmatch(design_ref) is None
+        ) or not package_ids:
             raise NovaError(f"invalid designed feature record for {work_item}")
     elif record.get("design_ref") != "none" or package_ids:
         raise NovaError(f"invalid non-designed feature record for {work_item}")
@@ -863,7 +890,17 @@ def validate_recorded_commits(
                 raise NovaError(f"non-canonical reviewed commit for {work_item}")
             message = run_git(repo, "show", "-s", "--format=%B", commit_hash)
             diff = run_git(repo, "show", "--format=", "--binary", "--no-ext-diff", commit_hash)
-            metadata, errors = validate_message(message, diff)
+            metadata, errors = parse_message(message)
+            if not errors:
+                errors.extend(
+                    validate_metadata(
+                        metadata,
+                        diff,
+                        allow_legacy_design_ref=legacy_design_ref_allowed(
+                            repo, commit_hash, metadata.get("Design-Ref", "")
+                        ),
+                    )
+                )
             if errors:
                 raise NovaError(f"invalid reviewed commit {commit_hash}: " + "; ".join(errors))
             expected = (work_item, item["change_class"], item["design_ref"], "required")
@@ -993,7 +1030,7 @@ def expected_audit_snapshot(
                 product, requirement_ref, item["work_item"]
             )
         text_updates[blueprint_relative] = remove_blueprint_row(
-            blueprint, item["work_item"], item["design_ref"]
+            blueprint, item["work_item"], item["design_ref"], legacy_layout=legacy_layout
         )
         text_updates[design_relative] = complete_design_packages(
             design, item["package_ids"], anchor
@@ -1865,12 +1902,14 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def remove_blueprint_row(text: str, work_item: str, design_ref: str) -> str:
+def remove_blueprint_row(
+    text: str, work_item: str, design_ref: str, *, legacy_layout: bool = False
+) -> str:
     lines = text.splitlines(keepends=True)
     matches = [index for index, line in enumerate(lines) if re.match(rf"^\|\s*{re.escape(work_item)}\s*\|", line)]
     if len(matches) != 1:
         raise NovaError(f"blueprint must contain exactly one row for {work_item}")
-    if f"]({blueprint_design_ref(design_ref)})" not in lines[matches[0]]:
+    if f"]({blueprint_design_ref(design_ref, legacy_layout=legacy_layout)})" not in lines[matches[0]]:
         raise NovaError(f"blueprint design reference mismatch for {work_item}")
     del lines[matches[0]]
     return "".join(lines)

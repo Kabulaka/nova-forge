@@ -696,6 +696,72 @@ def validate_design_reference(blueprint: Path, value: str) -> list[str]:
     return []
 
 
+def referenced_design_requirement(blueprint: Path, value: str) -> str | None:
+    match = DESIGN_LINK_RE.fullmatch(value)
+    if match is None:
+        return None
+    target = (blueprint.parent / match.group(1)).resolve()
+    text, _ = read_document(target)
+    if text is None:
+        return None
+    values = re.findall(r"^>\s*Requirement-Ref[：:]\s*(.+?)\s*$", text, re.MULTILINE)
+    return values[0] if len(values) == 1 else "无"
+
+
+def head_has_legacy_pending_layout(path: Path) -> bool:
+    try:
+        repo_result = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    repo = Path(repo_result.stdout.strip()).resolve()
+    try:
+        relative = path.resolve().relative_to(repo).as_posix()
+    except ValueError:
+        return False
+    legacy_header = "| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |"
+    for candidate in git_head_path_candidates(relative):
+        result = subprocess.run(
+            ["git", "-C", str(repo), "show", f"HEAD:{candidate}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and legacy_header in result.stdout:
+            return True
+    return False
+
+
+def git_head_matches_document(path: Path, text: str) -> bool:
+    try:
+        repo_result = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    repo = Path(repo_result.stdout.strip()).resolve()
+    try:
+        relative = path.resolve().relative_to(repo).as_posix()
+    except ValueError:
+        return False
+    expected = text.encode("utf-8")
+    return any(
+        subprocess.run(
+            ["git", "-C", str(repo), "show", f"HEAD:{candidate}"],
+            capture_output=True,
+            check=False,
+        ).stdout == expected
+        for candidate in git_head_path_candidates(relative)
+    )
+
+
 def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
     text, read_errors = read_document(path)
     if text is None:
@@ -746,9 +812,11 @@ def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
         )
         if legacy_errors:
             errors.extend(pending_errors)
-        else:
+        elif head_has_legacy_pending_layout(path):
             pending_rows = [row + ["无"] for row in legacy_rows]
             warnings.append("pending work table uses legacy layout without 需求引用")
+        else:
+            errors.append("pending work table requires 需求引用; legacy layout is allowed only from Git HEAD")
     parsed_tables["待开发功能"] = pending_rows
 
     contract_ids = [row[0] for row in parsed_tables.get("全局契约", [])]
@@ -784,9 +852,17 @@ def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
         ):
             if not value:
                 errors.append(f"empty {field_name} for pending work {task_id}")
-        errors.extend(validate_design_reference(path, design_basis))
+        design_errors = validate_design_reference(path, design_basis)
+        errors.extend(design_errors)
         if requirement_ref != "无" and REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
             errors.append(f"invalid requirement reference for {task_id}: {requirement_ref}")
+        if not design_errors and design_basis != "待澄清":
+            design_requirement = referenced_design_requirement(path, design_basis)
+            if design_requirement != requirement_ref:
+                errors.append(
+                    f"requirement reference does not match design for {task_id}: "
+                    f"blueprint={requirement_ref}, design={design_requirement or 'missing'}"
+                )
     for cells in pending_rows:
         errors.extend(
             validate_dependency(cells[0], cells[5], valid_pending_ids, TASK_ID_RE, "pending work")
@@ -853,7 +929,15 @@ def validate_design(
     requirement_matches = re.findall(
         r"^>\s*Requirement-Ref[：:]\s*(.+?)\s*$", structural_text, re.MULTILINE
     )
-    if len(requirement_matches) > 1:
+    terminal_head_compatibility = (
+        version == DESIGN_VERSION
+        and state in {"已实现", "已废弃"}
+        and not requirement_matches
+        and git_head_matches_document(path, text)
+    )
+    if version == DESIGN_VERSION and len(requirement_matches) != 1 and not terminal_head_compatibility:
+        errors.append("version 5 design must contain exactly one Requirement-Ref metadata line")
+    elif len(requirement_matches) > 1:
         errors.append("design must contain at most one Requirement-Ref metadata line")
     elif requirement_matches and requirement_matches[0] != "无" and REQUIREMENT_REF_RE.fullmatch(requirement_matches[0]) is None:
         errors.append("Requirement-Ref must be 无 or REQ-<UUIDv7>@vN")

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ BLOCK_SECTIONS = ("目标", "参与者与业务流程", "业务规则", "边界�
 INDEX_HEADERS = ("Requirement Key", "版本", "状态", "业务模块", "需求块", "已实现版本", "实现依据")
 STATUS_VALUES = {"待实现", "已实现", "已更新"}
 PLACEHOLDER_RE = re.compile(r"<(?!/?a\b)[^>\n]+>|\b(?:TODO|TBD)\b|\{\{[^}\n]+\}\}", re.IGNORECASE)
+RULE_RE = re.compile(r"^R-[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,6 +77,8 @@ def table_after(text: str, section: str, headers: tuple[str, ...]) -> tuple[list
             row = [cell.strip() for cell in lines[cursor].strip().strip("|").split("|")]
             if len(row) != len(headers):
                 return rows, [f"invalid column count in {section}"]
+            if any(not cell for cell in row):
+                return rows, [f"empty table cell in {section}"]
             rows.append(row)
             cursor += 1
         return rows, [] if rows else [f"table must contain rows: {section}"]
@@ -136,13 +140,52 @@ def validate_block(path: Path) -> tuple[list[str], dict[str, str]]:
         parsed[section] = rows
         errors.extend(table_errors)
     rule_ids = [row[0] for row in parsed.get("业务规则", [])]
+    for rule_id in rule_ids:
+        if RULE_RE.fullmatch(rule_id) is None:
+            errors.append(f"invalid business rule id: {rule_id or 'empty'}")
     if len(rule_ids) != len(set(rule_ids)):
         errors.append("business rule ids must be unique")
-    coverage = "、".join(row[0] for row in parsed.get("验收", []))
+    coverage = {
+        token
+        for row in parsed.get("验收", [])
+        for token in re.split(r"[、,，\s]+", row[0])
+        if token
+    }
     for rule_id in rule_ids:
         if rule_id not in coverage:
             errors.append(f"business rule lacks acceptance coverage: {rule_id}")
+    for rule_id in sorted(coverage - set(rule_ids)):
+        errors.append(f"acceptance references unknown business rule: {rule_id}")
     return errors, fields
+
+
+def trusted_review_pass(nova_root: Path, work_item: str) -> bool:
+    index_files = list((nova_root / "audit/index").glob(f"*/{work_item}.json"))
+    if len(index_files) != 1:
+        return False
+    try:
+        index = json.loads(index_files[0].read_text(encoding="utf-8"))
+        if index.get("schema") != 1 or index.get("work_item") != work_item:
+            return False
+        review_path = index.get("review_path")
+        if not isinstance(review_path, str):
+            return False
+        if review_path.startswith(".nova/"):
+            review = nova_root / review_path.removeprefix(".nova/")
+        elif review_path.startswith("docs/audit/"):
+            review = nova_root / review_path.removeprefix("docs/audit/")
+        else:
+            return False
+        review = review.resolve()
+        review.relative_to((nova_root / "audit/reviews").resolve())
+        record = json.loads(review.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+    if record.get("schema") != 1 or record.get("batch_id") != index.get("review_batch"):
+        return False
+    if record.get("conclusion") not in {"PASS", "PASS WITH NOTES"}:
+        return False
+    return any(item.get("work_item") == work_item for item in record.get("items", []) if isinstance(item, dict))
 
 
 def validate_index(path: Path) -> list[str]:
@@ -156,14 +199,19 @@ def validate_index(path: Path) -> list[str]:
         errors.append("product requirements schema version must be exactly 1")
     if len(product_version) != 1 or VERSION_RE.fullmatch(product_version[0]) is None:
         errors.append("product version must be exactly one vN value")
+    parsed_index_tables: dict[str, list[list[str]]] = {}
     for section, headers in (
         ("产品定位", ("对象", "核心问题", "成功结果")),
         ("端到端业务流程", ("步骤", "参与者", "业务输入", "业务结果")),
         ("业务模块", ("业务模块", "职责", "边界")),
         ("范围边界", ("边界", "内容")),
     ):
-        _, table_errors = table_after(text, section, headers)
+        section_rows, table_errors = table_after(text, section, headers)
+        parsed_index_tables[section] = section_rows
         errors.extend(table_errors)
+    modules = [row[0] for row in parsed_index_tables.get("业务模块", [])]
+    if len(modules) != len(set(modules)):
+        errors.append("business module names must be unique")
     rows, table_errors = table_after(text, "需求索引", INDEX_HEADERS)
     errors.extend(table_errors)
     keys: set[str] = set()
@@ -180,6 +228,8 @@ def validate_index(path: Path) -> list[str]:
             errors.append(f"invalid requirement version for {key}: {version}")
         if status not in STATUS_VALUES:
             errors.append(f"invalid requirement status for {key}: {status}")
+        if module not in modules:
+            errors.append(f"unknown business module for {key}: {module}")
         link_match = re.fullmatch(r"\[[^]\n]+\]\((requirements/(REQ-[^/\s]+\.md))\)", link)
         if link_match is None:
             errors.append(f"invalid requirement block link for {key}")
@@ -201,11 +251,15 @@ def validate_index(path: Path) -> list[str]:
         elif status == "已实现":
             if implemented != version or PEND_RE.fullmatch(evidence) is None:
                 errors.append(f"{key}: 已实现 requires current implemented version and PEND evidence")
+            elif not trusted_review_pass(path.parent, evidence):
+                errors.append(f"{key}: implementation evidence is not a trusted Review PASS: {evidence}")
         elif status == "已更新":
             current = int(version_match.group(1)) if version_match else 0
             implemented_match = VERSION_RE.fullmatch(implemented)
             if implemented_match is None or int(implemented_match.group(1)) >= current or PEND_RE.fullmatch(evidence) is None:
                 errors.append(f"{key}: 已更新 requires an older implemented version and PEND evidence")
+            elif not trusted_review_pass(path.parent, evidence):
+                errors.append(f"{key}: implementation evidence is not a trusted Review PASS: {evidence}")
     return errors
 
 

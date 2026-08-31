@@ -26,7 +26,7 @@ description: 在总体需求确认后，以单问题访谈确定足以指导开�
 
 1. `.nova/PROJECT_BLUEPRINT.md` 保持七章精简结构；创建或修改时复用 `nova-development` 的 [蓝图规范](../nova-development/references/blueprint-standard.md)、[模板](../nova-development/assets/PROJECT_BLUEPRINT.template.md) 和校验器。
 2. `.nova/architecture/ARCHITECTURE_CONTRACTS.md` 是并行门禁和架构契约索引，新建时严格使用 [架构契约模板](assets/ARCHITECTURE_CONTRACTS.template.md)。
-3. 数据所有权和共享数据规则放 `architecture/data/`，新建时使用 [数据契约模板](assets/DATA_CONTRACT.template.md)；公共 API 使用 OpenAPI，事件使用 AsyncAPI，Mock/fixture 放 `architecture/mocks/`。
+3. 共享语言、框架、运行形态和目录边界放 `architecture/foundation/`，新建时使用 [工程骨架模板](assets/FOUNDATION_CONTRACT.template.md)；数据所有权和共享数据规则放 `architecture/data/`，使用 [数据契约模板](assets/DATA_CONTRACT.template.md)；公共 API 使用 OpenAPI，事件使用 AsyncAPI，Mock/fixture 放 `architecture/mocks/`。
 4. 只创建实际需要的目录；迁移、共享类型和接口实现仍放正常源码目录。
 
 创建或更新前完整读取 [架构契约规范](references/architecture-standard.md)。首次建立架构体系时可读取 [并行项目示例](references/examples/order-platform/.nova/architecture/ARCHITECTURE_CONTRACTS.md) 及其实际引用；已有体系时只读目标契约。
@@ -39,4 +39,4 @@ python3 scripts/validate_architecture.py /absolute/path/to/.nova/architecture/AR
 python3 scripts/validate_architecture.py --ready /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
 ```
 
-`--ready` 只有共享工程骨架、数据所有权、所需 API/事件/Mock 契约均有 Review PASS 证据时通过。通过后，各需求块才能由不同全栈工程师并行进入 `nova-development`；不得把架构文档本身伪装成 Review PASS。
+架构交付在提交前把需要项及对应契约标记为`待Review`，并把 Review 依据写为同一架构 `PEND-*`。`--ready` 只有共享工程骨架、数据所有权、所需 API/事件/Mock 契约均存在、状态一致，且所引 PEND 可从 `.nova/audit/` 验证为 Review PASS 时通过；PASS 后直接由不可变审计派生就绪，无需递归改写架构文档。通过后，各需求块才能由不同全栈工程师并行进入 `nova-development`；不得把文档状态或手填批次名伪装成 Review PASS。
