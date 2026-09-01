@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nova Doctor"
+  short_description: "只读检查当前项目的 Nova 数据、引用与迁移状态"
+  default_prompt: "Use $nova-doctor to run a read-only health check on the current project's Nova data."

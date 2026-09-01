@@ -1,0 +1,48 @@
+{
+  "batch_id": "NR-20260901-nova-doctor",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "d46a2b42c9b45235f7bb1defa10fb0518b679365",
+          "repository": "main"
+        },
+        {
+          "commit": "766645d229aa88122b8753d94515142e9adce382",
+          "repository": "main"
+        },
+        {
+          "commit": "132ef5ae97ebe24ce01483d971e775e41ade30f5",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-01_Nova当前项目健康检查.md#wp-01-current-project-health-check",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "238 tests; quick_validate; design, blueprint and live doctor; diff check (pass)",
+      "work_item": "PEND-01a05cbd-7146-77b9-98d8-954c24849ad6"
+    }
+  ],
+  "manifest_sha256": "9dc1ca01aa261d87ee5eab11a6c72334c34595db687a5dcedd8d93c63b3364fc",
+  "review_content_sha256": "f6676090f364fecc013be2aad8eb7ca9926de6894855fb46448c3b11ebf52f2f",
+  "review_round": 2,
+  "review_scope": [
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/design/2026-09-01_Nova当前项目健康检查.md",
+    "main:README.md",
+    "main:codex/AGENTS.global.md",
+    "main:nova-doctor/SKILL.md",
+    "main:nova-doctor/agents/openai.yaml",
+    "main:nova-doctor/scripts/nova_doctor.py",
+    "main:nova-doctor/scripts/test_nova_doctor.py",
+    "main:nova-review/scripts/test_global_governance.py",
+    "main:nova-review/scripts/test_validate_discovery.py",
+    "main:nova-review/scripts/validate_discovery.py"
+  ],
+  "reviewed_at": "2026-09-01T20:46:44+08:00",
+  "reviewer": "/root/review_doctor_runtime + /root/review_doctor_integration",
+  "schema": 1
+}

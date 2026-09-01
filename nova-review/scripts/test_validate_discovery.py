@@ -21,7 +21,13 @@ class DiscoveryTests(unittest.TestCase):
         (workspace / "codex/AGENTS.global.md").write_text("# global\n", encoding="utf-8")
         (codex_home / "skills").mkdir(parents=True)
         (codex_home / "AGENTS.md").symlink_to(workspace / "codex/AGENTS.global.md")
-        for name in ("nova-requirements", "nova-architecture", "nova-development", "nova-review"):
+        for name in (
+            "nova-requirements",
+            "nova-architecture",
+            "nova-development",
+            "nova-doctor",
+            "nova-review",
+        ):
             (workspace / name).mkdir()
             (workspace / name / "SKILL.md").write_text(
                 f"---\nname: {name}\ndescription: test\n---\n",

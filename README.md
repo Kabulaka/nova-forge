@@ -11,6 +11,7 @@
 | [`nova-requirements`](./nova-requirements/) | 总体业务、业务模块和可独立交付需求块 | 绿地项目、新需求或业务语义变化 |
 | [`nova-architecture`](./nova-architecture/) | 技术栈、七章蓝图与 API/数据/事件/Mock 并行契约 | 绿地初始化或共享架构变化 |
 | [`nova-development`](./nova-development/) | 功能设计、`PEND-*` / `FIX-*` / `MAINT-*` 的实施、测试与本地提交 | 已确认需求下的功能和普通开发 |
+| [`nova-doctor`](./nova-doctor/) | 只读检查当前项目的 Nova 数据、引用、审计与迁移状态 | 项目健康检查、校验失败诊断或迁移判断 |
 | [`nova-review`](./nova-review/) | 按稳定工作项选择已提交变更，复用测试证据，执行独立 Review，并在 PASS 后写入分片审计 | 仅在用户明确提出 Review、复审、补审、全部未审项或查询 Review 状态时触发 |
 
 默认流程：
@@ -50,6 +51,9 @@
 │   ├── references/            # 条件性 SOP 与完整示例
 │   ├── assets/                # 蓝图和设计模板
 │   └── scripts/               # 文档校验器及测试
+├── nova-doctor/
+│   ├── SKILL.md               # 当前项目只读健康检查入口
+│   └── scripts/               # 聚合诊断脚本及测试
 └── nova-review/
     ├── SKILL.md               # 人工 Review 入口
     ├── references/            # 提交、Review 与审计契约
@@ -74,6 +78,7 @@ mkdir -p ~/.codex/skills
 ln -s "$PWD/nova-development" ~/.codex/skills/nova-development
 ln -s "$PWD/nova-requirements" ~/.codex/skills/nova-requirements
 ln -s "$PWD/nova-architecture" ~/.codex/skills/nova-architecture
+ln -s "$PWD/nova-doctor" ~/.codex/skills/nova-doctor
 ln -s "$PWD/nova-review" ~/.codex/skills/nova-review
 ln -s "$PWD/codex/AGENTS.global.md" ~/.codex/AGENTS.md
 ```
@@ -105,6 +110,10 @@ python3 nova-review/scripts/validate_discovery.py \
 ```
 
 ```text
+使用 $nova-doctor，只读检查当前项目的 Nova 健康状态。
+```
+
+```text
 使用 $nova-review，Review PEND-001。
 ```
 
@@ -125,7 +134,11 @@ python3 nova-architecture/scripts/validate_shared_capabilities.py --if-present .
 python3 -m unittest discover -s nova-requirements/scripts -p 'test_*.py'
 python3 -m unittest discover -s nova-architecture/scripts -p 'test_*.py'
 python3 -m unittest discover -s nova-development/scripts -p 'test_*.py'
+python3 -m unittest discover -s nova-doctor/scripts -p 'test_*.py'
 python3 -m unittest discover -s nova-review/scripts -p 'test_*.py'
+
+# 只读检查当前项目的 Nova 数据
+python3 nova-doctor/scripts/nova_doctor.py
 
 # 校验技能与全局治理文件的发现链接
 python3 nova-review/scripts/validate_discovery.py \

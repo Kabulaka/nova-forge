@@ -3,7 +3,7 @@
 > 蓝图规范版本：3
 > 文档定位：定义所有技能共同遵守的工作区事实、代码落位、模块契约、系统资源边界和未完成工作包。
 > 事实来源：总体业务以 `.nova/PRODUCT_REQUIREMENTS.md` 与需求块为准，待开发目标以 `.nova/design/` 工作包为准；当前行为以技能源码、脚本和测试为准。
-> 源码边界：`/home/nika/workspace/ai/skills` 是唯一可写源码，个人技能目录只保留发现链接。
+> 源码边界：`/home/nika/workspace/ai/nova-forge` 是唯一可写源码，个人技能目录只保留发现链接。
 
 ## 1. 项目定位
 
@@ -23,7 +23,7 @@
 | 确定性校验 | Python 3 标准库 | 各技能 `scripts/` |
 | 审计记录 | JSONL 与严格 JSON-in-YAML | `.nova/audit/features/`、`.nova/audit/reviews/` 与 `.nova/audit/index/` |
 | 发现入口 | 本地文件系统符号链接 | 个人技能目录链接状态 |
-| 版本控制 | 本地 Git `main` 分支，无远程 | `.git/` 与仓库配置 |
+| 版本控制 | 本地 Git 仓库；远程配置、push 和其他外部写操作需独立授权 | `.git/`、仓库配置与 C-07 |
 
 ## 3. 代码结构
 
