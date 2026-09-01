@@ -24,10 +24,17 @@ SPEC.loader.exec_module(PROBE)
 
 class GlobalGovernanceTests(unittest.TestCase):
     def test_global_file_is_small_router_not_review_sop(self) -> None:
+        routing = GLOBAL.split("## 技能路由", 1)[1].split("\n## ", 1)[0]
         self.assertLessEqual(len(GLOBAL.splitlines()), 100)
         self.assertLessEqual(len(GLOBAL.encode("utf-8")), 10_000)
         self.assertIn("使用 `nova-development`", GLOBAL)
-        self.assertIn("使用 `nova-doctor`", GLOBAL)
+        self.assertIn(
+            "用户要求检查当前项目的 Nova 文档、引用、审计或迁移状态时使用 "
+            "`nova-doctor`；只读检查调用时所在项目，不检查全局技能安装、技能源码更新"
+            "或远端版本，也不自动修复或迁移。",
+            routing,
+        )
+        self.assertNotIn("技能源码仓库", routing)
         self.assertIn("使用 `nova-review`", GLOBAL)
         self.assertIn("不得以“保持全局文件简短”为由删除", GLOBAL)
         self.assertNotIn("Observation-Fix", GLOBAL)

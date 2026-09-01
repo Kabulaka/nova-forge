@@ -81,9 +81,17 @@ class NovaDoctorTests(unittest.TestCase):
             root = Path(directory)
             nova = root / ".nova"
             nova.mkdir()
+            target = nova / "folder" / "file_(v1).md"
+            target.parent.mkdir()
+            target.write_text("target\n", encoding="utf-8")
             document = nova / "PROJECT_BLUEPRINT.md"
             document.write_text(
-                "```markdown\n[example](missing-example.md)\n```\n",
+                "````markdown\n"
+                "[fenced](missing-fenced.md)\n"
+                "````\n"
+                "    [indented](missing-indented.md)\n"
+                "``[inline](missing-inline.md)``\n"
+                "[balanced](folder/file_(v1).md)\n",
                 encoding="utf-8",
             )
             self.assertEqual(DOCTOR.check_local_links(root).status, "PASS")
@@ -94,6 +102,26 @@ class NovaDoctorTests(unittest.TestCase):
             result = DOCTOR.check_local_links(root)
             self.assertEqual(result.status, "FAIL")
             self.assertIn("missing-real.md", result.details[0])
+
+    def test_nova_symlink_cannot_escape_current_project(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            tempfile.TemporaryDirectory() as external_directory,
+        ):
+            root = Path(directory)
+            nova = root / ".nova"
+            nova.mkdir()
+            external = Path(external_directory) / "outside.md"
+            external.write_text("EXTERNAL-SECRET\n", encoding="utf-8")
+            (nova / "PROJECT_BLUEPRINT.md").symlink_to(external)
+            results = DOCTOR.diagnose(root, WORKSPACE)
+        self.assertEqual([result.status for result in results], ["FAIL"])
+        report = " ".join(
+            [result.message for result in results]
+            + [detail for result in results for detail in result.details]
+        )
+        self.assertIn("escapes project root", report)
+        self.assertNotIn("EXTERNAL-SECRET", report)
 
     def test_cli_rejects_another_project_path(self) -> None:
         result = self.run_doctor(WORKSPACE, "--project", "/tmp/other")
@@ -114,6 +142,25 @@ class NovaDoctorTests(unittest.TestCase):
             )
         self.assertEqual(result.status, "FAIL")
         self.assertEqual(result.message, "requirements validator timed out")
+        self.assertEqual(result.details, ("Run: validator document.md",))
+
+    def test_subprocess_decode_failure_is_bounded(self) -> None:
+        completed = DOCTOR.run(
+            [sys.executable, "-c", "import os; os.write(1, b'\\xff')"],
+            WORKSPACE,
+        )
+        self.assertEqual(completed.stdout, "\ufffd")
+
+        decode_error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid")
+        with mock.patch.object(DOCTOR, "run", side_effect=decode_error):
+            result = DOCTOR.validator_result(
+                "requirements",
+                "requirements validator",
+                ["validator", "document.md"],
+                WORKSPACE,
+            )
+        self.assertEqual(result.status, "FAIL")
+        self.assertEqual(result.message, f"cannot run requirements validator: {decode_error}")
         self.assertEqual(result.details, ("Run: validator document.md",))
 
     def test_audit_rejects_malformed_feature_record(self) -> None:

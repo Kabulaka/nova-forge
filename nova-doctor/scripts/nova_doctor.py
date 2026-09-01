@@ -42,6 +42,8 @@ def run(
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         env=environment,
     )
@@ -50,7 +52,7 @@ def run(
 def current_project(cwd: Path) -> tuple[Path | None, Result]:
     try:
         completed = run(["git", "rev-parse", "--show-toplevel"], cwd)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
         return None, Result("FAIL", "project-root", f"cannot run Git: {exc}")
     if completed.returncode != 0:
         return None, Result(
@@ -63,6 +65,53 @@ def current_project(cwd: Path) -> tuple[Path | None, Result]:
         return None, Result("FAIL", "project-root", "Git returned an empty project root")
     root = Path(root_text).resolve()
     return root, Result("PASS", "project-root", str(root))
+
+
+def is_inside_project(root: Path, candidate: Path) -> bool:
+    try:
+        return candidate.resolve().is_relative_to(root)
+    except (OSError, RuntimeError):
+        return False
+
+
+def nova_boundary(root: Path) -> tuple[Result, bool]:
+    nova_root = root / ".nova"
+    if not is_inside_project(root, nova_root):
+        return Result("FAIL", "nova-layout", ".nova path escapes project root"), False
+    if not nova_root.is_dir():
+        return Result("FAIL", "nova-layout", "missing .nova directory"), True
+
+    walk_errors: list[str] = []
+
+    def remember_walk_error(exc: OSError) -> None:
+        walk_errors.append(str(exc))
+
+    for directory, directories, files in os.walk(
+        nova_root, followlinks=False, onerror=remember_walk_error
+    ):
+        for name in [*directories, *files]:
+            candidate = Path(directory) / name
+            if not is_inside_project(root, candidate):
+                relative = candidate.relative_to(root)
+                return (
+                    Result(
+                        "FAIL",
+                        "nova-layout",
+                        f"Nova path escapes project root: {relative}",
+                    ),
+                    False,
+                )
+    if walk_errors:
+        return (
+            Result(
+                "FAIL",
+                "nova-layout",
+                "cannot inspect .nova directory",
+                tuple(walk_errors[:DETAIL_LIMIT]),
+            ),
+            False,
+        )
+    return Result("PASS", "nova-layout", ".nova directory is present"), True
 
 
 def command_details(completed: subprocess.CompletedProcess[str]) -> tuple[str, ...]:
@@ -94,7 +143,7 @@ def validator_result(
         completed = run(arguments, root)
     except subprocess.TimeoutExpired:
         return Result("FAIL", check, f"{label} timed out", (f"Run: {command}",))
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         return Result("FAIL", check, f"cannot run {label}: {exc}", (f"Run: {command}",))
     if completed.returncode == 0:
         return Result("PASS", check, f"{label} passed")
@@ -133,7 +182,7 @@ def check_migration(root: Path, suite_root: Path) -> Result:
         completed = run(arguments, root)
     except subprocess.TimeoutExpired:
         return Result("FAIL", "migration", "migration dry-run timed out")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         return Result("FAIL", "migration", f"cannot run migration dry-run: {exc}")
     if completed.returncode != 0:
         return Result(
@@ -166,6 +215,8 @@ def optional_validator(
     label: str,
 ) -> Result:
     document = root / relative_document
+    if not is_inside_project(root, document):
+        return Result("FAIL", check, f"{relative_document} escapes project root")
     if not document.is_file():
         return Result("PASS", check, f"{label} is not present (optional)")
     script = suite_root / relative_script
@@ -181,6 +232,8 @@ def optional_validator(
 
 def check_blueprint(root: Path, suite_root: Path) -> Result:
     document = root / ".nova" / "PROJECT_BLUEPRINT.md"
+    if not is_inside_project(root, document):
+        return Result("FAIL", "blueprint", ".nova/PROJECT_BLUEPRINT.md escapes project root")
     if not document.is_file():
         return Result("FAIL", "blueprint", "missing .nova/PROJECT_BLUEPRINT.md")
     script = suite_root / "nova-development" / "scripts" / "validate_blueprint.py"
@@ -196,6 +249,8 @@ def check_blueprint(root: Path, suite_root: Path) -> Result:
 
 def check_designs(root: Path, suite_root: Path) -> Result:
     design_root = root / ".nova" / "design"
+    if not is_inside_project(root, design_root):
+        return Result("FAIL", "designs", ".nova/design escapes project root")
     documents = sorted(design_root.rglob("*.md")) if design_root.is_dir() else []
     if not documents:
         return Result("PASS", "designs", "no design documents are present (optional)")
@@ -204,10 +259,13 @@ def check_designs(root: Path, suite_root: Path) -> Result:
         return Result("FAIL", "designs", f"missing validator: {script}")
     failures: list[str] = []
     for document in documents:
+        if not is_inside_project(root, document):
+            failures.append(f"{document.relative_to(root)}: path escapes project root")
+            continue
         arguments = [sys.executable, str(script), "--design", str(document)]
         try:
             completed = run(arguments, root)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
             failures.append(f"{document.relative_to(root)}: {exc}")
             continue
         if completed.returncode != 0:
@@ -242,7 +300,12 @@ def load_review_module(script: Path) -> ModuleType:
 
 
 def check_audit(root: Path, suite_root: Path) -> Result:
+    boundary, safe_to_read = nova_boundary(root)
+    if not safe_to_read:
+        return Result("FAIL", "audit", boundary.message, boundary.details)
     audit_root = root / ".nova" / "audit"
+    if not is_inside_project(root, audit_root):
+        return Result("FAIL", "audit", ".nova/audit escapes project root")
     if not audit_root.is_dir():
         return Result("PASS", "audit", "audit data is not present (optional)")
     review_script = suite_root / "nova-review" / "scripts" / "nova_review.py"
@@ -303,44 +366,132 @@ def check_audit(root: Path, suite_root: Path) -> Result:
     return Result("PASS", "audit", f"{len(index_items)} completed work items are consistent")
 
 
-MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+MARKDOWN_LINK_START_RE = re.compile(r"!?\[[^\]\n]*\]\(")
+MARKDOWN_FENCE_RE = re.compile(r" {0,3}(`{3,}|~{3,})")
+
+
+def without_inline_code(line: str) -> str:
+    characters = list(line)
+    offset = 0
+    while offset < len(line):
+        if line[offset] != "`":
+            offset += 1
+            continue
+        end = offset
+        while end < len(line) and line[end] == "`":
+            end += 1
+        delimiter = line[offset:end]
+        closing = end
+        while True:
+            closing = line.find(delimiter, closing)
+            if closing < 0:
+                offset = end
+                break
+            before_is_tick = closing > 0 and line[closing - 1] == "`"
+            after = closing + len(delimiter)
+            after_is_tick = after < len(line) and line[after] == "`"
+            if not before_is_tick and not after_is_tick:
+                for index in range(offset, after):
+                    characters[index] = " "
+                offset = after
+                break
+            closing = after
+    return "".join(characters)
 
 
 def markdown_prose(text: str) -> str:
     lines: list[str] = []
-    fence: str | None = None
+    fence_character: str | None = None
+    fence_length = 0
     for line in text.splitlines():
-        marker = line.lstrip()[:3]
-        if marker in {"```", "~~~"}:
-            fence = None if fence == marker else marker if fence is None else fence
+        fence = MARKDOWN_FENCE_RE.match(line)
+        if fence_character is not None:
+            if (
+                fence is not None
+                and fence.group(1)[0] == fence_character
+                and len(fence.group(1)) >= fence_length
+                and not line[fence.end() :].strip()
+            ):
+                fence_character = None
+                fence_length = 0
             continue
-        if fence is None:
-            lines.append(re.sub(r"`[^`\n]*`", "", line))
+        if fence is not None:
+            fence_character = fence.group(1)[0]
+            fence_length = len(fence.group(1))
+            continue
+        if line.startswith(("    ", "\t")):
+            continue
+        lines.append(without_inline_code(line))
     return "\n".join(lines)
 
 
+def markdown_link_targets(text: str) -> list[str]:
+    targets: list[str] = []
+    offset = 0
+    while match := MARKDOWN_LINK_START_RE.search(text, offset):
+        position = match.end()
+        if position < len(text) and text[position] == "<":
+            end = position + 1
+            while end < len(text) and text[end] != ">":
+                end += 2 if text[end] == "\\" and end + 1 < len(text) else 1
+            if end < len(text):
+                targets.append(text[position + 1 : end])
+                closing = text.find(")", end + 1)
+                offset = closing + 1 if closing >= 0 else end + 1
+                continue
+
+        depth = 0
+        target_end: int | None = None
+        end = position
+        while end < len(text):
+            character = text[end]
+            if character == "\\" and end + 1 < len(text):
+                end += 2
+                continue
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                if depth == 0:
+                    target_end = end if target_end is None else target_end
+                    break
+                depth -= 1
+            elif character.isspace() and depth == 0 and target_end is None:
+                target_end = end
+            end += 1
+        if end >= len(text):
+            offset = match.end()
+            continue
+        raw_target = text[position : target_end if target_end is not None else end]
+        targets.append(raw_target)
+        offset = end + 1
+    return targets
+
+
 def check_local_links(root: Path) -> Result:
+    boundary, safe_to_read = nova_boundary(root)
+    if not safe_to_read:
+        return Result("FAIL", "references", boundary.message, boundary.details)
     nova_root = root / ".nova"
     if not nova_root.is_dir():
         return Result("FAIL", "references", "missing .nova directory")
     broken: list[str] = []
     for document in sorted(nova_root.rglob("*.md")):
+        if not is_inside_project(root, document):
+            broken.append(f"{document.relative_to(root)}: path escapes project root")
+            continue
         try:
             text = document.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             broken.append(f"{document.relative_to(root)}: {exc}")
             continue
-        for match in MARKDOWN_LINK_RE.finditer(markdown_prose(text)):
-            raw_target = match.group(1).strip()
-            if raw_target.startswith("<") and ">" in raw_target:
-                raw_target = raw_target[1 : raw_target.index(">")]
-            elif " " in raw_target:
-                raw_target = raw_target.split(" ", 1)[0]
+        for raw_target in markdown_link_targets(markdown_prose(text)):
+            raw_target = raw_target.strip()
             if not raw_target or raw_target.startswith("#"):
                 continue
             if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", raw_target):
                 continue
             path_text = unquote(raw_target.split("#", 1)[0])
+            path_text = re.sub(r"\\([\\() ])", r"\1", path_text)
             if not path_text:
                 continue
             target = root / path_text.lstrip("/") if path_text.startswith("/.nova/") else document.parent / path_text
@@ -360,11 +511,11 @@ def check_local_links(root: Path) -> Result:
 
 
 def diagnose(root: Path, suite_root: Path) -> list[Result]:
-    nova_root = root / ".nova"
+    layout, safe_to_read = nova_boundary(root)
+    if not safe_to_read:
+        return [layout]
     results = [
-        Result("PASS", "nova-layout", ".nova directory is present")
-        if nova_root.is_dir()
-        else Result("FAIL", "nova-layout", "missing .nova directory"),
+        layout,
         check_migration(root, suite_root),
         check_blueprint(root, suite_root),
         optional_validator(
