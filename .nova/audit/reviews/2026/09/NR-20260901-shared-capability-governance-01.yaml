@@ -1,0 +1,51 @@
+{
+  "batch_id": "NR-20260901-shared-capability-governance-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "79363e2eb3398c2ab9d9c5f40616aecdd2018858",
+          "repository": "main"
+        },
+        {
+          "commit": "ce57b21ccd9dea2358ef6f849764f15e5f1fecaa",
+          "repository": "main"
+        },
+        {
+          "commit": "da09288f4d730f1c68341435fde512819ff79587",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-01_Nova共享能力发现与分层治理.md#wp-01-shared-capability-governance",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "isolated 28 architecture tests; 109 development tests; blueprint, target design, and skill validators (pass)",
+      "work_item": "PEND-01a05c55-3b55-7a92-9684-aaaa643c1f1e"
+    }
+  ],
+  "manifest_sha256": "357e27c04c6f4b8103cf2fe45d56025d91f28710f56d010730abb8e7d0f26fce",
+  "review_content_sha256": "1d437cc8cb7cff7cfd81f7dfa0714e7559efe72f7dfc9b0eb9085e9ea9ce403e",
+  "review_round": 3,
+  "review_scope": [
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/design/2026-09-01_Nova共享能力发现与分层治理.md",
+    "main:README.md",
+    "main:nova-architecture/SKILL.md",
+    "main:nova-architecture/assets/SHARED_CAPABILITIES.template.md",
+    "main:nova-architecture/references/architecture-standard.md",
+    "main:nova-architecture/scripts/test_validate_shared_capabilities.py",
+    "main:nova-architecture/scripts/validate_shared_capabilities.py",
+    "main:nova-development/SKILL.md",
+    "main:nova-development/assets/PROJECT_BLUEPRINT.template.md",
+    "main:nova-development/references/blueprint-standard.md",
+    "main:nova-development/references/conversation-sop.md",
+    "main:nova-development/references/implementation-sop.md",
+    "main:nova-development/scripts/test_skill_routing.py"
+  ],
+  "reviewed_at": "2026-09-01T18:34:30+08:00",
+  "reviewer": "review_governance+review_development+review_validator",
+  "schema": 1
+}
