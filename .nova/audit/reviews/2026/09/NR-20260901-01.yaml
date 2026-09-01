@@ -1,0 +1,44 @@
+{
+  "batch_id": "NR-20260901-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "077a8e2a19fe7a953b6790031a415cea1371500a",
+          "repository": "main"
+        },
+        {
+          "commit": "b39f20b27462e8fb7a93e5e4a4864a3defd7e98f",
+          "repository": "main"
+        },
+        {
+          "commit": "0ec6c352cc63eb299c18c6f34516c2c44b924759",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-01_Nova访谈委托决策与参考研究闭环.md#wp-01-interview-governance-architecture",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "requirements, blueprint, design and architecture validators; git diff check (pass)",
+      "work_item": "PEND-01a05bb2-de06-772b-aa7a-8fd2aced7911"
+    }
+  ],
+  "manifest_sha256": "6eb917f821d04f63e94325fb65907c9d6db070acd05d3beaf2818d7ba45c2e76",
+  "review_content_sha256": "5d0ca47773766cdd04a79197675d69cfa9459a51cb3e7f2a50baa40d61dfc81f",
+  "review_round": 2,
+  "review_scope": [
+    "main:.nova/PRODUCT_REQUIREMENTS.md",
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/architecture/ARCHITECTURE_CONTRACTS.md",
+    "main:.nova/architecture/data/interview-decision-state.md",
+    "main:.nova/architecture/foundation/interview-governance.md",
+    "main:.nova/design/2026-09-01_Nova访谈委托决策与参考研究闭环.md",
+    "main:.nova/requirements/REQ-01a05ba8-f944-7de8-83ba-599a04745d83_AI委托决策与外部参考研究闭环.md"
+  ],
+  "reviewed_at": "2026-09-01T15:04:05+08:00",
+  "reviewer": "/root/review_interview_architecture",
+  "schema": 1
+}
