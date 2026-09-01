@@ -60,19 +60,30 @@ DESIGN_EXAMPLE = (
 
 
 def markdown_section(document: str, heading: str) -> str:
+    def update_fence(
+        line: str, active: tuple[str, int] | None
+    ) -> tuple[tuple[str, int] | None, bool]:
+        if active is not None:
+            marker_char, marker_length = active
+            closing = re.fullmatch(
+                rf" {{0,3}}{re.escape(marker_char)}{{{marker_length},}}[ \t]*",
+                line,
+            )
+            return (None, True) if closing else (active, True)
+        opening = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if opening:
+            marker = opening.group(1)
+            return (marker[0], len(marker)), True
+        return None, False
+
     level = len(heading) - len(heading.lstrip("#"))
     lines = document.splitlines(keepends=True)
     matches: list[int] = []
-    fence: str | None = None
+    fence: tuple[str, int] | None = None
     for index, line in enumerate(lines):
         stripped = line.rstrip("\r\n")
-        marker = re.match(r"^\s*(`{3,}|~{3,})", stripped)
-        if marker:
-            marker_char = marker.group(1)[0]
-            if fence is None:
-                fence = marker_char
-            elif fence == marker_char:
-                fence = None
+        fence, handled = update_fence(stripped, fence)
+        if handled:
             continue
         if fence is None and stripped == heading:
             matches.append(index)
@@ -86,13 +97,8 @@ def markdown_section(document: str, heading: str) -> str:
     end = len(lines)
     for index in range(start + 1, len(lines)):
         stripped = lines[index].rstrip("\r\n")
-        marker = re.match(r"^\s*(`{3,}|~{3,})", stripped)
-        if marker:
-            marker_char = marker.group(1)[0]
-            if fence is None:
-                fence = marker_char
-            elif fence == marker_char:
-                fence = None
+        fence, handled = update_fence(stripped, fence)
+        if handled:
             continue
         if fence is None and re.match(rf"^#{{1,{level}}}\s+", stripped):
             end = index
@@ -104,9 +110,12 @@ class SkillRoutingContractTests(unittest.TestCase):
     def test_markdown_section_requires_one_real_heading(self) -> None:
         document = """# Root
 
-```
+````python
 ## Target
 ```
+```` not-a-close
+## Target
+````
 
 ## Target
 expected body
@@ -415,7 +424,10 @@ other body
         self.assertIn("不证明实现不存在", implementation_scope)
         self.assertIn("候选、计划和未完成入口不得登记", implementation_rules)
         self.assertIn("最后一项能力退役时删除目录文件", implementation_rules)
-        self.assertIn("validate_shared_capabilities.py --if-present", implementation_rules)
+        self.assertIn(
+            "validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md",
+            implementation_rules,
+        )
         self.assertIn("新增、修改或删除共享能力目录", validation)
         self.assertIn(
             "validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md",
