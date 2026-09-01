@@ -27,6 +27,15 @@ MIGRATION_SOP = (SKILL_ROOT / "references" / "blueprint-migration-sop.md").read_
 IMPLEMENTATION_SOP = (SKILL_ROOT / "references" / "implementation-sop.md").read_text(
     encoding="utf-8"
 )
+BLUEPRINT_STANDARD = (SKILL_ROOT / "references" / "blueprint-standard.md").read_text(
+    encoding="utf-8"
+)
+ARCHITECTURE_STANDARD = (
+    SKILL_ROOT.parent / "nova-architecture" / "references" / "architecture-standard.md"
+).read_text(encoding="utf-8")
+SHARED_CAPABILITIES_TEMPLATE = (
+    SKILL_ROOT.parent / "nova-architecture" / "assets" / "SHARED_CAPABILITIES.template.md"
+)
 DESIGN_STANDARD = (SKILL_ROOT / "references" / "design-document-standard.md").read_text(
     encoding="utf-8"
 )
@@ -290,6 +299,38 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("身份与安全边界、共享失败语义", ARCHITECTURE_SKILL)
         self.assertIn("会改变功能行为、外部契约、安全边界或数据语义", SKILL)
         self.assertIn("普通低风险内部实现由 AI 决定并在整份摘要中披露", SKILL)
+
+    def test_shared_capability_opportunities_require_user_decision(self) -> None:
+        self.assertIn("### 共享能力发现与决定", SKILL)
+        self.assertIn("目录缺失或没有命中不证明能力不存在", SKILL)
+        self.assertIn("本次共享建设 / 当前局部实现 / 局部实现但保留抽象边界", SKILL)
+        self.assertIn("用户确认共享建设后", SKILL)
+        self.assertIn("### 共享能力机会闸门", CONVERSATION_SOP)
+        self.assertIn("先查共享能力目录，再定向查代码和测试", CONVERSATION_SOP)
+        self.assertIn("用户确认前不得扩大范围", CONVERSATION_SOP)
+        self.assertIn("共享复用", CONVERSATION_SOP)
+
+    def test_shared_capability_catalog_only_indexes_implemented_code(self) -> None:
+        self.assertTrue(SHARED_CAPABILITIES_TEMPLATE.is_file())
+        template = SHARED_CAPABILITIES_TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("共享能力目录版本：1", template)
+        self.assertIn("| 类型 | 能力 | 说明 | 代码位置 | 复用边界 |", template)
+        self.assertIn("只登记已实现且通过最低验收", template)
+        self.assertIn("目录只登记已实现且通过最低验收的能力", SKILL)
+        self.assertIn("候选和计划留在设计中", SKILL)
+        self.assertIn("不证明实现不存在", IMPLEMENTATION_SOP)
+        self.assertIn("候选、计划和未完成入口不得登记", IMPLEMENTATION_SOP)
+
+    def test_module_owned_persistence_still_obeys_project_layers(self) -> None:
+        invariant = "模块自己的业务表结构、查询和 Repository"
+        self.assertIn(invariant, SKILL)
+        self.assertIn(invariant, IMPLEMENTATION_SOP)
+        self.assertIn(invariant, BLUEPRINT_STANDARD)
+        self.assertIn(invariant, ARCHITECTURE_STANDARD)
+        self.assertIn("界面或接口层不得越级直接访问持久化实现", IMPLEMENTATION_SOP)
+        self.assertIn("不得吸收模块业务语义形成万能数据层", IMPLEMENTATION_SOP)
+        self.assertIn("分层落位", IMPLEMENTATION_SOP)
+        self.assertIn("系统分层及目录映射、允许依赖", ARCHITECTURE_SKILL)
 
     def test_compression_restores_authority_without_new_persistence(self) -> None:
         self.assertIn("会话内同时保留最小决策胶囊", CONVERSATION_SOP)

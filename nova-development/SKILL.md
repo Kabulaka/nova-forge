@@ -9,7 +9,7 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 ## 自动路由与有限加载
 
-技能名称不决定用户意图。首次只读用户表达、`.nova/PRODUCT_REQUIREMENTS.md` 的需求索引和 `.nova/PROJECT_BLUEPRINT.md` 的技术/模块摘要及活动工作索引；不得为了判断路由扫描需求块、设计正文或代码树。
+技能名称不决定用户意图。首次只读用户表达、`.nova/PRODUCT_REQUIREMENTS.md` 的需求索引、`.nova/PROJECT_BLUEPRINT.md` 的技术/模块摘要及活动工作索引，以及存在时的 `.nova/SHARED_CAPABILITIES.md`；不得为了判断路由扫描需求块、设计正文或代码树。
 
 - 无需求文档、无代码且无蓝图：转入 `nova-requirements`，需求确认后再进入 `nova-architecture`，不得直接生成开发设计。
 - 已有代码和蓝图但无需求文档：只询问是否补建需求层；用户拒绝时继续普通功能/FIX，不把缺少需求文档当阻断。
@@ -73,13 +73,19 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 已有代码库时，围绕当前主题研究入口、模块边界、直接调用关系、权限、存储、失败恢复和测试；冲突标为待确认。
 
+### 共享能力发现与决定
+
+澄清当前功能时，先查 `.nova/SHARED_CAPABILITIES.md`，再定向研究相关共享目录、代码和测试；目录缺失或没有命中不证明能力不存在。发现已有能力时说明复用入口和边界，不重复建设。发现边界清晰、可能跨页面或模块复用，或统一实现能显著降低复杂度、安全或一致性风险的候选时，向用户说明当前需要、可能复用场景、本次成本与影响并给出建议，只确认“本次共享建设 / 当前局部实现 / 局部实现但保留抽象边界”一个决定；普通辅助函数、一次性布局和纯业务语义不升级为共享候选。
+
+用户确认共享建设后才把抽象范围、分层落位和验收写入当前设计。现有蓝图已定义共享代码区域、系统分层和允许依赖时可在当前工作项实现；需要新增技术栈、层、公共依赖方向、数据所有权或外部契约时停止功能设计并返回 `nova-architecture`。目录只登记已实现且通过最低验收的能力，候选和计划留在设计中。
+
 用户显式引用成熟平台、标准、最佳实践、产品或仓库，或把安全、身份、公共契约等高风险事项委托给 AI 时，完整读取 [参考研究 SOP](references/reference-research-sop.md)。范围明确且支持子代理时，启动一个或多个只读探索子代理；主代理分离参考事实与本项目候选决定，并披露具体决定、依据、影响、不采用内容和证据缺口。宽泛的“类似某产品”先问一个范围问题；产品名仅作为研究例子时不得形成产品专属规则。
 
 开发阶段只询问会改变功能行为、外部契约、安全边界或数据语义且无法由证据和委托消解的差量。用户委托范围内的普通低风险内部实现由 AI 决定并在整份摘要中披露，不逐项提问；委托不能授权单功能静默修改共享架构，也不能代替用户最终确认。
 
 沿当前语境选择影响最大且证据不足的一个差量。用户谈 A 时涉及 B，只有 B 会改变 A 的当前含义才立即问，否则暂存。逐轮闭环目标、参与者、触发、结果、权限、状态、边界、失败恢复、明确不做和验收证据；不要按文档章节审问用户。
 
-架构讨论来自已确认场景、失败语义和非功能要求。必须澄清代码结构、系统分层及其目录映射；内部实现细节可由开发时分析，不用提前写成长说明。
+架构讨论来自已确认场景、失败语义和非功能要求。必须澄清代码结构、系统分层、目录映射和依赖方向；模块自己的业务表结构、查询和 Repository 仍由模块所有，但其代码位置及依赖必须服从蓝图分层。内部实现细节可由开发时分析，不用提前写成长说明。
 
 ### 已确认工作包的实施交接
 
@@ -114,11 +120,12 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 ## 5. 校验触发
 
-以下操作完成后运行对应校验器：创建、修改或迁移蓝图/设计；改变待办引用、工作包状态或文档生命周期；交付本轮已变更文档前。
+以下操作完成后运行对应校验器：创建、修改或迁移蓝图/设计；新增或修改共享能力目录；改变待办引用、工作包状态或文档生命周期；交付本轮已变更文档前。
 
 ```bash
 python3 scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
 python3 scripts/validate_blueprint.py --design /absolute/path/to/.nova/design/2026-08-26_example.md
+python3 ../nova-architecture/scripts/validate_shared_capabilities.py /absolute/path/to/.nova/SHARED_CAPABILITIES.md
 ```
 
 纯头脑风暴、继续提问、解释规则、读取项目和只读分析不运行校验器。校验不代替项目要求的测试、显式 Review 或提交门禁。
@@ -132,6 +139,7 @@ python3 scripts/validate_blueprint.py --design /absolute/path/to/.nova/design/20
 | 显式外部参考或安全、身份、公共契约等高风险委托 | `references/reference-research-sop.md` |
 | 创建或升级蓝图 | `references/blueprint-standard.md`；新建用模板；项目首次创建才读 `references/examples/equipment-borrowing/.nova/PROJECT_BLUEPRINT.md` |
 | 创建或更新设计 | `references/design-document-standard.md`；新建用模板；项目首次创建才读 `references/examples/equipment-borrowing/.nova/design/2026-08-25_设备借用闭环.md` |
+| 澄清或实施可能复用的能力 | `.nova/SHARED_CAPABILITIES.md`（存在时）；无命中再定向研究相关代码与测试 |
 | 实施 `PEND-*`、`FIX-*` 或 `MAINT-*` | `references/implementation-sop.md` |
 | 版本 3 项目出现旧式设计文件名 | `references/design-document-standard.md` 的“旧式文件名迁移” |
 | 确定设计演进来源 | 候选终态设计头部元数据；证据不足或冲突时定向读取相关契约与直接依赖 |

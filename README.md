@@ -2,7 +2,7 @@
 
 一套面向 Codex 的项目治理技能，覆盖“总体需求 → 并行架构契约 → 功能开发与本地提交 → 人工 Review → 审计关闭”的完整工作流。
 
-本仓库坚持分层事实来源：总体业务以 `.nova/PRODUCT_REQUIREMENTS.md` 与需求块为准，公共技术约束以 [.nova/PROJECT_BLUEPRINT.md](.nova/PROJECT_BLUEPRINT.md) 与架构契约为准，目标方案以 `.nova/design/` 为准，当前实现以技能源码、脚本和测试为准。
+本仓库坚持分层事实来源：总体业务以 `.nova/PRODUCT_REQUIREMENTS.md` 与需求块为准，公共技术约束以 [.nova/PROJECT_BLUEPRINT.md](.nova/PROJECT_BLUEPRINT.md) 与架构契约为准，已实现复用入口以 `.nova/SHARED_CAPABILITIES.md` 为索引，目标方案以 `.nova/design/` 为准，当前实现以技能源码、脚本和测试为准。
 
 ## 核心技能
 
@@ -36,6 +36,7 @@
 ├── .nova/
 │   ├── PRODUCT_REQUIREMENTS.md # 总体业务与需求索引（按需）
 │   ├── PROJECT_BLUEPRINT.md    # 公共技术契约与待办索引
+│   ├── SHARED_CAPABILITIES.md  # 已实现共享能力及源码位置（按需）
 │   ├── requirements/           # 长期需求块（按需）
 │   ├── architecture/           # 并行开发前置契约（按需）
 │   ├── design/                 # 功能设计与稳定工作包锚点
@@ -117,6 +118,9 @@ python3 nova-review/scripts/validate_discovery.py \
 # 校验版本 3 项目蓝图
 python3 nova-development/scripts/validate_blueprint.py .nova/PROJECT_BLUEPRINT.md
 
+# 共享能力目录存在时，校验登记项及源码位置
+python3 nova-architecture/scripts/validate_shared_capabilities.py .nova/SHARED_CAPABILITIES.md
+
 # 运行各技能测试
 python3 -m unittest discover -s nova-requirements/scripts -p 'test_*.py'
 python3 -m unittest discover -s nova-architecture/scripts -p 'test_*.py'
@@ -139,6 +143,8 @@ python3 nova-development/scripts/validate_blueprint.py \
 ## 关键约束
 
 - 蓝图保存项目级公共事实，设计文档保存目标，代码、测试和配置证明当前实现。
+- 开发澄清先查共享能力目录与实际代码；新增共享能力由用户确认，最低验收后才登记。
+- 模块业务表、查询和 Repository 归模块所有，但代码落位和依赖方向必须服从蓝图分层。
 - 已实现或已废弃的设计是不可变历史；后续演进必须新建设计并链接来源。
 - 工作项使用稳定的 `PEND-*`、`FIX-*` 或 `MAINT-*` 编号，commit 只作为证据。
 - 本地提交必须包含 Nova trailers；人工 Review 结论不得伪造进不可变开发提交。
