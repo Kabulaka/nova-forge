@@ -152,6 +152,15 @@ class SharedCapabilityValidatorTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must not be symbolic links", result.stdout)
 
+    def test_rejects_catalog_path_trailing_separators(self) -> None:
+        temp, catalog = self.make_repo()
+        self.addCleanup(temp.cleanup)
+        for suffix in ("/", "\\"):
+            with self.subTest(suffix=suffix):
+                result = self.run_validator(f"{catalog}{suffix}")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("path must be canonical", result.stdout)
+
     def test_rejects_noncanonical_cross_platform_code_locations(self) -> None:
         locations = (
             r"src\shared\database.py",

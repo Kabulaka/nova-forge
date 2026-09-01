@@ -77,6 +77,10 @@ def catalog_context(path_value: str | os.PathLike[str]) -> tuple[Path, Path, lis
     raw_path = os.fspath(path_value)
     if not raw_path or "\x00" in raw_path:
         return Path("."), Path("."), ["invalid shared capability catalog path"]
+    if raw_path.endswith(("/", "\\")):
+        return Path(raw_path), Path("."), [
+            "shared capability catalog path must be canonical"
+        ]
     if re.search(r"[\\/]{2,}", raw_path):
         return Path(raw_path), Path("."), [
             "shared capability catalog path must be canonical"
