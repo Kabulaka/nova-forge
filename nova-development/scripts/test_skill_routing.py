@@ -301,9 +301,10 @@ class SkillRoutingContractTests(unittest.TestCase):
     def test_progression_blocks_premature_closure_and_idle_next_steps(self) -> None:
         self.assertIn("待确认差量和研究任务均为空", CONVERSATION_SOP)
         self.assertIn(
-            "目标、参与者、触发、正常结果、状态变化、权限、关键边界、失败恢复、明确不做与验收证据均已确认",
+            "用户已确认 / 证据已查明 / 明确不适用 / 已完整披露的 AI 候选决定",
             CONVERSATION_SOP,
         )
+        self.assertIn("不得含“待确认”", CONVERSATION_SOP)
         self.assertIn("局部流程明确但条件未满足时只能称“阶段结论”", CONVERSATION_SOP)
         self.assertIn("不得只列出待办、只说“建议下一步”", CONVERSATION_SOP)
         self.assertIn("不把研究任务改问用户", CONVERSATION_SOP)
