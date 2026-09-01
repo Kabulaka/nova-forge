@@ -324,10 +324,12 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("AI 准备把某项做法作为已验证的成熟/最佳实践提出时", REQUIREMENTS_SKILL)
         self.assertIn("AI 准备把某项做法作为已验证的成熟/最佳实践提出时", CONVERSATION_SOP)
         for document in (ARCHITECTURE_SKILL, SKILL):
-            self.assertIn("已验证的成熟/最佳实践或多边界方案依据", document)
+            self.assertIn("只有准备把它作为已验证的成熟/最佳实践", document)
+            self.assertNotIn("成熟/最佳实践或多边界", document)
         self.assertIn("普通低风险模块内部取舍只标为可修正的 AI 候选", ARCHITECTURE_SKILL)
         self.assertIn("普通低风险内部取舍只标为可修正的 AI 候选", SKILL)
-        self.assertIn("准备把它作为已验证的成熟/最佳实践或多边界推荐依据", REFERENCE_RESEARCH_SOP)
+        self.assertIn("准备把它作为已验证的成熟/最佳实践", REFERENCE_RESEARCH_SOP)
+        self.assertNotIn("成熟/最佳实践或多边界", REFERENCE_RESEARCH_SOP)
         self.assertIn("普通低风险内部取舍只标为 AI 候选", REQUIREMENTS_SKILL)
         self.assertIn("不得声称为已验证实践", SKILL)
 
@@ -337,6 +339,9 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("不可分的行为选择", CONVERSATION_SOP)
         self.assertIn("可以同时更新其包含的多个收敛矩阵格", CONVERSATION_SOP)
         self.assertIn("彼此可独立改变、取舍不同或没有直接依赖的决定不得打包", CONVERSATION_SOP)
+        self.assertIn("多个直接依赖且不可分的边界也不因此触发外部研究", CONVERSATION_SOP)
+        self.assertIn("多边界本身不构成研究触发", REFERENCE_RESEARCH_SOP)
+        self.assertIn("只有显式参考、成熟/最佳实践主张或高风险边界", REFERENCE_RESEARCH_SOP)
         self.assertIn("彼此独立的决定不得借研究结果打包确认", REFERENCE_RESEARCH_SOP)
 
     def test_explicit_feature_reference_researches_before_one_remaining_delta(self) -> None:
