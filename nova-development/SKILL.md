@@ -9,7 +9,7 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 ## 自动路由与有限加载
 
-技能名称不决定用户意图。首次只读用户表达、`.nova/PRODUCT_REQUIREMENTS.md` 的需求索引、`.nova/PROJECT_BLUEPRINT.md` 的技术/模块摘要及活动工作索引，以及存在时的 `.nova/SHARED_CAPABILITIES.md`；不得为了判断路由扫描需求块、设计正文或代码树。
+技能名称不决定用户意图。首次只读用户表达、`.nova/PRODUCT_REQUIREMENTS.md` 的需求索引、`.nova/PROJECT_BLUEPRINT.md` 的技术/模块摘要及活动工作索引；不得为了判断路由扫描需求块、设计正文、共享能力目录或代码树。
 
 - 无需求文档、无代码且无蓝图：转入 `nova-requirements`，需求确认后再进入 `nova-architecture`，不得直接生成开发设计。
 - 已有代码和蓝图但无需求文档：只询问是否补建需求层；用户拒绝时继续普通功能/FIX，不把缺少需求文档当阻断。
@@ -120,12 +120,12 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 ## 5. 校验触发
 
-以下操作完成后运行对应校验器：创建、修改或迁移蓝图/设计；新增或修改共享能力目录；改变待办引用、工作包状态或文档生命周期；交付本轮已变更文档前。
+以下操作完成后运行对应校验器：创建、修改或迁移蓝图/设计；新增、修改或删除共享能力目录；改变待办引用、工作包状态或文档生命周期；交付本轮已变更文档前。
 
 ```bash
 python3 scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
 python3 scripts/validate_blueprint.py --design /absolute/path/to/.nova/design/2026-08-26_example.md
-python3 ../nova-architecture/scripts/validate_shared_capabilities.py /absolute/path/to/.nova/SHARED_CAPABILITIES.md
+python3 ../nova-architecture/scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md
 ```
 
 纯头脑风暴、继续提问、解释规则、读取项目和只读分析不运行校验器。校验不代替项目要求的测试、显式 Review 或提交门禁。

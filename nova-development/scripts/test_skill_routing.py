@@ -60,15 +60,67 @@ DESIGN_EXAMPLE = (
 
 
 def markdown_section(document: str, heading: str) -> str:
-    start = document.index(heading)
     level = len(heading) - len(heading.lstrip("#"))
-    body_start = document.index("\n", start) + 1
-    next_heading = re.search(rf"^#{{1,{level}}} ", document[body_start:], re.MULTILINE)
-    end = body_start + next_heading.start() if next_heading else len(document)
-    return document[start:end]
+    lines = document.splitlines(keepends=True)
+    matches: list[int] = []
+    fence: str | None = None
+    for index, line in enumerate(lines):
+        stripped = line.rstrip("\r\n")
+        marker = re.match(r"^\s*(`{3,}|~{3,})", stripped)
+        if marker:
+            marker_char = marker.group(1)[0]
+            if fence is None:
+                fence = marker_char
+            elif fence == marker_char:
+                fence = None
+            continue
+        if fence is None and stripped == heading:
+            matches.append(index)
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected exactly one real Markdown heading {heading!r}, found {len(matches)}"
+        )
+
+    start = matches[0]
+    fence = None
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        stripped = lines[index].rstrip("\r\n")
+        marker = re.match(r"^\s*(`{3,}|~{3,})", stripped)
+        if marker:
+            marker_char = marker.group(1)[0]
+            if fence is None:
+                fence = marker_char
+            elif fence == marker_char:
+                fence = None
+            continue
+        if fence is None and re.match(rf"^#{{1,{level}}}\s+", stripped):
+            end = index
+            break
+    return "".join(lines[start:end])
 
 
 class SkillRoutingContractTests(unittest.TestCase):
+    def test_markdown_section_requires_one_real_heading(self) -> None:
+        document = """# Root
+
+```
+## Target
+```
+
+## Target
+expected body
+
+## Next
+other body
+"""
+        self.assertIn("expected body", markdown_section(document, "## Target"))
+        self.assertNotIn("other body", markdown_section(document, "## Target"))
+        with self.assertRaises(AssertionError):
+            markdown_section(document, "## Missing")
+        with self.assertRaises(AssertionError):
+            markdown_section(document + "\n## Target\nduplicate\n", "## Target")
+
     def test_entrypoint_is_compact_and_routes_conditional_detail(self) -> None:
         self.assertLessEqual(len(SKILL.splitlines()), 180)
         self.assertLessEqual(len(SKILL), 16_000)
@@ -315,6 +367,7 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("普通低风险内部实现由 AI 决定并在整份摘要中披露", SKILL)
 
     def test_shared_capability_opportunities_require_user_decision(self) -> None:
+        automatic_route = markdown_section(SKILL, "## 自动路由与有限加载")
         decision = markdown_section(SKILL, "### 共享能力发现与决定")
         conversation_gate = markdown_section(CONVERSATION_SOP, "### 共享能力机会闸门")
         resource_route = markdown_section(SKILL, "## 资源路由")
@@ -324,13 +377,16 @@ class SkillRoutingContractTests(unittest.TestCase):
             if line.startswith("| 澄清或实施可能复用的能力 |")
         )
 
+        self.assertNotIn(".nova/SHARED_CAPABILITIES.md", automatic_route)
         self.assertLess(
             decision.index("先查 `.nova/SHARED_CAPABILITIES.md`"),
             decision.index("再定向研究相关共享目录、代码和测试"),
         )
         self.assertIn("目录缺失或没有命中不证明能力不存在", decision)
         self.assertIn("可能复用场景、收益、本次成本与影响", decision)
+        self.assertIn("并给出建议", decision)
         self.assertIn("本次共享建设 / 当前局部实现 / 局部实现但保留抽象边界", decision)
+        self.assertIn("普通辅助函数、一次性布局和纯业务语义不升级为共享候选", decision)
         self.assertIn("用户确认共享建设后", decision)
         self.assertIn(
             "需要新增技术栈、层、共享依赖、数据所有权或公共契约时",
@@ -343,22 +399,31 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("命中时验证入口与边界，未命中时继续发现", route_row)
 
     def test_shared_capability_catalog_only_indexes_implemented_code(self) -> None:
+        decision = markdown_section(SKILL, "### 共享能力发现与决定")
+        validation = markdown_section(SKILL, "## 5. 校验触发")
+        implementation_scope = markdown_section(IMPLEMENTATION_SOP, "## 1. 准入、范围与任务差异基线")
+        implementation_rules = markdown_section(IMPLEMENTATION_SOP, "## 3. 编码约束")
+        architecture_delivery = markdown_section(ARCHITECTURE_SKILL, "## 交付物")
+        readme_validation = markdown_section(README, "## 本地验证")
         self.assertTrue(SHARED_CAPABILITIES_TEMPLATE.is_file())
         template = SHARED_CAPABILITIES_TEMPLATE.read_text(encoding="utf-8")
         self.assertIn("共享能力目录版本：1", template)
         self.assertIn("| 类型 | 能力 | 说明 | 代码位置 | 复用边界 |", template)
         self.assertIn("只登记已实现且通过最低验收", template)
-        self.assertIn("目录只登记已实现且通过最低验收的能力", SKILL)
-        self.assertIn("候选和计划留在设计中", SKILL)
-        self.assertIn("不证明实现不存在", IMPLEMENTATION_SOP)
-        self.assertIn("候选、计划和未完成入口不得登记", IMPLEMENTATION_SOP)
+        self.assertIn("目录只登记已实现且通过最低验收的能力", decision)
+        self.assertIn("候选和计划留在设计中", decision)
+        self.assertIn("不证明实现不存在", implementation_scope)
+        self.assertIn("候选、计划和未完成入口不得登记", implementation_rules)
+        self.assertIn("最后一项能力退役时删除目录文件", implementation_rules)
+        self.assertIn("validate_shared_capabilities.py --if-present", implementation_rules)
+        self.assertIn("新增、修改或删除共享能力目录", validation)
         self.assertIn(
             "validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md",
-            ARCHITECTURE_SKILL,
+            architecture_delivery,
         )
         self.assertIn(
             "validate_shared_capabilities.py --if-present .nova/SHARED_CAPABILITIES.md",
-            README,
+            readme_validation,
         )
 
     def test_module_owned_persistence_still_obeys_project_layers(self) -> None:
@@ -366,11 +431,13 @@ class SkillRoutingContractTests(unittest.TestCase):
         implementation_rules = markdown_section(IMPLEMENTATION_SOP, "## 3. 编码约束")
         blueprint_layers = markdown_section(BLUEPRINT_STANDARD, "### 3.4 系统架构")
         template_layers = markdown_section(BLUEPRINT_TEMPLATE, "### 分层与代码映射")
+        architecture_minimum = markdown_section(ARCHITECTURE_STANDARD, "## 1. 最小交付")
+        architecture_decisions = markdown_section(ARCHITECTURE_SKILL, "## 访谈与决策")
 
         self.assertIn(invariant, markdown_section(SKILL, "### 共享能力发现与决定"))
         self.assertIn(invariant, implementation_rules)
         self.assertIn(invariant, blueprint_layers)
-        self.assertIn(invariant, ARCHITECTURE_STANDARD)
+        self.assertIn(invariant, architecture_minimum)
         self.assertIn("所有实现代码均须映射", template_layers)
         self.assertIn("为相应职责规定的层和目录", implementation_rules)
         self.assertIn("Repository 接口可按蓝图作为端口或应用契约落位", implementation_rules)
@@ -383,7 +450,7 @@ class SkillRoutingContractTests(unittest.TestCase):
             "需要新增技术栈、层、共享依赖、数据所有权或公共契约时",
             markdown_section(IMPLEMENTATION_SOP, "## 2. 编码前契约"),
         )
-        self.assertIn("系统分层及目录映射、允许依赖", ARCHITECTURE_SKILL)
+        self.assertIn("系统分层及目录映射、允许依赖", architecture_decisions)
 
     def test_compression_restores_authority_without_new_persistence(self) -> None:
         self.assertIn("会话内同时保留最小决策胶囊", CONVERSATION_SOP)

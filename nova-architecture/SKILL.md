@@ -32,7 +32,7 @@ description: 在总体需求确认后，以单问题访谈确定足以指导开�
 2. `.nova/architecture/ARCHITECTURE_CONTRACTS.md` 是并行门禁和架构契约索引，新建时严格使用 [架构契约模板](assets/ARCHITECTURE_CONTRACTS.template.md)。
 3. 共享语言、框架、运行形态和目录边界放 `architecture/foundation/`，新建时使用 [工程骨架模板](assets/FOUNDATION_CONTRACT.template.md)；数据所有权和共享数据规则放 `architecture/data/`，使用 [数据契约模板](assets/DATA_CONTRACT.template.md)；公共 API 使用 OpenAPI，事件使用 AsyncAPI，Mock/fixture 放 `architecture/mocks/`。
 4. 只创建实际需要的目录；迁移、共享类型和接口实现仍放正常源码目录。
-5. `.nova/SHARED_CAPABILITIES.md` 是已实现共享能力的复用路由索引，使用 [共享能力目录模板](assets/SHARED_CAPABILITIES.template.md)；绿地或暂无能力时不创建空目录。架构负责冻结共享代码区域、分层和依赖边界，功能开发在用户确认并完成最低验收后登记实现；登记若要求新增层、共享依赖、数据所有权或公共契约，必须先完成架构确认。
+5. `.nova/SHARED_CAPABILITIES.md` 是已实现共享能力的复用路由索引，使用 [共享能力目录模板](assets/SHARED_CAPABILITIES.template.md)；绿地或暂无能力时不创建空目录。架构负责冻结共享代码区域、分层和依赖边界，功能开发在用户确认并完成最低验收后登记实现；候选或实现若要求新增技术栈、层、共享依赖、数据所有权或公共契约，必须先完成架构确认。
 
 创建或更新前完整读取 [架构契约规范](references/architecture-standard.md)。首次建立架构体系时可读取 [并行项目示例](references/examples/order-platform/.nova/architecture/ARCHITECTURE_CONTRACTS.md) 及其实际引用；已有体系时只读目标契约。
 

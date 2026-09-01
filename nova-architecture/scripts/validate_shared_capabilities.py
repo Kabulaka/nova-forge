@@ -123,11 +123,13 @@ def validate(
     path, repo_root, context_errors = catalog_context(path_value)
     if context_errors:
         return context_errors, False
-    try:
-        if allow_missing and not path.exists():
+    if allow_missing:
+        try:
+            path.stat()
+        except FileNotFoundError:
             return [], True
-    except (OSError, RuntimeError, ValueError) as exc:
-        return [f"cannot inspect shared capability catalog: {exc}"], False
+        except (OSError, RuntimeError, ValueError) as exc:
+            return [f"cannot inspect shared capability catalog: {exc}"], False
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
@@ -183,7 +185,7 @@ def validate(
             continue
         try:
             target = (repo_root / Path(*relative.parts)).resolve(strict=True)
-            target.relative_to(repo_root)
+            resolved_relative = target.relative_to(repo_root)
         except FileNotFoundError:
             errors.append(
                 f"capability row line {line_number} shared capability code location "
@@ -202,6 +204,11 @@ def validate(
                 f"code location {display_path(location)}: {exc}"
             )
             continue
+        if resolved_relative.parts and resolved_relative.parts[0] == ".nova":
+            errors.append(
+                f"capability row line {line_number} shared capability code location "
+                f"resolves into .nova governance data: {display_path(location)}"
+            )
 
     return errors, False
 
