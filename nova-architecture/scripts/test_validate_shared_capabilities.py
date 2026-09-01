@@ -201,6 +201,31 @@ class SharedCapabilityValidatorTests(unittest.TestCase):
         self.assertIn("cannot resolve shared capability code location", result2.stdout)
         self.assertNotIn("Traceback", result2.stderr)
 
+        temp3, catalog3 = self.make_repo()
+        self.addCleanup(temp3.cleanup)
+        catalog3.write_bytes(b"\xff\xfe")
+        result3 = self.run_validator(catalog3)
+        self.assertNotEqual(result3.returncode, 0)
+        self.assertIn("cannot read shared capability catalog", result3.stdout)
+        self.assertNotIn("Traceback", result3.stderr)
+
+    def test_rejects_code_location_symlink_into_governance_data(self) -> None:
+        temp, catalog = self.make_repo(
+            self.valid_catalog().replace(
+                "src/shared/database.py", "src/shared/governance-alias.py"
+            )
+        )
+        self.addCleanup(temp.cleanup)
+        blueprint = catalog.parent / "PROJECT_BLUEPRINT.md"
+        blueprint.write_text("# Blueprint\n", encoding="utf-8")
+        alias = catalog.parent.parent / "src/shared/governance-alias.py"
+        alias.symlink_to(blueprint)
+
+        result = self.run_validator(catalog)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("resolves into .nova governance data", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_rejects_invalid_versions_headers_and_empty_fields(self) -> None:
         invalid_bodies = (
             (self.valid_catalog().replace("共享能力目录版本：1", "共享能力目录版本：2"), "version must be 1"),
@@ -249,6 +274,17 @@ class SharedCapabilityValidatorTests(unittest.TestCase):
         invalid_present = self.run_validator(catalog, "--if-present")
         self.assertNotEqual(invalid_present.returncode, 0)
         self.assertIn("code location does not exist", invalid_present.stdout)
+
+        temp2 = tempfile.TemporaryDirectory()
+        self.addCleanup(temp2.cleanup)
+        root = Path(temp2.name)
+        (root / ".nova").write_text("not a directory\n", encoding="utf-8")
+        invalid_parent = self.run_validator(
+            root / ".nova/SHARED_CAPABILITIES.md", "--if-present"
+        )
+        self.assertNotEqual(invalid_parent.returncode, 0)
+        self.assertIn("cannot inspect shared capability catalog", invalid_parent.stdout)
+        self.assertNotIn("Traceback", invalid_parent.stderr)
 
 
 if __name__ == "__main__":
