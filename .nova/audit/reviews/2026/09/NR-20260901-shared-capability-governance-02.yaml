@@ -1,0 +1,67 @@
+{
+  "batch_id": "NR-20260901-shared-capability-governance-02",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "79363e2eb3398c2ab9d9c5f40616aecdd2018858",
+          "repository": "main"
+        },
+        {
+          "commit": "ce57b21ccd9dea2358ef6f849764f15e5f1fecaa",
+          "repository": "main"
+        },
+        {
+          "commit": "da09288f4d730f1c68341435fde512819ff79587",
+          "repository": "main"
+        },
+        {
+          "commit": "2e0735ba850e8f701465ef93fea79abb723ff0e9",
+          "repository": "main"
+        },
+        {
+          "commit": "a27a5c65232b5e8cd00cadae330bafbd26eac15a",
+          "repository": "main"
+        },
+        {
+          "commit": "22700e054022585541f8254aebf8963b79c8b311",
+          "repository": "main"
+        },
+        {
+          "commit": "b4f2e71a456c736795142418fa376831b0ef8012",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-01_Nova共享能力发现与分层治理.md#wp-01-shared-capability-governance",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "requirements 7; architecture 29; development 110 plus targeted routing 30; review 73 (1 skipped); blueprint, design, shared catalog, skill validators, mutation and path probes, diff checks (pass)",
+      "work_item": "PEND-01a05c55-3b55-7a92-9684-aaaa643c1f1e"
+    }
+  ],
+  "manifest_sha256": "22772838859c44248305fa024d7c22a814682d59f50c21911b8cddc8a0e02811",
+  "review_content_sha256": "9e407514e2a92f2290250decbb25e58f8ec948fadbbf1b432521383418cfb230",
+  "review_round": 2,
+  "review_scope": [
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/design/2026-09-01_Nova共享能力发现与分层治理.md",
+    "main:README.md",
+    "main:nova-architecture/SKILL.md",
+    "main:nova-architecture/assets/SHARED_CAPABILITIES.template.md",
+    "main:nova-architecture/references/architecture-standard.md",
+    "main:nova-architecture/scripts/test_validate_shared_capabilities.py",
+    "main:nova-architecture/scripts/validate_shared_capabilities.py",
+    "main:nova-development/SKILL.md",
+    "main:nova-development/assets/PROJECT_BLUEPRINT.template.md",
+    "main:nova-development/references/blueprint-standard.md",
+    "main:nova-development/references/conversation-sop.md",
+    "main:nova-development/references/implementation-sop.md",
+    "main:nova-development/scripts/test_skill_routing.py"
+  ],
+  "reviewed_at": "2026-09-01T20:42:55+08:00",
+  "reviewer": "redo_governance+redo_validator+development_cycle2_review",
+  "schema": 1
+}
