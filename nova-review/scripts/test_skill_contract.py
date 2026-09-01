@@ -81,6 +81,25 @@ class NovaReviewSkillContractTests(unittest.TestCase):
         self.assertEqual(SKILL.count("Observation-Fix"), 1)
         self.assertNotIn("Observation-Defer", SKILL)
 
+    def test_pass_completion_report_routes_to_fixed_implementation_template(self) -> None:
+        self.assertIn("实施与交付 SOP 的代码完成报告", SKILL)
+        self.assertIn("关闭提交完成且 `query` 可信校验通过后", SKILL)
+        self.assertIn("严格使用其第 7 节固定结构", SKILL)
+        self.assertIn("所有章节不得省略", SKILL)
+        self.assertIn("不得用简化的 Review 摘要替代固定完成报告", SKILL)
+        for heading in (
+            "概要",
+            "变更文件",
+            "关键决策",
+            "测试结果",
+            "提交结果",
+            "Review 结果",
+            ".nova/PROJECT_BLUEPRINT.md 与设计更新",
+            "基线与清理",
+            "遗留事项",
+        ):
+            self.assertIn(f"### {heading}", IMPLEMENTATION)
+
 
 if __name__ == "__main__":
     unittest.main()

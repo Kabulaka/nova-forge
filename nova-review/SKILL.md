@@ -40,6 +40,8 @@ PASS 或按 SOP 合法的 PASS WITH NOTES 后，读取 [审计与关闭契约](r
 
 关闭前先 `check-manifest`。失败时不得手工补一半台账；修正输入后重试同一批次。相同批次和内容重复执行必须复用既有记录。
 
+关闭提交完成且 `query` 可信校验通过后，完整读取 [实施与交付 SOP 的代码完成报告](../nova-development/references/implementation-sop.md#7-代码完成报告)，严格使用其第 7 节固定结构向用户报告最终结果。所有章节不得省略；必须按实际结果更新提交、Review 状态与轮次、内容标识与范围、逐轮问题处置、蓝图/设计/审计、基线清理和遗留事项，无内容写“无”。不得用简化的 Review 摘要替代固定完成报告。
+
 ## 5. 工具入口
 
 ```bash
@@ -62,3 +64,4 @@ python3 scripts/probe_default_flow.py
 | 选择范围、生成或校验 commit trailers | `references/commit-contract.md` |
 | 启动独立 Review 或复审 | `references/review-sop.md` |
 | 查询、记录 PASS 或关闭正式待办 | `references/audit-contract.md` |
+| PASS/PASS WITH NOTES 关闭并完成可信查询后的用户报告 | `../nova-development/references/implementation-sop.md` 第 7 节 |
