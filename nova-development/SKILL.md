@@ -73,7 +73,9 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 已有代码库时，围绕当前主题研究入口、模块边界、直接调用关系、权限、存储、失败恢复和测试；冲突标为待确认。
 
-用户指定外部产品、功能或 GitHub 项目时，完整读取 [参考研究 SOP](references/reference-research-sop.md)。范围明确且支持子代理时，启动一个或多个只读探索子代理；主代理只向用户输出参考事实、适配建议、不建议照搬之处和一个确认问题。宽泛的“类似某产品”先问一个范围问题。
+用户显式引用成熟平台、标准、最佳实践、产品或仓库，或把安全、身份、公共契约等高风险事项委托给 AI 时，完整读取 [参考研究 SOP](references/reference-research-sop.md)。范围明确且支持子代理时，启动一个或多个只读探索子代理；主代理分离参考事实与本项目候选决定，并披露具体决定、依据、影响、不采用内容和证据缺口。宽泛的“类似某产品”先问一个范围问题；产品名仅作为研究例子时不得形成产品专属规则。
+
+开发阶段只询问会改变功能行为、外部契约、安全边界或数据语义且无法由证据和委托消解的差量。用户委托范围内的普通低风险内部实现由 AI 决定并在整份摘要中披露，不逐项提问；委托不能授权单功能静默修改共享架构，也不能代替用户最终确认。
 
 沿当前语境选择影响最大且证据不足的一个差量。用户谈 A 时涉及 B，只有 B 会改变 A 的当前含义才立即问，否则暂存。逐轮闭环目标、参与者、触发、结果、权限、状态、边界、失败恢复、明确不做和验收证据；不要按文档章节审问用户。
 
@@ -127,7 +129,7 @@ python3 scripts/validate_blueprint.py --design /absolute/path/to/.nova/design/20
 |------|----------|
 | 本会话首次提问，或 SOP 指纹未记录/变化 | `references/conversation-sop.md` |
 | 已有蓝图但版本缺失、旧版或显式迁移审计 | `references/blueprint-migration-sop.md` |
-| 用户指定外部参考 | `references/reference-research-sop.md` |
+| 显式外部参考或安全、身份、公共契约等高风险委托 | `references/reference-research-sop.md` |
 | 创建或升级蓝图 | `references/blueprint-standard.md`；新建用模板；项目首次创建才读 `references/examples/equipment-borrowing/.nova/PROJECT_BLUEPRINT.md` |
 | 创建或更新设计 | `references/design-document-standard.md`；新建用模板；项目首次创建才读 `references/examples/equipment-borrowing/.nova/design/2026-08-25_设备借用闭环.md` |
 | 实施 `PEND-*`、`FIX-*` 或 `MAINT-*` | `references/implementation-sop.md` |

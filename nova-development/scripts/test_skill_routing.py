@@ -9,9 +9,18 @@ from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 SKILL = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+REQUIREMENTS_SKILL = (SKILL_ROOT.parent / "nova-requirements" / "SKILL.md").read_text(
+    encoding="utf-8"
+)
+ARCHITECTURE_SKILL = (SKILL_ROOT.parent / "nova-architecture" / "SKILL.md").read_text(
+    encoding="utf-8"
+)
 CONVERSATION_SOP = (SKILL_ROOT / "references" / "conversation-sop.md").read_text(
     encoding="utf-8"
 )
+REFERENCE_RESEARCH_SOP = (
+    SKILL_ROOT / "references" / "reference-research-sop.md"
+).read_text(encoding="utf-8")
 MIGRATION_SOP = (SKILL_ROOT / "references" / "blueprint-migration-sop.md").read_text(
     encoding="utf-8"
 )
@@ -243,6 +252,52 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("按上一节载体规则立即提出一个问题", CONVERSATION_SOP)
         self.assertNotIn("### 结构化答案后的推进", CONVERSATION_SOP)
 
+    def test_delegated_decisions_are_disclosed_before_confirmation(self) -> None:
+        delegation = CONVERSATION_SOP.index("### 委托决定闭环")
+        disclosure = CONVERSATION_SOP.index("具体决定、依据及证据强度")
+        final_summary = CONVERSATION_SOP.index("覆盖整份设计的最终摘要", disclosure)
+        self.assertLess(delegation, disclosure)
+        self.assertLess(disclosure, final_summary)
+        self.assertIn("委托只能免除形式性提问", CONVERSATION_SOP)
+        self.assertIn("不能免除必要研究、具体决定披露、用户修正机会和整份确认", CONVERSATION_SOP)
+        self.assertIn("沉默或普通“继续”不把候选变成正式契约", CONVERSATION_SOP)
+        self.assertIn("委托只记录为授权范围，不能直接标成已确认要求", CONVERSATION_SOP)
+        self.assertIn(
+            "用户已确认 / 证据已查明 / 明确不适用 / AI 候选决定 / 待确认",
+            CONVERSATION_SOP,
+        )
+
+    def test_research_trigger_is_generic_risk_based_and_product_neutral(self) -> None:
+        shared_trigger = "显式引用成熟平台、标准、最佳实践、产品或仓库"
+        high_risk = "安全、身份、公共契约等高风险"
+        for document in (
+            REQUIREMENTS_SKILL,
+            ARCHITECTURE_SKILL,
+            SKILL,
+            CONVERSATION_SOP,
+            REFERENCE_RESEARCH_SOP,
+        ):
+            self.assertIn(shared_trigger, document)
+            self.assertIn(high_risk, document)
+        self.assertIn("产品名仅作为研究能力的例子、类比或历史说明", REFERENCE_RESEARCH_SOP)
+        self.assertIn("不启动该产品的专属研究", REFERENCE_RESEARCH_SOP)
+        self.assertIn("普通低风险内部实现", REFERENCE_RESEARCH_SOP)
+
+    def test_stage_skills_keep_distinct_delegation_authority(self) -> None:
+        self.assertIn("业务目标、角色、端到端流程、业务权限、业务状态、规则、范围和验收", REQUIREMENTS_SKILL)
+        self.assertIn("需求阶段保持最终确认权", REQUIREMENTS_SKILL)
+        self.assertIn("显著成本、部署边界、数据所有权、公共 API/事件", ARCHITECTURE_SKILL)
+        self.assertIn("身份与安全边界、共享失败语义", ARCHITECTURE_SKILL)
+        self.assertIn("会改变功能行为、外部契约、安全边界或数据语义", SKILL)
+        self.assertIn("普通低风险内部实现由 AI 决定并在整份摘要中披露", SKILL)
+
+    def test_compression_restores_authority_without_new_persistence(self) -> None:
+        self.assertIn("会话内同时保留最小决策胶囊", CONVERSATION_SOP)
+        self.assertIn("上下文压缩或续接先恢复这些权威状态", CONVERSATION_SOP)
+        self.assertIn("缺少具体冲突时不得把已回答事项重置为待确认", CONVERSATION_SOP)
+        self.assertIn("不新增项目文件或宿主持久化", CONVERSATION_SOP)
+        self.assertIn("不得从头重放访谈", CONVERSATION_SOP)
+
     def test_progression_blocks_premature_closure_and_idle_next_steps(self) -> None:
         self.assertIn("待确认差量和研究任务均为空", CONVERSATION_SOP)
         self.assertIn(
@@ -307,7 +362,7 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("`0/1 answered`", CONVERGENCE_DESIGN)
 
     def test_conversation_sop_preserves_frontstage_gates(self) -> None:
-        self.assertLessEqual(len(CONVERSATION_SOP.splitlines()), 160)
+        self.assertLessEqual(len(CONVERSATION_SOP.splitlines()), 190)
         self.assertIn("### 单问题闸门", CONVERSATION_SOP)
         self.assertIn("只有一个需要用户回答的句子", CONVERSATION_SOP)
         self.assertIn("用用户可感知结果解释取舍并明确推荐", CONVERSATION_SOP)
