@@ -27,6 +27,7 @@ class GlobalGovernanceTests(unittest.TestCase):
         self.assertLessEqual(len(GLOBAL.splitlines()), 100)
         self.assertLessEqual(len(GLOBAL.encode("utf-8")), 10_000)
         self.assertIn("使用 `nova-development`", GLOBAL)
+        self.assertIn("使用 `nova-doctor`", GLOBAL)
         self.assertIn("使用 `nova-review`", GLOBAL)
         self.assertIn("不得以“保持全局文件简短”为由删除", GLOBAL)
         self.assertNotIn("Observation-Fix", GLOBAL)

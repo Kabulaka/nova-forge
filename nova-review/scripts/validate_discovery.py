@@ -9,7 +9,13 @@ import sys
 from pathlib import Path
 
 
-EXPECTED_SKILLS = ("nova-requirements", "nova-architecture", "nova-development", "nova-review")
+EXPECTED_SKILLS = (
+    "nova-requirements",
+    "nova-architecture",
+    "nova-development",
+    "nova-doctor",
+    "nova-review",
+)
 
 
 def skill_name(path: Path) -> str | None:
