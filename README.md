@@ -67,23 +67,44 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/Kabulaka/skills.git
-cd skills
+git clone https://github.com/Kabulaka/nova-forge.git
+cd nova-forge
 ```
 
-### 2. 建立 Codex 发现链接
+### 2. 建立 Codex 用户级发现链接
+
+Codex 实际加载的用户级治理入口是 `~/.codex/AGENTS.md`，不会直接发现仓库内命名为 `AGENTS.global.md` 的文件。因此必须让 `~/.codex/AGENTS.md` 指向本仓库的 `codex/AGENTS.global.md`。仓库迁移或更换克隆目录后，也需要刷新已有软链接；下面的命令会更新软链接，但会拒绝覆盖普通文件或真实目录。
 
 ```bash
 mkdir -p ~/.codex/skills
-ln -s "$PWD/nova-development" ~/.codex/skills/nova-development
-ln -s "$PWD/nova-requirements" ~/.codex/skills/nova-requirements
-ln -s "$PWD/nova-architecture" ~/.codex/skills/nova-architecture
-ln -s "$PWD/nova-doctor" ~/.codex/skills/nova-doctor
-ln -s "$PWD/nova-review" ~/.codex/skills/nova-review
-ln -s "$PWD/codex/AGENTS.global.md" ~/.codex/AGENTS.md
+
+link_codex_entry() {
+  source_path=$1
+  target_path=$2
+  if [ -e "$target_path" ] && [ ! -L "$target_path" ]; then
+    printf '拒绝覆盖非软链接路径：%s\n' "$target_path" >&2
+    return 1
+  fi
+  ln -sfnT "$source_path" "$target_path"
+}
+
+link_codex_entry "$PWD/nova-development" ~/.codex/skills/nova-development
+link_codex_entry "$PWD/nova-requirements" ~/.codex/skills/nova-requirements
+link_codex_entry "$PWD/nova-architecture" ~/.codex/skills/nova-architecture
+link_codex_entry "$PWD/nova-doctor" ~/.codex/skills/nova-doctor
+link_codex_entry "$PWD/nova-review" ~/.codex/skills/nova-review
+link_codex_entry "$PWD/codex/AGENTS.global.md" ~/.codex/AGENTS.md
 ```
 
-工作区目录是唯一可写源码；`~/.codex` 下只保留发现链接。若目标路径已经存在，请先核对其用途和指向，再自行决定是否迁移，避免覆盖已有配置。
+工作区目录是唯一可写源码；`~/.codex` 下只保留发现链接。若命令报告目标不是软链接，请先核对其用途，再自行决定是否迁移，避免覆盖已有配置。链接更新后请新开 Codex 会话，使用户级治理文件重新加载。
+
+先确认用户级入口已经解析到当前仓库：
+
+```bash
+readlink -f ~/.codex/AGENTS.md
+```
+
+输出应为当前仓库下 `codex/AGENTS.global.md` 的绝对路径，而不是旧克隆目录。
 
 安装后验证：
 
