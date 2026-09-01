@@ -20,7 +20,7 @@ description: 在总体需求确认后，以单问题访谈确定足以指导开�
 
 用户委托 AI 采用成熟方案时，架构阶段可免除委托范围内的逐项选型提问，但显著成本、部署边界、数据所有权、公共 API/事件、身份与安全边界、共享失败语义仍必须作为具体候选披露并由整份摘要确认。委托不得静默扩大基础设施或跨越已确认需求。
 
-显式引用成熟平台、标准、最佳实践、产品或仓库，或委托安全、身份、公共契约等高风险事项时，完整读取 [外部参考研究 SOP](../nova-development/references/reference-research-sop.md)。研究事实和架构候选分开呈现；产品名仅作为研究例子时不得形成产品专属依赖。普通低风险模块内部实现直接交给 `nova-development`。
+显式引用成熟平台、标准、最佳实践、产品或仓库，委托安全、身份、公共契约等高风险事项，或 AI 准备把某项做法作为已验证的成熟/最佳实践提出时，完整读取 [外部参考研究 SOP](../nova-development/references/reference-research-sop.md)。研究事实和架构候选分开呈现；产品名仅作为研究例子时不得形成产品专属依赖。普通低风险模块内部取舍只标为 AI 候选，具体实现直接交给 `nova-development`。
 
 至少闭环：语言与框架、运行形态、代码结构、系统分层及目录映射、允许依赖、数据存储与所有权、公共 API、鉴权、失败恢复、部署边界，以及需求实际需要时的缓存、事件/MQ 和 Mock。没有明确需要的基础设施写为“不使用”，不创建空目录或占位文档。
 
@@ -42,7 +42,7 @@ description: 在总体需求确认后，以单问题访谈确定足以指导开�
 python3 ../nova-development/scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
 python3 scripts/validate_architecture.py /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
 python3 scripts/validate_architecture.py --ready /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
-python3 scripts/validate_shared_capabilities.py /absolute/path/to/.nova/SHARED_CAPABILITIES.md
+python3 scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md
 ```
 
 架构交付在提交前把需要项及对应契约标记为`待Review`，并把 Review 依据写为本次架构交付的 `PEND-*`。`--ready` 只有共享工程骨架、数据所有权、所需 API/事件/Mock 契约均存在且状态一致，并能从 Git 归属重建可信审计时通过：架构索引工作树必须等于 HEAD，且从首个可信架构 PASS 起每次索引变更都属于已归档 PASS PEND；门禁行必须属于其所写 PEND，每条契约索引行、每个契约文件和每条硬依赖行分别属于某个已归档 PASS PEND，契约文件当前字节还必须等于被审 commit。增量架构允许未变化门禁和契约保留原 PEND，同一类型新增契约可由新 PEND 独立负责。PASS 后直接由不可变审计派生就绪，无需递归改写架构文档；不得用无关 PASS、伪造审计、未提交或未审 commit、PASS 后修改、文档状态或手填批次名解锁。

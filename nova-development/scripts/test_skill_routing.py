@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -30,6 +31,10 @@ IMPLEMENTATION_SOP = (SKILL_ROOT / "references" / "implementation-sop.md").read_
 BLUEPRINT_STANDARD = (SKILL_ROOT / "references" / "blueprint-standard.md").read_text(
     encoding="utf-8"
 )
+BLUEPRINT_TEMPLATE = (SKILL_ROOT / "assets" / "PROJECT_BLUEPRINT.template.md").read_text(
+    encoding="utf-8"
+)
+README = (SKILL_ROOT.parent / "README.md").read_text(encoding="utf-8")
 ARCHITECTURE_STANDARD = (
     SKILL_ROOT.parent / "nova-architecture" / "references" / "architecture-standard.md"
 ).read_text(encoding="utf-8")
@@ -52,6 +57,15 @@ DESIGN_EXAMPLE = (
     / "design"
     / "2026-08-25_设备借用闭环.md"
 )
+
+
+def markdown_section(document: str, heading: str) -> str:
+    start = document.index(heading)
+    level = len(heading) - len(heading.lstrip("#"))
+    body_start = document.index("\n", start) + 1
+    next_heading = re.search(rf"^#{{1,{level}}} ", document[body_start:], re.MULTILINE)
+    end = body_start + next_heading.start() if next_heading else len(document)
+    return document[start:end]
 
 
 class SkillRoutingContractTests(unittest.TestCase):
@@ -301,14 +315,32 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("普通低风险内部实现由 AI 决定并在整份摘要中披露", SKILL)
 
     def test_shared_capability_opportunities_require_user_decision(self) -> None:
-        self.assertIn("### 共享能力发现与决定", SKILL)
-        self.assertIn("目录缺失或没有命中不证明能力不存在", SKILL)
-        self.assertIn("本次共享建设 / 当前局部实现 / 局部实现但保留抽象边界", SKILL)
-        self.assertIn("用户确认共享建设后", SKILL)
-        self.assertIn("### 共享能力机会闸门", CONVERSATION_SOP)
-        self.assertIn("先查共享能力目录，再定向查代码和测试", CONVERSATION_SOP)
-        self.assertIn("用户确认前不得扩大范围", CONVERSATION_SOP)
-        self.assertIn("共享复用", CONVERSATION_SOP)
+        decision = markdown_section(SKILL, "### 共享能力发现与决定")
+        conversation_gate = markdown_section(CONVERSATION_SOP, "### 共享能力机会闸门")
+        resource_route = markdown_section(SKILL, "## 资源路由")
+        route_row = next(
+            line
+            for line in resource_route.splitlines()
+            if line.startswith("| 澄清或实施可能复用的能力 |")
+        )
+
+        self.assertLess(
+            decision.index("先查 `.nova/SHARED_CAPABILITIES.md`"),
+            decision.index("再定向研究相关共享目录、代码和测试"),
+        )
+        self.assertIn("目录缺失或没有命中不证明能力不存在", decision)
+        self.assertIn("可能复用场景、收益、本次成本与影响", decision)
+        self.assertIn("本次共享建设 / 当前局部实现 / 局部实现但保留抽象边界", decision)
+        self.assertIn("用户确认共享建设后", decision)
+        self.assertIn(
+            "需要新增技术栈、层、共享依赖、数据所有权或公共契约时",
+            decision,
+        )
+        self.assertIn("先查共享能力目录，再定向查代码和测试", conversation_gate)
+        self.assertIn("可能复用场景、收益、本次成本与影响", conversation_gate)
+        self.assertIn("用户确认前不得扩大范围", conversation_gate)
+        self.assertIn("无论目录命中与否都定向核对相关代码和测试", route_row)
+        self.assertIn("命中时验证入口与边界，未命中时继续发现", route_row)
 
     def test_shared_capability_catalog_only_indexes_implemented_code(self) -> None:
         self.assertTrue(SHARED_CAPABILITIES_TEMPLATE.is_file())
@@ -320,16 +352,37 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("候选和计划留在设计中", SKILL)
         self.assertIn("不证明实现不存在", IMPLEMENTATION_SOP)
         self.assertIn("候选、计划和未完成入口不得登记", IMPLEMENTATION_SOP)
+        self.assertIn(
+            "validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md",
+            ARCHITECTURE_SKILL,
+        )
+        self.assertIn(
+            "validate_shared_capabilities.py --if-present .nova/SHARED_CAPABILITIES.md",
+            README,
+        )
 
     def test_module_owned_persistence_still_obeys_project_layers(self) -> None:
         invariant = "模块自己的业务表结构、查询和 Repository"
-        self.assertIn(invariant, SKILL)
-        self.assertIn(invariant, IMPLEMENTATION_SOP)
-        self.assertIn(invariant, BLUEPRINT_STANDARD)
+        implementation_rules = markdown_section(IMPLEMENTATION_SOP, "## 3. 编码约束")
+        blueprint_layers = markdown_section(BLUEPRINT_STANDARD, "### 3.4 系统架构")
+        template_layers = markdown_section(BLUEPRINT_TEMPLATE, "### 分层与代码映射")
+
+        self.assertIn(invariant, markdown_section(SKILL, "### 共享能力发现与决定"))
+        self.assertIn(invariant, implementation_rules)
+        self.assertIn(invariant, blueprint_layers)
         self.assertIn(invariant, ARCHITECTURE_STANDARD)
-        self.assertIn("界面或接口层不得越级直接访问持久化实现", IMPLEMENTATION_SOP)
-        self.assertIn("不得吸收模块业务语义形成万能数据层", IMPLEMENTATION_SOP)
-        self.assertIn("分层落位", IMPLEMENTATION_SOP)
+        self.assertIn("所有实现代码均须映射", template_layers)
+        self.assertIn("为相应职责规定的层和目录", implementation_rules)
+        self.assertIn("Repository 接口可按蓝图作为端口或应用契约落位", implementation_rules)
+        self.assertIn("持久化适配器必须落入蓝图规定", implementation_rules)
+        self.assertIn("界面或接口层不得越级直接访问持久化实现", implementation_rules)
+        self.assertIn("不得吸收模块业务语义形成万能数据层", implementation_rules)
+        self.assertIn("为相应职责规定的层和目录", blueprint_layers)
+        self.assertIn("Repository 接口定义为端口或应用契约", blueprint_layers)
+        self.assertIn(
+            "需要新增技术栈、层、共享依赖、数据所有权或公共契约时",
+            markdown_section(IMPLEMENTATION_SOP, "## 2. 编码前契约"),
+        )
         self.assertIn("系统分层及目录映射、允许依赖", ARCHITECTURE_SKILL)
 
     def test_compression_restores_authority_without_new_persistence(self) -> None:

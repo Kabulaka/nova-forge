@@ -119,7 +119,7 @@ python3 nova-review/scripts/validate_discovery.py \
 python3 nova-development/scripts/validate_blueprint.py .nova/PROJECT_BLUEPRINT.md
 
 # 共享能力目录存在时，校验登记项及源码位置
-python3 nova-architecture/scripts/validate_shared_capabilities.py .nova/SHARED_CAPABILITIES.md
+python3 nova-architecture/scripts/validate_shared_capabilities.py --if-present .nova/SHARED_CAPABILITIES.md
 
 # 运行各技能测试
 python3 -m unittest discover -s nova-requirements/scripts -p 'test_*.py'
