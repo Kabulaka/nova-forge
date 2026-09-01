@@ -306,6 +306,49 @@ class SkillRoutingContractTests(unittest.TestCase):
         self.assertIn("不启动该产品的专属研究", REFERENCE_RESEARCH_SOP)
         self.assertIn("普通低风险内部实现", REFERENCE_RESEARCH_SOP)
 
+    def test_requirements_scope_is_first_for_overall_intake_only(self) -> None:
+        first_question = "第一问必须先确认目标层级"
+        self.assertIn(first_question, REQUIREMENTS_SKILL)
+        self.assertIn("`MVP / 完整系统 / 自定义范围`", REQUIREMENTS_SKILL)
+        self.assertIn("后续提问、明确不做和验收都受该选择约束", REQUIREMENTS_SKILL)
+        self.assertIn("已有项目的增量需求沿用已确认的总体范围", REQUIREMENTS_SKILL)
+        self.assertIn("只有范围证据缺失、冲突或用户要求重置时才重新确认", REQUIREMENTS_SKILL)
+        self.assertLess(
+            REQUIREMENTS_SKILL.index(first_question),
+            REQUIREMENTS_SKILL.index("先收敛产品定位"),
+        )
+        self.assertIn("### 访谈范围闸门", CONVERSATION_SOP)
+        self.assertIn("架构和开发访谈继承需求范围，只确认本阶段差量", CONVERSATION_SOP)
+
+    def test_evidence_gates_best_practice_claims(self) -> None:
+        self.assertIn("AI 准备把某项做法作为已验证的成熟/最佳实践提出时", REQUIREMENTS_SKILL)
+        self.assertIn("AI 准备把某项做法作为已验证的成熟/最佳实践提出时", CONVERSATION_SOP)
+        for document in (ARCHITECTURE_SKILL, SKILL):
+            self.assertIn("已验证的成熟/最佳实践或多边界方案依据", document)
+        self.assertIn("普通低风险模块内部取舍只标为可修正的 AI 候选", ARCHITECTURE_SKILL)
+        self.assertIn("普通低风险内部取舍只标为可修正的 AI 候选", SKILL)
+        self.assertIn("准备把它作为已验证的成熟/最佳实践或多边界推荐依据", REFERENCE_RESEARCH_SOP)
+        self.assertIn("普通低风险内部取舍只标为 AI 候选", REQUIREMENTS_SKILL)
+        self.assertIn("不得声称为已验证实践", SKILL)
+
+    def test_coupled_recommendation_can_close_only_dependent_boundaries(self) -> None:
+        self.assertIn("### 耦合方案收敛", CONVERSATION_SOP)
+        self.assertIn("多个明确列出的边界", CONVERSATION_SOP)
+        self.assertIn("不可分的行为选择", CONVERSATION_SOP)
+        self.assertIn("可以同时更新其包含的多个收敛矩阵格", CONVERSATION_SOP)
+        self.assertIn("彼此可独立改变、取舍不同或没有直接依赖的决定不得打包", CONVERSATION_SOP)
+        self.assertIn("彼此独立的决定不得借研究结果打包确认", REFERENCE_RESEARCH_SOP)
+
+    def test_explicit_feature_reference_researches_before_one_remaining_delta(self) -> None:
+        direct_research = REFERENCE_RESEARCH_SOP.index("参考对象 + 明确功能")
+        adapted_content = REFERENCE_RESEARCH_SOP.index("可参考内容与具体候选决定")
+        remaining_delta = REFERENCE_RESEARCH_SOP.index("完成上述内容展示后")
+        self.assertLess(direct_research, adapted_content)
+        self.assertLess(adapted_content, remaining_delta)
+        self.assertIn("结合当前阶段、已确认范围和未决差量确定必答问题", REFERENCE_RESEARCH_SOP)
+        self.assertIn("不打印原始代理输出", REFERENCE_RESEARCH_SOP)
+        self.assertIn("一个差量时才提问", REFERENCE_RESEARCH_SOP)
+
     def test_stage_skills_keep_distinct_delegation_authority(self) -> None:
         self.assertIn("业务目标、角色、端到端流程、业务权限、业务状态、规则、范围和验收", REQUIREMENTS_SKILL)
         self.assertIn("需求阶段保持最终确认权", REQUIREMENTS_SKILL)
