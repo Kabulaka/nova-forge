@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 TOOL = Path(__file__).with_name("nova_doctor.py")
@@ -98,6 +99,33 @@ class NovaDoctorTests(unittest.TestCase):
         result = self.run_doctor(WORKSPACE, "--project", "/tmp/other")
         self.assertEqual(result.returncode, 2)
         self.assertIn("unrecognized arguments", result.stderr)
+
+    def test_validator_timeout_is_bounded_failure(self) -> None:
+        with mock.patch.object(
+            DOCTOR,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["validator"], 60),
+        ):
+            result = DOCTOR.validator_result(
+                "requirements",
+                "requirements validator",
+                ["validator", "document.md"],
+                WORKSPACE,
+            )
+        self.assertEqual(result.status, "FAIL")
+        self.assertEqual(result.message, "requirements validator timed out")
+        self.assertEqual(result.details, ("Run: validator document.md",))
+
+    def test_audit_rejects_malformed_feature_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            features = root / ".nova" / "audit" / "features"
+            features.mkdir(parents=True)
+            (features / "2026.jsonl").write_text("{broken json\n", encoding="utf-8")
+            result = DOCTOR.check_audit(root, WORKSPACE)
+        self.assertEqual(result.status, "FAIL")
+        self.assertEqual(result.message, "audit records are inconsistent")
+        self.assertTrue(result.details)
 
 
 if __name__ == "__main__":
