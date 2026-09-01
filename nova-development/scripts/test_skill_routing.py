@@ -426,7 +426,7 @@ other body
         self.assertIn("候选、计划和未完成入口不得登记", implementation_rules)
         self.assertIn("最后一项能力退役时删除目录文件", implementation_rules)
         self.assertIn(
-            "validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md",
+            "../nova-architecture/scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md",
             implementation_rules,
         )
         self.assertIn("新增、修改或删除共享能力目录", validation)

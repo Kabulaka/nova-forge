@@ -39,7 +39,7 @@
 - 同一失败连续修复三次仍未解决时停止，向用户报告证据、三次尝试和阻断点；
 - 新依赖必须先声明。Python 依赖通过项目 `pyproject.toml` 安装；其他语言使用项目既有的权威依赖清单，不得绕过依赖管理器。
 - 模块自己的业务表结构、查询和 Repository 由模块所有，其接口与实现分别落入蓝图为相应职责规定的层和目录并服从依赖方向；Repository 接口可按蓝图作为端口或应用契约落位，持久化适配器必须落入蓝图规定的数据访问或基础设施实现区域。共享层只承载已确认的连接、事务、迁移、恢复等公共机制，不得吸收模块业务语义形成万能数据层；界面或接口层不得越级直接访问持久化实现。
-- 用户已确认且本轮完成的共享能力在最低验收通过后登记 `.nova/SHARED_CAPABILITIES.md`，写明类型、能力、说明、代码位置和复用边界；候选、计划和未完成入口不得登记。代码移动、废弃或边界变化必须在同一任务更新目录；最后一项能力退役时删除目录文件，不保留空目录。新增、修改或删除目录后运行 `nova-architecture/scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md`。
+- 用户已确认且本轮完成的共享能力在最低验收通过后登记 `.nova/SHARED_CAPABILITIES.md`，写明类型、能力、说明、代码位置和复用边界；候选、计划和未完成入口不得登记。代码移动、废弃或边界变化必须在同一任务更新目录；最后一项能力退役时删除目录文件，不保留空目录。新增、修改或删除目录后运行 `../nova-architecture/scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md`。
 
 ## 4. 测试与证据复用
 
