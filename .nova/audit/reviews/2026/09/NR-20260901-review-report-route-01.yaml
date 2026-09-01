@@ -1,0 +1,33 @@
+{
+  "batch_id": "NR-20260901-review-report-route-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "adhoc",
+      "commits": [
+        {
+          "commit": "4335d9a9a8fb0694c09b63f1199eef4f851b32ef",
+          "repository": "main"
+        },
+        {
+          "commit": "b0dc05f11da0ca826923d57e996e6462f8ab376f",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "python3 nova-review/scripts/test_skill_contract.py (5/5 pass); git diff --check (pass); select current includes both commits (pass)",
+      "work_item": "FIX-01a05cf2-7897-7cef-999a-1fa0c3f5ca83"
+    }
+  ],
+  "manifest_sha256": "581399a3f943602ee67f442bcbd8adf0218129a12b944be91d9d1cca2c73e6d4",
+  "review_content_sha256": "f136a6a1b529691bd30369117eed14d6cd197e5d331624701e0647d53a811b80",
+  "review_round": 2,
+  "review_scope": [
+    "main:nova-review/SKILL.md",
+    "main:nova-review/scripts/test_skill_contract.py"
+  ],
+  "reviewed_at": "2026-09-01T20:55:15+08:00",
+  "reviewer": "review_fixed_report_route",
+  "schema": 1
+}
