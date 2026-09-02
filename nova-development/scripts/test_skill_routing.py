@@ -262,6 +262,30 @@ other body
             },
             decisions,
         )
+        slice_sources = {}
+        for line in handoff.splitlines():
+            match = re.fullmatch(
+                r"\| `([^`]+)` \| `([^`]+)` \| `([^`]+)` \| ([^|]+) \|", line
+            )
+            if match:
+                item_class, work_package, milestone, source = match.groups()
+                slice_sources[item_class] = (work_package, milestone, source)
+
+        self.assertEqual(
+            {
+                "FIX-*": (
+                    "none",
+                    "none",
+                    "任务差异基线、固定验收矩阵与当前修复计划",
+                ),
+                "MAINT-*": (
+                    "none",
+                    "none",
+                    "任务差异基线、最低验收与当前维护计划",
+                ),
+            },
+            {key: slice_sources[key] for key in ("FIX-*", "MAINT-*")},
+        )
         self.assertLess(
             CONVERSATION_SOP.index("### 实施阶段范围闸门"),
             CONVERSATION_SOP.index("### 单问题闸门"),
