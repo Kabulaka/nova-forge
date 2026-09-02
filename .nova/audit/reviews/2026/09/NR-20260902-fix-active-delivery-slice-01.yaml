@@ -1,0 +1,34 @@
+{
+  "batch_id": "NR-20260902-fix-active-delivery-slice-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "adhoc",
+      "commits": [
+        {
+          "commit": "a02e73a329d80449bd8af42e28d8ea3bd5d059f9",
+          "repository": "main"
+        },
+        {
+          "commit": "c56eb82a3ec2b6ca4a83217517f2964904fdfa2e",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "35 routing tests (pass); 115 nova-development tests (pass); quick_validate.py nova-development (pass); git diff check (pass)",
+      "work_item": "FIX-01a060a4-1607-789d-89d2-4b3b716fddae"
+    }
+  ],
+  "manifest_sha256": "9a15a17d88f65ba60cd6b4ae14bba90bb005f97b5d131e43d38bf7091aef14f1",
+  "review_content_sha256": "584f20ded3b1b3f9fd96320b860a89d2f6d23c8a01ea214006d60b495d5df765",
+  "review_round": 2,
+  "review_scope": [
+    "main:nova-development/SKILL.md",
+    "main:nova-development/references/conversation-sop.md",
+    "main:nova-development/scripts/test_skill_routing.py"
+  ],
+  "reviewed_at": "2026-09-02T14:27:00+08:00",
+  "reviewer": "/root/review_fix_active_slice",
+  "schema": 1
+}
