@@ -29,6 +29,29 @@ class AgentsGlobalContractTests(unittest.TestCase):
         self.assertNotIn("仅当当前会话提供 context-mode", control_section)
         self.assertNotIn("已命中技能后必须完整读取", context_mode_section)
 
+    def test_compaction_contract_preserves_state_and_reuses_control_documents(self) -> None:
+        section = self._section("上下文压缩与续接")
+
+        for required in (
+            "当前目标与阶段",
+            "用户已确认决定",
+            "明确排除",
+            "AI 候选身份",
+            "活动交付范围",
+            "有效证据",
+            "文件与提交状态",
+            "下一动作",
+            "控制文档的绝对路径与 SHA-256",
+        ):
+            self.assertIn(required, section)
+        self.assertIn("不得把已回答事项重置为待确认", section)
+        self.assertIn("不得为了保险重复全文读取", section)
+        self.assertIn("逐字模板、提交契约、Review 状态格式", section)
+        self.assertIn("只询问缺失的具体差量", section)
+        self.assertIn("秘密不得写入压缩摘要", section)
+        self.assertIn("新会话不自动继承旧会话任务", section)
+        self.assertIn("提示约束下的尽力保证", section)
+
     def _section(self, title: str) -> str:
         marker = f"## {title}\n"
         self.assertIn(marker, AGENTS)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate Nova skill discovery and the global Codex AGENTS.md link."""
+"""Validate Nova skill discovery and Codex/Claude Code global rule links."""
 
 from __future__ import annotations
 
@@ -35,28 +35,26 @@ def skill_name(path: Path) -> str | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def validate(workspace: Path, codex_home: Path) -> list[str]:
-    workspace = workspace.resolve()
-    codex_home = codex_home.resolve()
+def validate_host(
+    workspace: Path, host_home: Path, global_filename: str, host_label: str
+) -> list[str]:
     errors: list[str] = []
-    if (workspace / "AGENTS.md").exists():
-        errors.append("workspace root must not contain AGENTS.md; use codex/AGENTS.global.md")
-
     global_source = workspace / "codex" / "AGENTS.global.md"
-    global_link = codex_home / "AGENTS.md"
-    if not global_source.is_file():
-        errors.append(f"missing global source: {global_source}")
+    global_link = host_home / global_filename
     if not global_link.is_symlink():
-        errors.append(f"global AGENTS.md must be a symlink: {global_link}")
+        errors.append(f"global {global_filename} must be a symlink: {global_link}")
     elif global_link.resolve() != global_source.resolve():
-        errors.append(f"global AGENTS.md resolves to unexpected target: {global_link.resolve()}")
+        errors.append(
+            f"global {global_filename} resolves to unexpected target: "
+            f"{global_link.resolve()}"
+        )
 
-    skill_home = codex_home / "skills"
+    skill_home = host_home / "skills"
     discovered: dict[str, list[Path]] = {}
     if skill_home.is_dir():
         for entry in skill_home.iterdir():
             if entry.is_symlink() and not entry.exists():
-                errors.append(f"broken skill discovery entry: {entry}")
+                errors.append(f"{host_label} broken skill discovery entry: {entry}")
                 continue
             if not entry.is_dir():
                 continue
@@ -67,28 +65,60 @@ def validate(workspace: Path, codex_home: Path) -> list[str]:
     for name in EXPECTED_SKILLS:
         source = workspace / name
         link = skill_home / name
-        if not source.is_dir():
-            errors.append(f"missing skill source: {source}")
-        elif skill_name(source) != name:
-            errors.append(f"skill source frontmatter name mismatch: {source}")
         if not link.is_symlink():
-            errors.append(f"skill discovery entry must be a symlink: {link}")
+            errors.append(f"{host_label} skill discovery entry must be a symlink: {link}")
         elif not link.exists():
-            errors.append(f"skill discovery entry is broken: {link}")
+            errors.append(f"{host_label} skill discovery entry is broken: {link}")
         elif link.resolve() != source.resolve():
-            errors.append(f"skill discovery entry resolves to unexpected target: {link.resolve()}")
+            errors.append(
+                f"{host_label} skill discovery entry resolves to unexpected target: "
+                f"{link.resolve()}"
+            )
         matching = discovered.get(name, [])
         if len(matching) != 1:
             errors.append(
-                f"{name} must have exactly one discoverable skill entity, found {len(matching)}"
+                f"{host_label} {name} must have exactly one discoverable skill entity, "
+                f"found {len(matching)}"
             )
         elif matching[0] != link:
-            errors.append(f"{name} discoverable entity must use canonical link: {matching[0]}")
+            errors.append(
+                f"{host_label} {name} discoverable entity must use canonical link: "
+                f"{matching[0]}"
+            )
 
     for legacy_name in ("project-brainstorming", "nova-brainstorming"):
         legacy = skill_home / legacy_name
         if legacy.exists() or legacy.is_symlink():
-            errors.append(f"legacy discovery entry must be absent: {legacy}")
+            errors.append(f"{host_label} legacy discovery entry must be absent: {legacy}")
+
+    return errors
+
+
+def validate(
+    workspace: Path, codex_home: Path, claude_home: Path | None = None
+) -> list[str]:
+    workspace = workspace.resolve()
+    codex_home = codex_home.resolve()
+    errors: list[str] = []
+    if (workspace / "AGENTS.md").exists():
+        errors.append("workspace root must not contain AGENTS.md; use codex/AGENTS.global.md")
+
+    global_source = workspace / "codex" / "AGENTS.global.md"
+    if not global_source.is_file():
+        errors.append(f"missing global source: {global_source}")
+
+    for name in EXPECTED_SKILLS:
+        source = workspace / name
+        if not source.is_dir():
+            errors.append(f"missing skill source: {source}")
+        elif skill_name(source) != name:
+            errors.append(f"skill source frontmatter name mismatch: {source}")
+
+    errors.extend(validate_host(workspace, codex_home, "AGENTS.md", "Codex"))
+    if claude_home is not None:
+        errors.extend(
+            validate_host(workspace, claude_home.resolve(), "CLAUDE.md", "Claude Code")
+        )
 
     return errors
 
@@ -97,8 +127,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--codex-home", type=Path, required=True)
+    parser.add_argument(
+        "--claude-home",
+        type=Path,
+        help="Claude Code user directory; omit for backward-compatible Codex-only validation",
+    )
     args = parser.parse_args()
-    errors = validate(args.workspace, args.codex_home)
+    errors = validate(args.workspace, args.codex_home, args.claude_home)
     if errors:
         for error in errors:
             print(f"ERROR: {error}")
