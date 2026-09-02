@@ -240,6 +240,35 @@ other body
         self.assertIn("当前 Review 的 `Observation-Fix`/Review 修复", IMPLEMENTATION_SOP)
         self.assertIn("合法 `Review-Defer` 必须重新分类建项，不得复用当前编号", IMPLEMENTATION_SOP)
 
+    def test_active_delivery_slice_blocks_future_milestone_questions(self) -> None:
+        scope_gate = markdown_section(CONVERSATION_SOP, "### 实施阶段范围闸门")
+        progression = markdown_section(CONVERSATION_SOP, "### 答案后的统一推进")
+        handoff = markdown_section(SKILL, "### 已确认工作包的实施交接")
+        decisions = {}
+        for line in scope_gate.splitlines():
+            match = re.fullmatch(r"\| ([^|]+) \| ([^|]+) \| `([^`]+)` \|", line)
+            if match:
+                status, scenario, action = match.groups()
+                decisions[(status, scenario)] = action
+
+        self.assertEqual(
+            {
+                ("实施中", "当前切片存在不可消解的阻塞差量"): "ask-current",
+                ("实施中", "技术子步骤完成且无当前阻塞"): "execute-next",
+                ("实施中", "出现后续工作项或里程碑差量"): "park-and-execute",
+                ("实施中", "用户委托按行业通用做法处理"): "resolve-current-only",
+                ("实施中", "用户指出跑偏或要求按既定顺序"): "correct-and-execute",
+                ("已闭环", "下一工作项已经明确路由"): "activate-next-slice",
+            },
+            decisions,
+        )
+        self.assertLess(
+            CONVERSATION_SOP.index("### 实施阶段范围闸门"),
+            CONVERSATION_SOP.index("### 单问题闸门"),
+        )
+        self.assertIn("`activeDeliverySlice`", handoff)
+        self.assertIn("实施阶段范围闸门", progression)
+
     def test_new_pending_design_auto_enters_implementation_unless_blocked(self) -> None:
         handoff = SKILL.index("### 已确认工作包的实施交接")
         auto_transition = SKILL.index("本轮从需求澄清新建正式 `PEND-*` 时")
