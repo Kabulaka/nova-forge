@@ -14,7 +14,7 @@ import {
   startSession,
 } from "../runtime/core/state-machine.mjs";
 import { sealEnvelope } from "../runtime/core/storage.mjs";
-import { binding, capsule, saveInput, temporaryDirectory } from "./helpers.mjs";
+import { binding, capsule, pluginRoot, saveInput, temporaryDirectory } from "./helpers.mjs";
 
 test("checkpoint schema requires the complete five-field stage projection", () => {
   const input = saveInput(0);
@@ -129,6 +129,42 @@ test("compaction handshake rejects mismatches and accepts one complete generatio
     const injected = recordInjectedCompaction(temp.directory, current, "0.1.0", { now: 6_000 });
     assert.equal(injected.envelope.compactionHandshake.status, "injected");
     assert.equal(injected.envelope.compactionHandshake.injectedGeneration, 1);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("control document changes advance authority and invalidate a frozen compaction", () => {
+  const temp = temporaryDirectory();
+  try {
+    const current = binding();
+    startSession(temp.directory, current, "0.1.0", "startup", { now: 1_000 });
+    markEvent(temp.directory, current, "0.1.0", "prompt:1", { now: 2_000 });
+    saveCheckpoint(temp.directory, current, "0.1.0", saveInput(1), { now: 3_000 });
+    freezeCompaction(temp.directory, current, "0.1.0", "manual", { now: 4_000 });
+
+    const changedDocuments = saveInput(1, {
+      idempotencyKey: "changed-control-documents",
+      controlDocuments: [
+        {
+          path: path.join(pluginRoot, "codex", "AGENTS.global.md"),
+          sha256: "b".repeat(64),
+          loadState: "needs-reload",
+        },
+      ],
+    });
+    const changed = saveCheckpoint(
+      temp.directory,
+      current,
+      "0.1.0",
+      changedDocuments,
+      { now: 5_000 },
+    );
+    assert.equal(changed.envelope.authorityGeneration, 2);
+    assert.throws(
+      () => completeCompaction(temp.directory, current, "0.1.0", "manual", { now: 6_000 }),
+      { code: "COMPACTION_HANDSHAKE_MISMATCH" },
+    );
   } finally {
     temp.cleanup();
   }

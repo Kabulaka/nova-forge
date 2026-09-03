@@ -140,3 +140,41 @@ test("quota failures leave the previous envelope intact and create no temporary 
     temp.cleanup();
   }
 });
+
+test("failed new scopes do not consume the exact host session quota", () => {
+  const temp = temporaryDirectory();
+  try {
+    const rejected = binding("codex", "rejected-session");
+    assert.throws(
+      () =>
+        writeEnvelope(temp.directory, rejected, initialEnvelope(rejected, "0.1.0", 1_000), {
+          rotateCurrentToBackup: false,
+          limits: permissiveLimits({ hostBytes: 1, globalBytes: 1, hostSessions: 1 }),
+          now: 1_000,
+        }),
+      { code: "HOST_QUOTA" },
+    );
+
+    const accepted = binding("codex", "accepted-session");
+    assert.doesNotThrow(() =>
+      writeEnvelope(temp.directory, accepted, initialEnvelope(accepted, "0.1.0", 2_000), {
+        rotateCurrentToBackup: false,
+        limits: permissiveLimits({ hostSessions: 1 }),
+        now: 2_000,
+      }),
+    );
+
+    const overLimit = binding("codex", "over-limit-session");
+    assert.throws(
+      () =>
+        writeEnvelope(temp.directory, overLimit, initialEnvelope(overLimit, "0.1.0", 3_000), {
+          rotateCurrentToBackup: false,
+          limits: permissiveLimits({ hostSessions: 1 }),
+          now: 3_000,
+        }),
+      { code: "SESSION_QUOTA" },
+    );
+  } finally {
+    temp.cleanup();
+  }
+});

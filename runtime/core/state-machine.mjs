@@ -94,8 +94,10 @@ export function saveCheckpoint(
           `${relation} coveredEventWatermark ${normalized.coveredEventWatermark}; current is ${draft.eventWatermark}`,
         );
       }
-      const capsuleChanged = stableStringify(draft.taskCapsule) !== stableStringify(normalized.taskCapsule);
-      if (capsuleChanged) draft.authorityGeneration += 1;
+      const authorityChanged =
+        stableStringify(draft.taskCapsule) !== stableStringify(normalized.taskCapsule) ||
+        stableStringify(draft.controlDocuments) !== stableStringify(normalized.controlDocuments);
+      if (authorityChanged) draft.authorityGeneration += 1;
       draft.pluginVersion = pluginVersion;
       draft.taskCapsule = canonicalClone(normalized.taskCapsule);
       draft.controlDocuments = canonicalClone(normalized.controlDocuments);

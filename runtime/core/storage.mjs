@@ -156,7 +156,14 @@ function fileSize(file) {
 function sessionCount(dataRoot, host) {
   const root = path.join(dataRoot, "state", host);
   if (!fs.existsSync(root)) return 0;
-  return fs.readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).length;
+  return fs.readdirSync(root, { withFileTypes: true }).filter((entry) => {
+    if (!entry.isDirectory()) return false;
+    const directory = path.join(root, entry.name);
+    return (
+      fs.existsSync(path.join(directory, "current.json")) ||
+      fs.existsSync(path.join(directory, "backup.json"))
+    );
+  }).length;
 }
 
 function withQuotaLock(dataRoot, callback) {
@@ -330,7 +337,7 @@ function enforceQuota(dataRoot, binding, newBytes, rotateCurrentToBackup, limits
   const currentBytes = fileSize(currentFile);
   const backupBytes = fileSize(backupFile);
   const scopeHasState = currentBytes > 0 || backupBytes > 0;
-  if (!scopeHasState && sessionCount(dataRoot, binding.host) > limits.hostSessions) {
+  if (!scopeHasState && sessionCount(dataRoot, binding.host) >= limits.hostSessions) {
     throw new NovaError("SESSION_QUOTA", `host session quota ${limits.hostSessions} reached`);
   }
   const replacedBytes = rotateCurrentToBackup ? backupBytes : currentBytes;
