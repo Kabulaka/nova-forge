@@ -1,0 +1,38 @@
+{
+  "batch_id": "NR-20260903-stage-projection-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "380a5e02e05dd27928290fad8f5273aebd6ab941",
+          "repository": "main"
+        },
+        {
+          "commit": "fd3bba59667da5d4e551a191c71a301e488b5a59",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-03_三阶段访谈差量投影架构.md#wp-01-stage-delta-projection-architecture",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "blueprint, design and architecture validators; shared capability catalog absent skip; git diff checks (pass)",
+      "work_item": "PEND-01a0654f-7c75-779b-8ef0-d9ecc6211322"
+    }
+  ],
+  "manifest_sha256": "976f1a35272394bba2097655a24b23a4b3660aa31a4e2b46d88ad91ad92931d7",
+  "review_content_sha256": "576f2ae8df8308833832ef4c5bfeb496a67fb91190f9e9e08f9ac011abdfc112",
+  "review_round": 3,
+  "review_scope": [
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/architecture/ARCHITECTURE_CONTRACTS.md",
+    "main:.nova/architecture/data/interview-decision-state.md",
+    "main:.nova/architecture/foundation/interview-governance.md",
+    "main:.nova/design/2026-09-03_三阶段访谈差量投影架构.md"
+  ],
+  "reviewed_at": "2026-09-03T12:11:18+08:00",
+  "reviewer": "review_stage_projection_arch",
+  "schema": 1
+}
