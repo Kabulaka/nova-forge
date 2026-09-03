@@ -25,7 +25,7 @@
 | 插件封装 | Codex `.codex-plugin/plugin.json`、Claude Code `.claude-plugin/plugin.json`、共享 `skills/` 与 `hooks/` | 双宿主官方插件规范与工程骨架契约 |
 | 会话连续性 | stdio MCP 提交结构化权威状态，Hook 校验、阻断并在 `SessionStart` 注入恢复胶囊 | [会话检查点数据契约](architecture/data/session-checkpoint.md) |
 | 审计记录 | JSONL 与严格 JSON-in-YAML | `.nova/audit/features/`、`.nova/audit/reviews/` 与 `.nova/audit/index/` |
-| 发现入口 | 支持插件的宿主默认使用版本化插件；Codex IDE、旧版宿主和故障恢复使用安全软链接 | 双 manifest、双 marketplace 与兼容安装检查 |
+| 发现入口 | 支持插件的宿主默认使用版本化插件；Codex IDE、旧版宿主和故障恢复使用安全软链接 | 双 manifest、双 marketplace、兼容安装检查及两个宿主的用户级规则链接状态 |
 | 发布 | SemVer；`package.json` 为版本单一来源；主分支只跑 CI，人工 `vX.Y.Z` 标签触发 GitHub Release | manifests、marketplaces 与 GitHub Actions |
 | 版本控制 | 本地 Git 仓库；远程配置、push 和其他外部写操作需独立授权 | `.git/`、仓库配置与 C-07 |
 
@@ -47,7 +47,9 @@
 .agents/plugins/marketplace.json     Codex GitHub marketplace
 .github/workflows/                   三平台 CI 与人工标签发布
 package.json                         插件 SemVer 单一来源
-codex/AGENTS.global.md               双宿主静态治理规则权威载荷及兼容安装源
+codex/
+├── AGENTS.global.md                 双宿主静态治理规则权威载荷及兼容安装源
+└── scripts/                         双宿主兼容安装、验证及规则契约测试
 skills/                              五个 Nova 技能的唯一权威源码
 └── nova-*/
     ├── SKILL.md                     技能入口和资源路由
@@ -72,7 +74,7 @@ compat/                              软链接安装、检查与回滚
 | `.nova/architecture/` | 并行开发前置 | 只保存共享 API、数据、事件与 Mock 契约，不保存实现代码或 ADR |
 | `.nova/design/` | 工作区功能设计 | 一个史诗可含多个相关工作包，已完成设计继续保留 |
 | `.nova/audit/` | Review 与完成功能审计 | 年度功能 JSONL、月度严格 JSON-in-YAML、工作项哈希索引，不建立无限增长总账 |
-| `codex/` | Codex 全局治理权威文件 | 使用非 `AGENTS.md` 文件名避免项目范围重复加载 |
+| `codex/` | Codex 与 Claude Code 共用的全局治理及兼容安装工具 | 权威规则只保留一份；使用非 `AGENTS.md` 文件名避免项目范围重复加载；安装脚本只维护安全符号链接 |
 | `skills/nova-*/SKILL.md` | 触发、核心规则和资源路由 | 五个技能只在标准 `skills/` 保留一份权威源码，目标少于 500 行 |
 | `skills/nova-*/references/` | 条件性流程、格式规范和完整示例 | 由 `SKILL.md` 说明读取条件，规则只保留一份 |
 | `skills/nova-*/assets/` | 复制或改写为输出的模板 | 不作为隐藏指令或运行状态存储 |
@@ -122,7 +124,7 @@ flowchart LR
 | 输出资产 | 提供生成结果使用的骨架或静态资源 | `assets/` 中被明确选择的文件 |
 | 确定性脚本 | 执行反复且需要稳定结论的检查或转换 | 命令行输入、退出状态和诊断输出 |
 | 验证 | 检查结构、引用、脚本和关键行为 | 官方校验、项目测试和独立 Review |
-| 发现入口 | 让运行时加载工作区唯一技能源码 | 个人目录符号链接和 UI 元数据 |
+| 发现入口 | 让运行时加载工作区唯一技能源码和全局规则源 | 个人目录符号链接、Codex/Claude Code 用户级规则入口和 UI 元数据 |
 | Review 治理 | 人工选择待审项、独立审查和 PASS 后关闭 | `nova-review` 入口、SOP 与确定性脚本 |
 | 分片审计 | 保存工作项、commit、验证与 Review 批次的可追踪关系 | 年度 JSONL、月度 JSON-in-YAML 和工作项哈希索引 |
 | 需求治理 | 收敛总体业务与可独立交付需求块，维护稳定 REQ 身份、版本和状态 | `nova-requirements` 与 `.nova/PRODUCT_REQUIREMENTS.md` |
@@ -168,6 +170,8 @@ flowchart LR
 | C-26 | 双宿主可信输入/工具事件递增 eventWatermark 并置 dirty，MCP 成功覆盖当前水位后才清除；`Stop` 和 `PreCompact` 阻断漏写或旧代，`PreCompact → PostCompact → SessionStart(compact)` 以 attempt/generation/watermark 握手后注入，resume 只允许同作用域最近有效代 | 漏写、旧/未来水位、dirty、手动/自动压缩、错序/缺失/重复事件、恢复、阻断和降级负例 |
 | C-27 | 首版运行时固定 Node.js 22.5+、ESM 和标准库，插件不得自动安装 Node.js 或 Bun；Ubuntu、macOS、Windows 均须通过单元、打包和真实路径/引号兼容检查后才可发布 | 三平台 Actions、缺失/低版本运行时、路径空格、Windows 分隔符和无外部依赖检查 |
 | C-28 | MCP frame、检查点字段/集合/嵌套/总字节、每宿主会话数与磁盘、全局磁盘均有确定上限；超限在解析、规范化、哈希或临时写入的对应最早阶段拒绝，只清理已过期未锁定作用域，未过期状态不因配额被静默逐出 | 边界值、超限、30 天内大量会话、备份放大、配额清理顺序与零临时文件负例 |
+| C-29 | Codex 与 Claude Code 的用户级全局规则入口解析到同一份工作区权威规则；双宿主兼容安装必须先完成全部目标预检，规范入口和 `project-brainstorming`/`nova-brainstorming` 旧别名的软链接只解除链接本身，旧别名不再重建，普通文件或真实目录一律拒绝覆盖或清理，任一失败不得遗留部分切换 | 隔离用户目录中的首次安装、重复安装、正常与失效软链接、旧别名清理、普通文件、真实目录、中途失败回滚及链接解析测试 |
+| C-30 | 轻量压缩提示应保留当前任务与阶段、已确认决定、排除、委托与候选身份、未决差量、当前问题、活动范围、证据、文件与提交状态、下一动作及已加载控制内容的绝对路径和指纹；压缩后按用户明确指令、项目规则、全局默认的顺序复用未变化内容，只在当前动作需要逐字正文而摘要不足时精确恢复；该静态规则本身不借助 Hook 或独立状态系统，验收不得承诺宿主绝不遗漏 | 两个宿主真实规则加载、至少一次宿主真实压缩前后对照、普通任务与 Nova 任务静态契约、控制内容读取记录、缺失信息定向恢复及能力边界检查 |
 
 ### 开发决策边界
 
@@ -186,7 +190,6 @@ flowchart LR
 | PEND-002 | P2 | 历史迁移 | 工作区统一验证入口 | 待澄清 | 待澄清 | 一条本地命令可发现全部技能并分别执行结构与行为校验 | 无 |
 | PEND-003 | P2 | 历史迁移 | 技能目录索引 | 待澄清 | 待澄清 | 自动生成技能名称、用途、入口和验证状态，不复制技能正文 | 无 |
 | PEND-004 | P3 | 历史迁移 | 持续集成 | 待澄清 | 待澄清 | 在受控环境执行无网络的结构、语法和正反用例检查 | 无 |
-| PEND-005 | P3 | 历史迁移 | 安装与回滚工具 | 待澄清 | 待澄清 | 安装入口切换可验证、可回滚，且不覆盖用户已有技能 | 无 |
 
 ## 7. 系统架构
 
@@ -197,8 +200,8 @@ flowchart LR
 | 治理层 | 定义总体需求、公共架构契约和未完成工作 | `.nova/PRODUCT_REQUIREMENTS.md`、`.nova/PROJECT_BLUEPRINT.md`、`.nova/architecture/`、`.nova/design/` | 不依赖单个技能实现细节 |
 | 指令层 | 选择工作模式并路由必要资源 | `skills/nova-*/SKILL.md` | 治理层、当前任务所需参考与工具 |
 | 资源层 | 提供条件性规范、完整示例和输出资产 | `skills/nova-*/references/`、`skills/nova-*/assets/` | 治理层，不反向决定技能触发 |
-| 执行层 | 执行确定性校验或转换 | `skills/nova-*/scripts/` | 指令契约和被验证输入 |
-| 接口层 | 暴露 UI 元数据与发现入口 | `skills/nova-*/agents/`、个人目录兼容链接 | 指令层，不复制业务规则 |
+| 执行层 | 执行确定性校验、转换或安全安装 | `skills/nova-*/scripts/`、`codex/scripts/` | 指令契约和被验证输入，不依赖宿主运行时服务 |
+| 接口层 | 暴露 UI 元数据与发现入口 | `skills/nova-*/agents/`、个人目录兼容链接、Codex/Claude Code 用户级规则入口 | 指令层，不复制业务规则 |
 | 分发层 | 暴露双宿主 manifest、marketplace、版本和不可变发布产物 | `.codex-plugin/`、`.claude-plugin/`、`.agents/plugins/`、`package.json`、`.github/workflows/` | 权威技能与规则、宿主适配层 |
 | 宿主适配层 | 把 Codex 与 Claude Code 生命周期输入映射为共享检查点操作和上下文输出 | `hooks/`、`runtime/adapters/` | 状态核心；不得反向定义权威语义 |
 | 状态服务层 | 提供 MCP 结构化写入/查询、原子持久化、TTL 和恢复胶囊 | `runtime/mcp/`、`runtime/core/` | Node.js 标准库与宿主注入的私有状态根 |
@@ -209,6 +212,7 @@ flowchart LR
 | 适用范围 | 不变量 | 验证 |
 |----------|--------|------|
 | 工作区源码 | 唯一可写实体位于工作区，个人目录只含符号链接 | `readlink` 与实体数量检查 |
+| 双宿主全局规则 | Codex 与 Claude Code 的用户级入口只链接工作区同一权威文件；安装前同时预检，普通文件或真实目录不覆盖，替换链接不删除其原目标 | 隔离用户目录的链接类型、解析目标、零写入失败与回滚测试 |
 | Review 审计 | 工作项稳定编号不变，commit 和批次只追加为证据；索引、功能行和 Review item 严格一致；非法关闭不得越出仓库、覆盖并发内容或产生部分记录 | manifest 预检、严格解析、符号链接/竞态、幂等与失败零写入测试 |
 | 文档更新 | 覆盖或迁移前重读当前文件，发现并发变化即停止 | 修改前后摘要和 Git diff |
 | 测试资源 | 临时夹具隔离创建，缓存被忽略，验证后不得成为事实来源 | 临时目录与 `git status` |
@@ -225,7 +229,7 @@ flowchart LR
 | 资源或失败点 | 所有者 | 恢复与清理 |
 |--------------|--------|------------|
 | 技能结构修改 | 技能维护者 | 验证失败不提交；保留最近通过验证的 Git 基线 |
-| 发现链接切换 | 技能维护者 | 目标异常时停止，不留下第二份实体源码 |
+| 发现链接切换 | 技能维护者 | 全部目标预检后再切换；已有软链接只解除链接本身并重建，目标异常或中途失败时停止并恢复本次已改变的链接，不留下第二份实体源码 |
 | 校验脚本 | 脚本进程 | 读失败或契约错误返回 1，不修改输入 |
 | 临时前向测试 | 测试进程 | 使用隔离目录，结束后清理或由临时目录生命周期回收 |
 | 人工 Review 拒绝或中断 | 主代理 | 按 `nova-review` 统一修复并复审，或保留未审状态返回调试；不自动关闭待办 |

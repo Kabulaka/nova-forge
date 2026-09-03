@@ -1,0 +1,46 @@
+{
+  "batch_id": "NR-20260903-systematic-compaction-recovery-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "5520ac2a7c2940d2aef26ef5bb27adb9f38ccd06",
+          "repository": "main"
+        },
+        {
+          "commit": "417e46ac1f53c20259719aeb47867fe16b7e1e2c",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-02_双宿主压缩续接.md#wp-01-dual-host-continuity",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "Python unittest suites 254 pass, 1 skipped; codex repair suite 20 pass; Nova requirements/design/blueprint/architecture/shared validators; dual-host discovery and Codex compact log check (pass)",
+      "work_item": "PEND-005"
+    }
+  ],
+  "manifest_sha256": "23e1cdcb144337faafbfee3fa036e3e709677d60698ebf77b79f76408a67dc1a",
+  "review_content_sha256": "42cdecee2a21e952cd5eab347a2c10869ab9a09cdd987887e6034e41699869d0",
+  "review_round": 2,
+  "review_scope": [
+    "main:.nova/PRODUCT_REQUIREMENTS.md",
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/SHARED_CAPABILITIES.md",
+    "main:.nova/design/2026-09-02_双宿主压缩续接.md",
+    "main:.nova/evidence/2026-09-03_PEND-005_real-host-acceptance.md",
+    "main:.nova/requirements/REQ-01a0621d-6904-7a4f-bd7e-4552e3c8f994_跨压缩任务状态恢复.md",
+    "main:README.md",
+    "main:codex/AGENTS.global.md",
+    "main:codex/scripts/install_global_rules.py",
+    "main:codex/scripts/test_agents_global.py",
+    "main:codex/scripts/test_install_global_rules.py",
+    "main:nova-review/scripts/test_validate_discovery.py",
+    "main:nova-review/scripts/validate_discovery.py"
+  ],
+  "reviewed_at": "2026-09-03T09:42:39+08:00",
+  "reviewer": "review_runtime_pend005+review_governance_pend005",
+  "schema": 1
+}

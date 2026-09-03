@@ -43,7 +43,8 @@
 │   ├── design/                 # 功能设计与稳定工作包锚点
 │   └── audit/                  # 功能、Review 与工作项索引审计
 ├── codex/
-│   └── AGENTS.global.md        # Codex 全局治理权威文件
+│   ├── AGENTS.global.md        # Codex 与 Claude Code 共用的全局治理权威文件
+│   └── scripts/                # 双宿主安装器及全局规则契约测试
 ├── nova-requirements/          # 需求访谈、模板、示例和校验
 ├── nova-architecture/          # 架构访谈、模板、示例和校验
 ├── nova-development/
@@ -71,52 +72,47 @@ git clone https://github.com/Kabulaka/nova-forge.git
 cd nova-forge
 ```
 
-### 2. 建立 Codex 用户级发现链接
+### 2. 安装 Codex 与 Claude Code 用户级发现链接
 
-Codex 实际加载的用户级治理入口是 `~/.codex/AGENTS.md`，不会直接发现仓库内命名为 `AGENTS.global.md` 的文件。因此必须让 `~/.codex/AGENTS.md` 指向本仓库的 `codex/AGENTS.global.md`。仓库迁移或更换克隆目录后，也需要刷新已有软链接；下面的命令会更新软链接，但会拒绝覆盖普通文件或真实目录。
+Codex 从 `~/.codex/AGENTS.md` 加载用户级规则，Claude Code 从 `~/.claude/CLAUDE.md` 加载用户级规则；两者都指向本仓库唯一的 `codex/AGENTS.global.md`。五个 Nova 技能也会分别链接到两个宿主的用户级技能目录。
+
+运行统一安装器：
 
 ```bash
-mkdir -p ~/.codex/skills
-
-link_codex_entry() {
-  source_path=$1
-  target_path=$2
-  if [ -e "$target_path" ] && [ ! -L "$target_path" ]; then
-    printf '拒绝覆盖非软链接路径：%s\n' "$target_path" >&2
-    return 1
-  fi
-  ln -sfnT "$source_path" "$target_path"
-}
-
-link_codex_entry "$PWD/nova-development" ~/.codex/skills/nova-development
-link_codex_entry "$PWD/nova-requirements" ~/.codex/skills/nova-requirements
-link_codex_entry "$PWD/nova-architecture" ~/.codex/skills/nova-architecture
-link_codex_entry "$PWD/nova-doctor" ~/.codex/skills/nova-doctor
-link_codex_entry "$PWD/nova-review" ~/.codex/skills/nova-review
-link_codex_entry "$PWD/codex/AGENTS.global.md" ~/.codex/AGENTS.md
+python3 codex/scripts/install_global_rules.py
 ```
 
-工作区目录是唯一可写源码；`~/.codex` 下只保留发现链接。若命令报告目标不是软链接，请先核对其用途，再自行决定是否迁移，避免覆盖已有配置。链接更新后请新开 Codex 会话，使用户级治理文件重新加载。
+安装器会先检查全部目标，再开始修改：
 
-先确认用户级入口已经解析到当前仓库：
+- 已存在的正常或失效软链接会先解除链接本身，再指向当前仓库；不会删除原链接指向的文件或目录。
+- 两个宿主中的 `project-brainstorming` 和 `nova-brainstorming` 旧别名如为软链接会被移除；若为普通文件或真实目录，安装整体拒绝且零写入。
+- 任一目标是普通文件或真实目录时，安装整体失败且不修改其他入口；请先核对其用途，再自行决定是否迁移或合并。
+- 仓库迁移或更换克隆目录后，重新执行同一命令即可刷新全部链接。
+- 工作区目录始终是唯一实体源码，两个宿主的用户目录只保存发现链接。
+
+链接更新后请分别新开 Codex 和 Claude Code 会话，使用户级规则与技能重新加载。
+
+确认两个用户级规则入口都解析到当前仓库：
 
 ```bash
 readlink -f ~/.codex/AGENTS.md
+readlink -f ~/.claude/CLAUDE.md
 ```
 
-输出应为当前仓库下 `codex/AGENTS.global.md` 的绝对路径，而不是旧克隆目录。
+两个输出都应为当前仓库下 `codex/AGENTS.global.md` 的绝对路径，而不是旧克隆目录。
 
 安装后验证：
 
 ```bash
 python3 nova-review/scripts/validate_discovery.py \
   --workspace "$PWD" \
-  --codex-home ~/.codex
+  --codex-home ~/.codex \
+  --claude-home ~/.claude
 ```
 
 ## 使用
 
-可以在 Codex 中直接描述目标，也可以显式点名技能：
+可以在 Codex 或 Claude Code 中直接描述目标，也可以显式点名技能：
 
 ```text
 使用 $nova-requirements，帮我逐步澄清这个项目的总体业务和需求块。
@@ -152,6 +148,7 @@ python3 nova-development/scripts/validate_blueprint.py .nova/PROJECT_BLUEPRINT.m
 python3 nova-architecture/scripts/validate_shared_capabilities.py --if-present .nova/SHARED_CAPABILITIES.md
 
 # 运行各技能测试
+python3 -m unittest discover -s codex/scripts -p 'test_*.py'
 python3 -m unittest discover -s nova-requirements/scripts -p 'test_*.py'
 python3 -m unittest discover -s nova-architecture/scripts -p 'test_*.py'
 python3 -m unittest discover -s nova-development/scripts -p 'test_*.py'
@@ -164,7 +161,8 @@ python3 nova-doctor/scripts/nova_doctor.py
 # 校验技能与全局治理文件的发现链接
 python3 nova-review/scripts/validate_discovery.py \
   --workspace "$PWD" \
-  --codex-home ~/.codex
+  --codex-home ~/.codex \
+  --claude-home ~/.claude
 ```
 
 设计文档可单独校验：
