@@ -478,6 +478,11 @@ other body
         self.assertIn("普通低风险内部实现由 AI 决定并在整份摘要中披露", SKILL)
 
     def test_stage_projection_is_visible_and_authority_preserving(self) -> None:
+        authority = markdown_section(CONVERSATION_SOP, "## 1. 后台关系记录")
+        summary = markdown_section(CONVERSATION_SOP, "### 阶段总结与交互载体")
+        projection_row = next(
+            line for line in authority.splitlines() if line.startswith("| 投影 |")
+        )
         for field in (
             "inheritedContracts",
             "stageEvidence",
@@ -485,19 +490,39 @@ other body
             "unresolvedDeltas",
             "resolutionBasis",
         ):
-            self.assertIn(field, CONVERSATION_SOP)
-        self.assertIn("只是当前权威状态的可重建分组", CONVERSATION_SOP)
-        self.assertIn("本阶段未决差量：0", CONVERSATION_SOP)
-        self.assertIn("零差量不等于零研究、零候选或零工作", CONVERSATION_SOP)
-        self.assertIn("按 `inheritedContracts` 来源返回需求或架构阶段", CONVERSATION_SOP)
-        self.assertIn("只失效并重建受影响投影", CONVERSATION_SOP)
-        self.assertIn("需求阶段按统一 SOP 生成 `stageProjection`", REQUIREMENTS_SKILL)
-        self.assertIn("需求阶段不继承或写入架构选型和功能实现决定", REQUIREMENTS_SKILL)
-        self.assertIn("架构阶段按统一 SOP 生成 `stageProjection`", ARCHITECTURE_SKILL)
-        self.assertIn("暂停架构收敛并返回 `inheritedContracts`", ARCHITECTURE_SKILL)
-        self.assertIn("开发阶段按统一 SOP 生成 `stageProjection`", SKILL)
-        self.assertIn("不得把上游内容冒充开发澄清", SKILL)
-        self.assertIn("暂停设计或实施", SKILL)
+            self.assertIn(field, projection_row)
+        self.assertIn("只是当前权威状态的可重建分组", authority)
+        self.assertIn(
+            "进入任一阶段、合并答案、完成研究、修正候选、恢复上下文或形成最终摘要时均从同一快照重建",
+            authority,
+        )
+        for group in (
+            "继承契约",
+            "本阶段查明事实",
+            "本阶段新增 AI 候选决定",
+            "本阶段未决差量",
+        ):
+            self.assertIn(group, authority)
+        self.assertIn("本阶段未决差量：0", authority)
+        self.assertIn("不得用“无需讨论”等无来源结论替代", authority)
+        self.assertIn("零差量不等于零研究、零候选或零工作", authority)
+        self.assertIn("最终确认仍覆盖整份候选契约", authority)
+        self.assertIn("按 `inheritedContracts` 来源返回需求或架构阶段", authority)
+        self.assertIn("只失效并重建受影响投影", authority)
+        self.assertIn("无冲突继承项保持有效且不得重问", authority)
+        self.assertIn("都必须从 `stageProjection` 生成并保留四个明确分组", summary)
+        self.assertIn("不得省略分组或把本阶段事实、候选排除在外", summary)
+
+        requirements = markdown_section(REQUIREMENTS_SKILL, "## 访谈")
+        architecture = markdown_section(ARCHITECTURE_SKILL, "## 访谈与决策")
+        development = markdown_section(SKILL, "## 3. 研究与澄清")
+        self.assertIn("需求阶段按统一 SOP 生成 `stageProjection`", requirements)
+        self.assertIn("需求阶段不继承或写入架构选型和功能实现决定", requirements)
+        self.assertIn("架构阶段按统一 SOP 生成 `stageProjection`", architecture)
+        self.assertIn("暂停架构收敛并返回 `inheritedContracts`", architecture)
+        self.assertIn("开发阶段按统一 SOP 生成 `stageProjection`", development)
+        self.assertIn("不得把上游内容冒充开发澄清", development)
+        self.assertIn("暂停设计或实施", development)
 
     def test_shared_capability_opportunities_require_user_decision(self) -> None:
         automatic_route = markdown_section(SKILL, "## 自动路由与有限加载")
