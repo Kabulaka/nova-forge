@@ -35,7 +35,7 @@
 
 | Requirement Key | 版本 | 状态 | 业务模块 | 需求块 | 已实现版本 | 实现依据 |
 |-----------------|------|------|----------|--------|------------|----------|
-| REQ-01a05ba8-f944-7de8-83ba-599a04745d83 | v1 | 已实现 | 访谈治理 | [AI委托决策与外部参考研究闭环](requirements/REQ-01a05ba8-f944-7de8-83ba-599a04745d83_AI委托决策与外部参考研究闭环.md) | v1 | PEND-01a05bd1-fddc-7f00-8390-36000c2942a7 |
+| REQ-01a05ba8-f944-7de8-83ba-599a04745d83 | v2 | 已实现 | 访谈治理 | [AI委托决策与外部参考研究闭环](requirements/REQ-01a05ba8-f944-7de8-83ba-599a04745d83_AI委托决策与外部参考研究闭环.md) | v2 | PEND-01a065b2-a963-7d1a-84e3-3898fba6b1bf |
 | REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff | v1 | 待实现 | 插件分发与会话续接 | [Codex与Claude Code插件分发及同会话压缩续接](requirements/REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff_Codex与Claude_Code插件分发及同会话压缩续接.md) | 无 | 无 |
 
 ## 5. 范围边界
