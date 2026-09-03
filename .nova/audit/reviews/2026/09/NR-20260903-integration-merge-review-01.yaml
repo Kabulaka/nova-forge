@@ -1,0 +1,50 @@
+{
+  "batch_id": "NR-20260903-integration-merge-review-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "ed6a13859a91649757e7f164690d04689188c83c",
+          "repository": "main"
+        },
+        {
+          "commit": "649c1b70c03a6f55fb81f0ab81e87544b5a4f631",
+          "repository": "main"
+        },
+        {
+          "commit": "7d074a13e029456c0555324f87ae35044f057897",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-03_合并集成契约闭环.md#wp-01-integration-contract-closure",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "six Python unittest suites 260 pass; affected integration contract 3 pass and stage routing 36 pass; Nova validators, Doctor, dual-host discovery and git diff checks (pass)",
+      "work_item": "PEND-01a06615-f351-7c1b-996f-875631601546"
+    }
+  ],
+  "manifest_sha256": "8788bb0741074e4a21cedf1e95a63e50e380de784f93ab98666afccdff6ebbdd",
+  "review_content_sha256": "8e38458070a7088b3e015223992b89e594469c9162314ca4e0ca534c97311b31",
+  "review_round": 3,
+  "review_scope": [
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/architecture/ARCHITECTURE_CONTRACTS.md",
+    "main:.nova/architecture/data/interview-decision-state.md",
+    "main:.nova/architecture/data/session-checkpoint.md",
+    "main:.nova/architecture/foundation/dual-host-plugin.md",
+    "main:.nova/design/2026-09-03_合并集成契约闭环.md",
+    "main:README.md",
+    "main:nova-architecture/SKILL.md",
+    "main:nova-architecture/scripts/test_integration_contracts.py",
+    "main:nova-development/SKILL.md",
+    "main:nova-development/references/conversation-sop.md",
+    "main:nova-development/scripts/test_skill_routing.py",
+    "main:nova-requirements/SKILL.md"
+  ],
+  "reviewed_at": "2026-09-03T15:32:21+08:00",
+  "reviewer": "review_governance_retry+review_semantics+review_host",
+  "schema": 1
+}
