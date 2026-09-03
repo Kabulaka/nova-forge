@@ -10,7 +10,7 @@
 |----------|------------|------------|----------|
 | 静态治理规则 | `codex/AGENTS.global.md` 及插件版本 | 双宿主 `SessionStart` 适配器 | 把会话状态回写到静态规则或每轮注入全文 |
 | 结构化权威状态 | 当前会话中的 AI 经绑定可信会话作用域的最小 MCP 工具提交 | 同宿主同会话 Hook、MCP 查询与恢复流程 | 从 transcript、压缩摘要或未经标记的自然语言自动推断正式决定，或由模型指定其他 host/sessionId |
-| 检查点文件 | `runtime/core/` 原子存储器 | 当前宿主适配器与状态核心 | 宿主间、会话间、设备间或团队间读取继承 |
+| 检查点文件 | `runtime/core/` 原子存储器；只是上述会话内权威状态的持久化投影，不是第二套权威 | 当前宿主适配器与状态核心 | 独立改写权威语义，或在宿主间、会话间、设备间、团队间读取继承 |
 | 恢复胶囊 | 状态核心从最近有效检查点确定性生成 | 当前会话 `SessionStart` | 把候选决定、暂存范围或不可信字段提升为已确认状态 |
 
 ## 2. 数据约束
@@ -25,12 +25,24 @@
 | authorityGeneration | 单调递增正整数 | 只在权威 taskCapsule 改变时递增；同一隔离键只有更高 authority generation 可替换权威状态 | 重复提交相同幂等键、payload 和覆盖水位返回既有代 |
 | leaseVersion、lastActivityAt、expiresAt | 独立单调租约版本和 UTC 时间戳 | 可信 `SessionStart` 或成功检查点写入刷新租约；普通 MCP 查询不刷新；`lastActivityAt=max(旧值, 当前时钟)`，`expiresAt=lastActivityAt+30天` | 同 authority generation 只允许更高 leaseVersion 原子替换；时钟回拨不得缩短保留期 |
 | authorityState | `user-confirmed`、`delegated-ai-candidate`、`verified-evidence`、`explicitly-excluded`、`pending` | 每项状态保留来源类别，候选与 pending 不得作为确认项注入 | 新类别需要 schema 升级和正反用例 |
-| taskCapsule | 目标、阶段、确认决定、排除、委托范围、当前问题、未决差量、活动交付范围、证据、文件与提交状态、下一动作 | 必填集合通过 schema 校验；空数组与未知不能互相替代 | 缺失必填字段使整代无效，不用默认值猜测 |
+| taskCapsule | 目标、阶段、确认决定、排除、委托范围、当前问题、未决差量、`stageProjection`、活动交付范围、证据、文件与提交状态、下一动作 | 必填集合通过 schema 校验；`stageProjection` 必须按下表从同一权威快照生成，空数组与未知不能互相替代 | 缺失必填字段或无法无损重建完整 `stageProjection` 使整代无效，不用默认值猜测 |
 | controlDocuments | 绝对路径、SHA-256、加载状态 | 不保存正文；路径与指纹共同决定是否复用已有理解 | 指纹变化时只标记需精确重载受影响文档 |
 | compactionHandshake | attemptId、frozenGeneration、frozenWatermark、completedGeneration、injectedGeneration | `PreCompact` 冻结，`PostCompact` 完成，`SessionStart(compact)` 注入并记录；三者必须同作用域且 generation/watermark 相等 | 重复同事件幂等，错序、缺失或冲突事件停止安全续接 |
 | resourceLimits | JSON-RPC frame 320 KiB；规范化 checkpoint payload 256 KiB；字符串 8 KiB；每数组 128 项；嵌套深度 4；每宿主 512 MiB/2000 会话，全局 1 GiB | frame 超限在完整读取/JSON 解析前终止；字段和 payload 超限在规范化、哈希、临时文件前拒绝；当前代与备份均计入配额 | 先清理过期且未加锁作用域；未过期状态不逐出，仍不足则拒绝新写入或新会话 |
 | checksum | 覆盖规范化 authority、租约及握手 envelope 的 SHA-256 | 写入完成前计算，读取不一致则拒绝该 envelope | 算法变化需要 schema 升级 |
 | secretScan | 禁止字段名、令牌形态和调用方显式敏感标记 | 命中即拒绝整次写入且不产生新代 | 规则更新不追溯解密或上传历史状态 |
+
+### 2.1 `stageProjection` 持久化映射
+
+| 投影字段 | 权威状态来源 | 持久化与恢复不变量 |
+|----------|--------------|--------------------|
+| inheritedContracts | 上游阶段 `user-confirmed` 正式契约引用、来源阶段与证据位置 | 只保存引用和来源标记；恢复后不得复制为本阶段决定或改写确认状态 |
+| stageEvidence | 当前阶段 `verified-evidence` 项及其 evidenceLocator | 证据位置逐项保留；证据漂移只能触发重新验证，不得改写成无来源事实 |
+| stageDecisions | 当前阶段 `delegated-ai-candidate` 项所引用的 disclosedDecision 及直接依赖 | 只保存已完整披露的 AI 候选；用户确认项、继承契约和 pending 不得进入本集合 |
+| unresolvedDeltas | 当前阶段 `pending` 项和与实际条目一致的显式数量 | 零值也必须保存；恢复不得把未知、暂存或相邻事项提升为当前差量 |
+| resolutionBasis | 消解本阶段差量的 `user-confirmed`、`verified-evidence`、委托或 `explicitly-excluded` 项引用 | 差量为零时仍必填；持久化、备份、迁移和恢复均不得丢失或替换为无来源默认结论 |
+
+`taskCapsule` 根级确认决定、排除和委托范围继续保存其原始 `authorityState`；上述映射只重建分组，不产生新事实、决定或确认。恢复流程必须从同一检查点快照重建完整 `stageProjection`，并逐项保持继承契约、阶段事实、AI 候选、用户确认和未决差量的类别边界。
 
 ## 3. 一致性与并发
 
@@ -38,6 +50,7 @@
 |------|----------|----------|----------|
 | 写入检查点 | 持有作用域锁，重读水位与租约，在同目录创建临时文件、完整写入并同步后原子替换 envelope | authorityGeneration 提升优先；同代租约刷新必须合并已提交权威状态，旧水位写入拒绝 | 相同隔离键、幂等键、payload 和覆盖水位返回同一结果 |
 | 保留最后有效状态 | 当前代替换前把已校验当前文件维护为单个备份 | 当前代损坏时只回退到校验通过且未过期的备份 | 重复恢复不创建新代 |
+| 恢复阶段投影 | 校验同一 envelope 中的 `taskCapsule`、authorityState 与五字段映射后一次性重建 | 任一字段、来源或 `resolutionBasis` 缺失即拒绝整代；不得从 transcript、摘要或相邻类别补齐 | 同一 authorityGeneration 重复恢复得到逐项等价的 `stageProjection` |
 | Hook、MCP 与租约并发 | 状态核心按可信作用域串行化 envelope 变更 | authority 写入重读并合并更高 leaseVersion；租约刷新不得覆盖更高 authorityGeneration | 同一事件 ID 或租约活动 ID 重复送达只记录一次 |
 | 清理过期状态 | 先选 `expiresAt` 已过期作用域，再取得同一作用域锁并重读 leaseVersion 后删除 | 跳过正在写入、锁定或已刷新活动时间的键；时钟回拨不使未过期项提前删除 | 重复清理结果相同；只按最旧过期时间释放配额 |
 
@@ -51,6 +64,6 @@
 | frame、字段、payload、会话数或磁盘配额超限 | 在对应分配阶段前确定性拒绝且不创建临时文件 | 只清理过期未锁定作用域；仍不足时保持旧有效代并要求缩减当前 payload 或释放明确范围 | MCP 与状态核心 |
 | 写入、同步、替换、租约或秘密扫描失败 | MCP 写入失败且 Hook 可观察；不清除 dirty、不推进 current 指针 | 保留最近有效 envelope；没有覆盖当前水位的有效代时 `PreCompact` 阻止不安全压缩 | 状态核心 |
 | 当前代损坏 | 拒绝当前代并记录校验失败 | 仅在备份同宿主、同会话、未过期且校验通过时恢复 | 状态核心 |
-| 检查点缺失、过期或 schema 不兼容 | 不注入权威状态，不宣称安全恢复 | 从当前会话与工作区事实定向恢复；仍缺失时只询问具体差量 | 恢复流程 |
+| 检查点缺失、过期、schema 不兼容或 `stageProjection` 不可完整重建 | 不注入权威状态，不宣称安全恢复 | 从当前会话与工作区事实定向恢复；仍缺失时只询问具体差量，禁止以默认值补齐五字段或提升 authorityState | 恢复流程 |
 | `SessionStart` 注入超限 | 不截断单个权威字段后伪装完整 | 按固定优先级生成有界胶囊并显式列出未注入字段定位，必要时阻止推进 | 状态核心 |
 | 压缩握手错序、缺失或 generation/watermark 不一致 | 显式报告连续性核验失败，不写 `injectedGeneration` | 停止把续接视为安全，重新查询当前作用域最近有效代并只恢复差量 | 宿主适配器 |

@@ -72,7 +72,11 @@ git clone https://github.com/Kabulaka/nova-forge.git
 cd nova-forge
 ```
 
-### 2. 安装 Codex 与 Claude Code 用户级发现链接
+### 2. 选择版本化插件或兼容发现链接
+
+支持插件且已经启用 Nova 版本化插件的宿主，以插件入口为唯一发现权威，不要同时保留本节兼容链接。Codex IDE、旧版宿主或需要显式故障恢复时，才使用下述兼容安装器；两种入口即使解析到同一工作区源码也不能在同一宿主并存。
+
+从兼容链接切换到插件时，插件激活流程必须先全量预检，再原子移除该宿主的正常或失效 Nova 软链接；普通文件或真实目录冲突时零写入失败。禁用、卸载或插件故障后需要回退时，先让插件退出，再运行兼容安装器恢复链接、执行 discovery 校验并新开会话；不要在插件仍启用的会话中叠加软链接。
 
 Codex 从 `~/.codex/AGENTS.md` 加载用户级规则，Claude Code 从 `~/.claude/CLAUDE.md` 加载用户级规则；两者都指向本仓库唯一的 `codex/AGENTS.global.md`。五个 Nova 技能也会分别链接到两个宿主的用户级技能目录。
 
