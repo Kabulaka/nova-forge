@@ -26,6 +26,35 @@ class IntegrationContractTests(unittest.TestCase):
         self.assertIn("用户确认和未决差量的类别边界", checkpoint)
         self.assertIn("持久化、备份、迁移和恢复均不得丢失", checkpoint)
 
+    def test_inherited_contract_sources_align_across_stages(self) -> None:
+        decision_state = (
+            ROOT / ".nova/architecture/data/interview-decision-state.md"
+        ).read_text(encoding="utf-8")
+        checkpoint = (
+            ROOT / ".nova/architecture/data/session-checkpoint.md"
+        ).read_text(encoding="utf-8")
+        conversation = (
+            ROOT / "nova-development/references/conversation-sop.md"
+        ).read_text(encoding="utf-8")
+        requirements = (ROOT / "nova-requirements/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        architecture = (ROOT / "nova-architecture/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        development = (ROOT / "nova-development/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        for document in (decision_state, checkpoint, conversation):
+            self.assertIn("进入当前阶段前", document)
+            self.assertIn("需求阶段", document)
+            self.assertIn("同一需求权威", document)
+            self.assertIn("架构与开发阶段", document)
+        self.assertIn("允许其真实来源阶段同为需求", requirements)
+        self.assertIn("保留其需求来源阶段", architecture)
+        self.assertIn("保留其需求或架构来源阶段", development)
+        self.assertIn("不得把同阶段来源伪装为上游阶段", conversation)
+
     def test_plugin_and_compat_discovery_are_mutually_exclusive(self) -> None:
         foundation = (
             ROOT / ".nova/architecture/foundation/dual-host-plugin.md"

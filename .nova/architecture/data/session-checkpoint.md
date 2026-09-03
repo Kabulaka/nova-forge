@@ -36,7 +36,7 @@
 
 | 投影字段 | 权威状态来源 | 持久化与恢复不变量 |
 |----------|--------------|--------------------|
-| inheritedContracts | 上游阶段 `user-confirmed` 正式契约引用、来源阶段与证据位置 | 只保存引用和来源标记；恢复后不得复制为本阶段决定或改写确认状态 |
+| inheritedContracts | 进入当前阶段前已存在的 `user-confirmed` 正式契约引用、真实来源阶段与证据位置；需求阶段允许同一需求权威内的既有总体范围和需求版本，架构与开发阶段只允许上游正式契约 | 只保存引用和真实来源标记；恢复后不得复制为本阶段决定、把同阶段来源伪装为上游阶段或改写确认状态 |
 | stageEvidence | 当前阶段 `verified-evidence` 项及其 evidenceLocator | 证据位置逐项保留；证据漂移只能触发重新验证，不得改写成无来源事实 |
 | stageDecisions | 当前阶段 `delegated-ai-candidate` 项所引用的 disclosedDecision 及直接依赖 | 只保存已完整披露的 AI 候选；用户确认项、继承契约和 pending 不得进入本集合 |
 | unresolvedDeltas | 当前阶段 `pending` 项和与实际条目一致的显式数量 | 零值也必须保存；恢复不得把未知、暂存或相邻事项提升为当前差量 |

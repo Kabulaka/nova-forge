@@ -26,7 +26,7 @@
 | disclosedDecision | 具体决定、依据、影响、不采用内容和证据缺口 | 委托可以免逐项提问但不能免披露 | 用户修正后保留新值及受影响差量 |
 | finalConfirmation | 覆盖整份候选摘要的用户明确确认 | 未确认、指纹失配或语义变化均保持非正式状态 | 语义变化必须重新展示完整摘要并确认 |
 | stageProjection | inheritedContracts、stageEvidence、stageDecisions、unresolvedDeltas、resolutionBasis | 只对已有权威状态分组，不产生独立事实、决定或确认 | 投影可重新生成，字段缺失不得由相邻类别或默认值补齐 |
-| inheritedContracts | 正式契约引用、来源阶段和证据位置 | 只包含上游已确认且与当前范围相关的正式契约 | 当前阶段不得改写内容、来源或确认状态 |
+| inheritedContracts | 正式契约引用、来源阶段和证据位置 | 只包含进入当前阶段前已正式确认且与当前范围相关的契约；需求阶段可继承同一需求权威内的既有总体范围和需求版本，架构与开发阶段只继承上游正式契约 | 当前阶段不得改写内容、来源或确认状态；同阶段来源不得伪装为上游阶段 |
 | stageEvidence | 本阶段查明事实及 evidenceLocator | 只包含当前阶段验证的项目或外部事实 | 证据漂移后重新验证，不能降级为无来源结论 |
 | stageDecisions | 本阶段 disclosedDecision 引用 | 只包含当前阶段新增且已完整披露的 AI 候选 | 继承契约不得复制进入本集合，用户修正只失效直接依赖 |
 | unresolvedDeltas | 当前阶段待确认事项及数量 | 只包含会改变本阶段结果且无法由确认、证据或委托消解的差量 | 数量必须与实际条目一致，零值不能省略 |
