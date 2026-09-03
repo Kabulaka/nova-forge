@@ -477,6 +477,28 @@ other body
         self.assertIn("会改变功能行为、外部契约、安全边界或数据语义", SKILL)
         self.assertIn("普通低风险内部实现由 AI 决定并在整份摘要中披露", SKILL)
 
+    def test_stage_projection_is_visible_and_authority_preserving(self) -> None:
+        for field in (
+            "inheritedContracts",
+            "stageEvidence",
+            "stageDecisions",
+            "unresolvedDeltas",
+            "resolutionBasis",
+        ):
+            self.assertIn(field, CONVERSATION_SOP)
+        self.assertIn("只是当前权威状态的可重建分组", CONVERSATION_SOP)
+        self.assertIn("本阶段未决差量：0", CONVERSATION_SOP)
+        self.assertIn("零差量不等于零研究、零候选或零工作", CONVERSATION_SOP)
+        self.assertIn("按 `inheritedContracts` 来源返回需求或架构阶段", CONVERSATION_SOP)
+        self.assertIn("只失效并重建受影响投影", CONVERSATION_SOP)
+        self.assertIn("需求阶段按统一 SOP 生成 `stageProjection`", REQUIREMENTS_SKILL)
+        self.assertIn("需求阶段不继承或写入架构选型和功能实现决定", REQUIREMENTS_SKILL)
+        self.assertIn("架构阶段按统一 SOP 生成 `stageProjection`", ARCHITECTURE_SKILL)
+        self.assertIn("暂停架构收敛并返回 `inheritedContracts`", ARCHITECTURE_SKILL)
+        self.assertIn("开发阶段按统一 SOP 生成 `stageProjection`", SKILL)
+        self.assertIn("不得把上游内容冒充开发澄清", SKILL)
+        self.assertIn("暂停设计或实施", SKILL)
+
     def test_shared_capability_opportunities_require_user_decision(self) -> None:
         automatic_route = markdown_section(SKILL, "## 自动路由与有限加载")
         decision = markdown_section(SKILL, "### 共享能力发现与决定")
