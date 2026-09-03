@@ -1,0 +1,47 @@
+{
+  "name": "nova-forge",
+  "version": "0.1.0",
+  "description": "Nova workflow skills and fail-closed same-session compaction recovery for Codex.",
+  "author": {
+    "name": "Nova Forge contributors",
+    "url": "https://github.com/Kabulaka/nova-forge"
+  },
+  "homepage": "https://github.com/Kabulaka/nova-forge#readme",
+  "repository": "https://github.com/Kabulaka/nova-forge",
+  "keywords": [
+    "nova",
+    "workflow",
+    "checkpoint",
+    "compaction"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "nova-checkpoint": {
+      "command": "node",
+      "args": [
+        "${PLUGIN_ROOT}/runtime/mcp/server.mjs",
+        "--host",
+        "codex"
+      ],
+      "env": {
+        "NOVA_PLUGIN_DATA": "${PLUGIN_DATA}",
+        "NOVA_PLUGIN_ROOT": "${PLUGIN_ROOT}"
+      }
+    }
+  },
+  "interface": {
+    "displayName": "Nova Forge",
+    "shortDescription": "Structured Nova delivery with safe compaction recovery",
+    "longDescription": "Five Nova workflow skills plus local, structured, same-session checkpoint recovery for Codex and Claude Code.",
+    "developerName": "Nova Forge contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Write",
+      "Hooks",
+      "MCP"
+    ],
+    "defaultPrompt": [
+      "Use Nova to clarify and implement this request."
+    ]
+  }
+}

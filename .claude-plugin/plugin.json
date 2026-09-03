@@ -1,0 +1,32 @@
+{
+  "name": "nova-forge",
+  "version": "0.1.0",
+  "description": "Nova workflow skills and fail-closed same-session compaction recovery for Claude Code.",
+  "author": {
+    "name": "Nova Forge contributors",
+    "url": "https://github.com/Kabulaka/nova-forge"
+  },
+  "homepage": "https://github.com/Kabulaka/nova-forge#readme",
+  "repository": "https://github.com/Kabulaka/nova-forge",
+  "keywords": [
+    "nova",
+    "workflow",
+    "checkpoint",
+    "compaction"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "nova-checkpoint": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/runtime/mcp/server.mjs",
+        "--host",
+        "claude-code"
+      ],
+      "env": {
+        "NOVA_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}",
+        "NOVA_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "nova-forge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Versioned Nova workflow plugin for Codex and Claude Code with fail-closed same-session compaction recovery.",
+  "author": "Nova Forge contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kabulaka/nova-forge.git"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "files": [
+    ".agents/plugins/marketplace.json",
+    ".claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+    ".codex-plugin/plugin.json",
+    "codex/AGENTS.global.md",
+    "hooks/",
+    "runtime/",
+    "skills/"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check:version": "node scripts/sync-version.mjs --check",
+    "check:plugin": "node scripts/validate-plugin.mjs",
+    "check:workflow": "node scripts/validate-workflows.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "check": "npm run check:version && npm run check:plugin && npm run check:workflow && npm run test && npm run check:package"
+  }
+}

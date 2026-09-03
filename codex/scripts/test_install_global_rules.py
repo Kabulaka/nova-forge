@@ -30,8 +30,8 @@ class InstallerTests(unittest.TestCase):
             "# global\n", encoding="utf-8"
         )
         for name in INSTALLER.SKILL_NAMES:
-            (workspace / name).mkdir()
-            (workspace / name / "SKILL.md").write_text(
+            (workspace / "skills" / name).mkdir(parents=True)
+            (workspace / "skills" / name / "SKILL.md").write_text(
                 f"---\nname: {name}\ndescription: test\n---\n",
                 encoding="utf-8",
             )
@@ -63,7 +63,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((codex_home / "AGENTS.md").resolve(), source)
         self.assertEqual((claude_home / "CLAUDE.md").resolve(), source)
         for name in INSTALLER.SKILL_NAMES:
-            expected = (workspace / name).resolve()
+            expected = (workspace / "skills" / name).resolve()
             self.assertEqual((codex_home / "skills" / name).resolve(), expected)
             self.assertEqual((claude_home / "skills" / name).resolve(), expected)
 

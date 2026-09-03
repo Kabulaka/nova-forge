@@ -31,13 +31,13 @@ class DiscoveryTests(unittest.TestCase):
             "nova-doctor",
             "nova-review",
         ):
-            (workspace / name).mkdir()
-            (workspace / name / "SKILL.md").write_text(
+            (workspace / "skills" / name).mkdir(parents=True)
+            (workspace / "skills" / name / "SKILL.md").write_text(
                 f"---\nname: {name}\ndescription: test\n---\n",
                 encoding="utf-8",
             )
-            (codex_home / "skills" / name).symlink_to(workspace / name)
-            (claude_home / "skills" / name).symlink_to(workspace / name)
+            (codex_home / "skills" / name).symlink_to(workspace / "skills" / name)
+            (claude_home / "skills" / name).symlink_to(workspace / "skills" / name)
         return workspace, codex_home, claude_home
 
     def run_validator(
@@ -78,7 +78,7 @@ class DiscoveryTests(unittest.TestCase):
             (codex_home / "AGENTS.md").unlink()
             (codex_home / "AGENTS.md").write_text("duplicate\n", encoding="utf-8")
             (codex_home / "skills/project-brainstorming").symlink_to(
-                workspace / "nova-development"
+                workspace / "skills/nova-development"
             )
             result = self.run_validator(workspace, codex_home)
             self.assertNotEqual(result.returncode, 0)
@@ -96,7 +96,7 @@ class DiscoveryTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (codex_home / "skills/broken").symlink_to(workspace / "missing")
-            (workspace / "nova-development/SKILL.md").write_text(
+            (workspace / "skills/nova-development/SKILL.md").write_text(
                 "---\nname: wrong-name\ndescription: wrong\n---\n",
                 encoding="utf-8",
             )
@@ -137,7 +137,9 @@ class DiscoveryTests(unittest.TestCase):
             (claude_home / "CLAUDE.md").unlink()
             (claude_home / "CLAUDE.md").symlink_to(wrong_global)
             (claude_home / "skills/nova-review").unlink()
-            (claude_home / "skills/nova-review").symlink_to(workspace / "nova-doctor")
+            (claude_home / "skills/nova-review").symlink_to(
+                workspace / "skills/nova-doctor"
+            )
 
             result = self.run_validator(workspace, codex_home, claude_home)
 

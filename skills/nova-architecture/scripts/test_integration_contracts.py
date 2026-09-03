@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 class IntegrationContractTests(unittest.TestCase):
@@ -34,15 +34,15 @@ class IntegrationContractTests(unittest.TestCase):
             ROOT / ".nova/architecture/data/session-checkpoint.md"
         ).read_text(encoding="utf-8")
         conversation = (
-            ROOT / "nova-development/references/conversation-sop.md"
+            ROOT / "skills/nova-development/references/conversation-sop.md"
         ).read_text(encoding="utf-8")
-        requirements = (ROOT / "nova-requirements/SKILL.md").read_text(
+        requirements = (ROOT / "skills/nova-requirements/SKILL.md").read_text(
             encoding="utf-8"
         )
-        architecture = (ROOT / "nova-architecture/SKILL.md").read_text(
+        architecture = (ROOT / "skills/nova-architecture/SKILL.md").read_text(
             encoding="utf-8"
         )
-        development = (ROOT / "nova-development/SKILL.md").read_text(
+        development = (ROOT / "skills/nova-development/SKILL.md").read_text(
             encoding="utf-8"
         )
         for document in (decision_state, checkpoint, conversation):

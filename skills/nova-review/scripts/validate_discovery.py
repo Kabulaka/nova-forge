@@ -63,7 +63,7 @@ def validate_host(
                 discovered.setdefault(name, []).append(entry)
 
     for name in EXPECTED_SKILLS:
-        source = workspace / name
+        source = workspace / "skills" / name
         link = skill_home / name
         if not link.is_symlink():
             errors.append(f"{host_label} skill discovery entry must be a symlink: {link}")
@@ -108,7 +108,7 @@ def validate(
         errors.append(f"missing global source: {global_source}")
 
     for name in EXPECTED_SKILLS:
-        source = workspace / name
+        source = workspace / "skills" / name
         if not source.is_dir():
             errors.append(f"missing skill source: {source}")
         elif skill_name(source) != name:

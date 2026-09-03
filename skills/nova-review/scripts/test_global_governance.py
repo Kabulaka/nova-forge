@@ -9,13 +9,13 @@ import unittest
 from pathlib import Path
 
 
-WORKSPACE = Path(__file__).resolve().parents[2]
+WORKSPACE = Path(__file__).resolve().parents[3]
 GLOBAL = (WORKSPACE / "codex" / "AGENTS.global.md").read_text(encoding="utf-8")
 MIGRATION = (WORKSPACE / "codex" / "AGENTS.migration-map.md").read_text(encoding="utf-8")
 IMPLEMENTATION = (
-    WORKSPACE / "nova-development" / "references" / "implementation-sop.md"
+    WORKSPACE / "skills" / "nova-development" / "references" / "implementation-sop.md"
 ).read_text(encoding="utf-8")
-FLOW_PROBE = WORKSPACE / "nova-review" / "scripts" / "probe_default_flow.py"
+FLOW_PROBE = WORKSPACE / "skills" / "nova-review" / "scripts" / "probe_default_flow.py"
 SPEC = importlib.util.spec_from_file_location("nova_default_flow_probe", FLOW_PROBE)
 assert SPEC is not None and SPEC.loader is not None
 PROBE = importlib.util.module_from_spec(SPEC)

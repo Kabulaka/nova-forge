@@ -1,0 +1,21 @@
+{
+  "name": "nova-forge",
+  "interface": {
+    "displayName": "Nova Forge"
+  },
+  "plugins": [
+    {
+      "name": "nova-forge",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/Kabulaka/nova-forge.git",
+        "ref": "v0.1.0"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
-# Nova Skills
+# Nova Forge
 
-一套面向 Codex 的项目治理技能，覆盖“总体需求 → 并行架构契约 → 功能开发与本地提交 → 人工 Review → 审计关闭”的完整工作流。
+面向 Codex 与 Claude Code 的版本化项目治理插件，覆盖“总体需求 → 并行架构契约 → 功能开发与本地提交 → 人工 Review → 审计关闭”，并以本机结构化检查点保护同一会话的压缩续接。
 
 本仓库坚持分层事实来源：总体业务以 `.nova/PRODUCT_REQUIREMENTS.md` 与需求块为准，公共技术约束以 [.nova/PROJECT_BLUEPRINT.md](.nova/PROJECT_BLUEPRINT.md) 与架构契约为准，已实现复用入口以 `.nova/SHARED_CAPABILITIES.md` 为索引，目标方案以 `.nova/design/` 为准，当前实现以技能源码、脚本和测试为准。
 
@@ -8,11 +8,11 @@
 
 | 技能 | 用途 | 触发边界 |
 |------|------|----------|
-| [`nova-requirements`](./nova-requirements/) | 总体业务、业务模块和可独立交付需求块 | 绿地项目、新需求或业务语义变化 |
-| [`nova-architecture`](./nova-architecture/) | 技术栈、七章蓝图与 API/数据/事件/Mock 并行契约 | 绿地初始化或共享架构变化 |
-| [`nova-development`](./nova-development/) | 功能设计、`PEND-*` / `FIX-*` / `MAINT-*` 的实施、测试与本地提交 | 已确认需求下的功能和普通开发 |
-| [`nova-doctor`](./nova-doctor/) | 只读检查当前项目的 Nova 数据、引用、审计与迁移状态 | 项目健康检查、校验失败诊断或迁移判断 |
-| [`nova-review`](./nova-review/) | 按稳定工作项选择已提交变更，复用测试证据，执行独立 Review，并在 PASS 后写入分片审计 | 仅在用户明确提出 Review、复审、补审、全部未审项或查询 Review 状态时触发 |
+| [`nova-requirements`](./skills/nova-requirements/) | 总体业务、业务模块和可独立交付需求块 | 绿地项目、新需求或业务语义变化 |
+| [`nova-architecture`](./skills/nova-architecture/) | 技术栈、七章蓝图与 API/数据/事件/Mock 并行契约 | 绿地初始化或共享架构变化 |
+| [`nova-development`](./skills/nova-development/) | 功能设计、`PEND-*` / `FIX-*` / `MAINT-*` 的实施、测试与本地提交 | 已确认需求下的功能和普通开发 |
+| [`nova-doctor`](./skills/nova-doctor/) | 只读检查当前项目的 Nova 数据、引用、审计与迁移状态 | 项目健康检查、校验失败诊断或迁移判断 |
+| [`nova-review`](./skills/nova-review/) | 按稳定工作项选择已提交变更，复用测试证据，执行独立 Review，并在 PASS 后写入分片审计 | 仅在用户明确提出 Review、复审、补审、全部未审项或查询 Review 状态时触发 |
 
 默认流程：
 
@@ -45,20 +45,16 @@
 ├── codex/
 │   ├── AGENTS.global.md        # Codex 与 Claude Code 共用的全局治理权威文件
 │   └── scripts/                # 双宿主安装器及全局规则契约测试
-├── nova-requirements/          # 需求访谈、模板、示例和校验
-├── nova-architecture/          # 架构访谈、模板、示例和校验
-├── nova-development/
-│   ├── SKILL.md               # 需求、设计与实施入口
-│   ├── references/            # 条件性 SOP 与完整示例
-│   ├── assets/                # 蓝图和设计模板
-│   └── scripts/               # 文档校验器及测试
-├── nova-doctor/
-│   ├── SKILL.md               # 当前项目只读健康检查入口
-│   └── scripts/               # 聚合诊断脚本及测试
-└── nova-review/
-    ├── SKILL.md               # 人工 Review 入口
-    ├── references/            # 提交、Review 与审计契约
-    └── scripts/               # 选择、预检、关闭、查询及测试
+├── skills/nova-*/              # 五个技能的唯一权威源码
+├── hooks/                      # 双宿主生命周期声明与入口
+├── runtime/
+│   ├── adapters/               # Codex、Claude Code 薄适配器
+│   ├── core/                   # 检查点、隔离、原子持久化和恢复胶囊
+│   └── mcp/                    # 结构化检查点 MCP
+├── .codex-plugin/              # Codex manifest
+├── .claude-plugin/             # Claude Code manifest 与 marketplace
+├── .agents/plugins/            # Codex marketplace
+└── .github/workflows/          # 三平台 CI 与人工标签发布
 ```
 
 每个技能以 `SKILL.md` 保存触发规则和核心路由，详细流程按需从 `references/` 加载；确定性操作集中在 `scripts/`，仅依赖 Python 3 标准库。
@@ -72,7 +68,26 @@ git clone https://github.com/Kabulaka/nova-forge.git
 cd nova-forge
 ```
 
-### 2. 选择版本化插件或兼容发现链接
+### 2. 安装版本化插件
+
+运行时要求 Node.js 22.5 或更高版本；插件不会自动安装 Node.js 或 Bun。正式版本只在仓库出现与 `package.json.version` 一致的人工 `vX.Y.Z` 标签后发布。
+
+Codex 可添加固定标签的仓库 marketplace，再从 `/plugins` 安装并启用 `nova-forge`：
+
+```bash
+codex plugin marketplace add Kabulaka/nova-forge --ref v0.1.0
+```
+
+Claude Code 可添加同一仓库 marketplace，再从插件管理器安装 `nova-forge@nova-forge`：
+
+```text
+/plugin marketplace add Kabulaka/nova-forge
+/plugin install nova-forge@nova-forge
+```
+
+安装后必须审阅并信任插件 Hook；未启用或未信任时，不得认为自动检查点和压缩恢复已经生效。Codex IDE 当前不提供插件入口，应使用下面的兼容方式。
+
+### 3. 兼容发现链接
 
 支持插件且已经启用 Nova 版本化插件的宿主，以插件入口为唯一发现权威，不要同时保留本节兼容链接。Codex IDE、旧版宿主或需要显式故障恢复时，才使用下述兼容安装器；两种入口即使解析到同一工作区源码也不能在同一宿主并存。
 
@@ -108,7 +123,7 @@ readlink -f ~/.claude/CLAUDE.md
 安装后验证：
 
 ```bash
-python3 nova-review/scripts/validate_discovery.py \
+python3 skills/nova-review/scripts/validate_discovery.py \
   --workspace "$PWD" \
   --codex-home ~/.codex \
   --claude-home ~/.claude
@@ -146,24 +161,27 @@ python3 nova-review/scripts/validate_discovery.py \
 
 ```bash
 # 校验版本 3 项目蓝图
-python3 nova-development/scripts/validate_blueprint.py .nova/PROJECT_BLUEPRINT.md
+python3 skills/nova-development/scripts/validate_blueprint.py .nova/PROJECT_BLUEPRINT.md
 
 # 共享能力目录存在时，校验登记项及源码位置
-python3 nova-architecture/scripts/validate_shared_capabilities.py --if-present .nova/SHARED_CAPABILITIES.md
+python3 skills/nova-architecture/scripts/validate_shared_capabilities.py --if-present .nova/SHARED_CAPABILITIES.md
 
 # 运行各技能测试
 python3 -m unittest discover -s codex/scripts -p 'test_*.py'
-python3 -m unittest discover -s nova-requirements/scripts -p 'test_*.py'
-python3 -m unittest discover -s nova-architecture/scripts -p 'test_*.py'
-python3 -m unittest discover -s nova-development/scripts -p 'test_*.py'
-python3 -m unittest discover -s nova-doctor/scripts -p 'test_*.py'
-python3 -m unittest discover -s nova-review/scripts -p 'test_*.py'
+python3 -m unittest discover -s skills/nova-requirements/scripts -p 'test_*.py'
+python3 -m unittest discover -s skills/nova-architecture/scripts -p 'test_*.py'
+python3 -m unittest discover -s skills/nova-development/scripts -p 'test_*.py'
+python3 -m unittest discover -s skills/nova-doctor/scripts -p 'test_*.py'
+python3 -m unittest discover -s skills/nova-review/scripts -p 'test_*.py'
+
+# 校验插件版本、结构、运行时和发布包
+npm run check
 
 # 只读检查当前项目的 Nova 数据
-python3 nova-doctor/scripts/nova_doctor.py
+python3 skills/nova-doctor/scripts/nova_doctor.py
 
 # 校验技能与全局治理文件的发现链接
-python3 nova-review/scripts/validate_discovery.py \
+python3 skills/nova-review/scripts/validate_discovery.py \
   --workspace "$PWD" \
   --codex-home ~/.codex \
   --claude-home ~/.claude
@@ -172,7 +190,7 @@ python3 nova-review/scripts/validate_discovery.py \
 设计文档可单独校验：
 
 ```bash
-python3 nova-development/scripts/validate_blueprint.py \
+python3 skills/nova-development/scripts/validate_blueprint.py \
   --design .nova/design/YYYY-MM-DD_example.md
 ```
 

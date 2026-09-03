@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = SKILL_ROOT.parents[1]
 SKILL = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 REQUIREMENTS_SKILL = (SKILL_ROOT.parent / "nova-requirements" / "SKILL.md").read_text(
     encoding="utf-8"
@@ -34,7 +35,7 @@ BLUEPRINT_STANDARD = (SKILL_ROOT / "references" / "blueprint-standard.md").read_
 BLUEPRINT_TEMPLATE = (SKILL_ROOT / "assets" / "PROJECT_BLUEPRINT.template.md").read_text(
     encoding="utf-8"
 )
-README = (SKILL_ROOT.parent / "README.md").read_text(encoding="utf-8")
+README = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 ARCHITECTURE_STANDARD = (
     SKILL_ROOT.parent / "nova-architecture" / "references" / "architecture-standard.md"
 ).read_text(encoding="utf-8")
@@ -45,7 +46,7 @@ DESIGN_STANDARD = (SKILL_ROOT / "references" / "design-document-standard.md").re
     encoding="utf-8"
 )
 CONVERGENCE_DESIGN = (
-    SKILL_ROOT.parent / ".nova" / "design" / "2026-08-26_访谈收敛判定与连续推进.md"
+    REPO_ROOT / ".nova" / "design" / "2026-08-26_访谈收敛判定与连续推进.md"
 ).read_text(encoding="utf-8")
 BLUEPRINT_EXAMPLE = SKILL_ROOT / "references" / "examples" / "equipment-borrowing" / ".nova/PROJECT_BLUEPRINT.md"
 DESIGN_EXAMPLE = (

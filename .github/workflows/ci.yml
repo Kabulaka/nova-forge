@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.5.0
+          cache: npm
+      - run: npm test
+      - run: npm run check:version
+      - run: npm run check:plugin
+      - run: npm run check:workflow
+      - run: npm run check:package
+
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m unittest discover -s codex/scripts -p 'test_*.py'
+      - run: python -m unittest discover -s skills/nova-requirements/scripts -p 'test_*.py'
+      - run: python -m unittest discover -s skills/nova-architecture/scripts -p 'test_*.py'
+      - run: python -m unittest discover -s skills/nova-development/scripts -p 'test_*.py'
+      - run: python -m unittest discover -s skills/nova-doctor/scripts -p 'test_*.py'
+      - run: python -m unittest discover -s skills/nova-review/scripts -p 'test_*.py'

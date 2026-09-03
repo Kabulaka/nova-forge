@@ -1,0 +1,32 @@
+{
+  "name": "nova-forge",
+  "owner": {
+    "name": "Nova Forge contributors"
+  },
+  "metadata": {
+    "description": "Versioned Nova workflow plugins",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "nova-forge",
+      "source": {
+        "source": "github",
+        "repo": "Kabulaka/nova-forge",
+        "ref": "v0.1.0"
+      },
+      "description": "Nova workflows with local same-session compaction recovery.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Nova Forge contributors"
+      },
+      "category": "development",
+      "keywords": [
+        "nova",
+        "workflow",
+        "checkpoint",
+        "compaction"
+      ]
+    }
+  ]
+}

@@ -13,7 +13,7 @@ from unittest import mock
 
 
 TOOL = Path(__file__).with_name("nova_doctor.py")
-WORKSPACE = Path(__file__).resolve().parents[2]
+WORKSPACE = Path(__file__).resolve().parents[3]
 SPEC = importlib.util.spec_from_file_location("nova_doctor_under_test", TOOL)
 assert SPEC is not None and SPEC.loader is not None
 DOCTOR = importlib.util.module_from_spec(SPEC)

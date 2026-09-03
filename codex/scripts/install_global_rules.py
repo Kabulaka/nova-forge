@@ -51,7 +51,7 @@ def build_link_specs(
         LinkSpec(global_source, claude_home / "CLAUDE.md"),
     ]
     for name in SKILL_NAMES:
-        source = workspace / name
+        source = workspace / "skills" / name
         specs.append(LinkSpec(source, codex_home / "skills" / name))
         specs.append(LinkSpec(source, claude_home / "skills" / name))
     return specs
