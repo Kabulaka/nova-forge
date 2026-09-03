@@ -17,9 +17,9 @@
 | `.codex-plugin/plugin.json`、`.claude-plugin/plugin.json` | 分别声明 Codex 与 Claude Code 插件身份、同一版本及组件入口 | `package.json` 的版本与插件根相对路径 | 各自维护不一致的规则或技能副本 |
 | `.agents/plugins/marketplace.json`、`.claude-plugin/marketplace.json` | 提供两个宿主可安装的 GitHub 仓库 marketplace 入口 | 同一插件根、发布版本与展示元数据 | 官方公共目录、主分支未标记版本自动发布 |
 | `hooks/` | 声明宿主事件并把输入、阻断和上下文输出映射到共享运行时 | `runtime/adapters/` 与宿主提供的会话 ID、事件来源和插件根 | 从 transcript 或压缩摘要推断正式决定 |
-| `runtime/adapters/` | Codex、Claude Code 薄适配器及路径解析 | `runtime/core/`、宿主事件 JSON 和注入根路径 | 在适配器中复制状态机、持久化或业务规则 |
+| `runtime/adapters/` | Codex、Claude Code 薄适配器、路径解析及当前会话可信作用域建立 | `runtime/core/`、宿主事件 JSON 和注入根路径 | 在适配器中复制状态机、持久化或业务规则，或允许模型选择 host/sessionId |
 | `runtime/core/` | 检查点 schema、校验、原子读写、代际、校验和、TTL 与恢复胶囊 | Node.js 22.5+ 标准库与注入的状态根 | 网络、数据库、原生扩展、插件缓存目录持久化 |
-| `runtime/mcp/` | 暴露最小的结构化检查点写入和查询工具 | `runtime/core/` | 接受无 authority 标记的自由文本作为正式状态 |
+| `runtime/mcp/` | 暴露最小的结构化检查点写入和查询工具；进程绑定宿主适配器建立的当前会话能力，工具参数不暴露 host/sessionId | `runtime/core/` 与只读可信作用域 | 接受无 authority 标记的自由文本作为正式状态，或按调用参数切换会话作用域 |
 | `compat/` | Codex IDE、旧版宿主和故障恢复的软链接安装、检查与回滚 | 工作区权威文件及显式目标路径 | 覆盖普通文件、真实目录或成为插件宿主默认入口 |
 | `.github/workflows/` | 三平台 CI、版本一致性检查、打包及人工标签发布 | Ubuntu、macOS、Windows；`package.json` SemVer | 主分支自动发布、自动创建版本标签或写官方目录 |
 
@@ -27,11 +27,13 @@
 
 | 语义事件 | Codex | Claude Code | 共享行为 |
 |----------|-------|-------------|----------|
-| 会话启动或恢复 | `SessionStart` 的 `startup`、`resume` | `SessionStart` 的 `startup`、`resume` | 加载静态治理规则；仅 `resume` 查询同宿主同会话检查点并注入有界恢复胶囊 |
-| 压缩前 | `PreCompact` 的 `manual`、`auto` | `PreCompact` 的 `manual`、`auto` | 校验最近结构化检查点；没有有效检查点时返回宿主支持的阻断结果并显式报错 |
-| 压缩后续接 | `SessionStart` 的 `compact` | `SessionStart` 的 `compact` | 在下一次模型请求前注入静态规则标识、最近有效检查点和下一动作 |
-| 压缩后核验 | `PostCompact` | `PostCompact` | 记录成功事件并核对会话代际；不把宿主生成的压缩摘要提升为权威状态 |
-| 权威状态变化 | AI 调用插件 MCP 工具 | AI 调用插件 MCP 工具 | 以明确字段和 authority 类型创建新代检查点，用户无需手工保存 |
+| 会话启动或恢复 | `SessionStart` 的 `startup`、`resume` | `SessionStart` 的 `startup`、`resume` | 从宿主事件建立不可由模型选择的当前会话作用域；加载静态规则，且仅 `resume` 查询该作用域检查点并记录 `injectedGeneration` |
+| 输入与工具事件 | `UserPromptSubmit`、`PostToolUse` | `UserPromptSubmit`、`PostToolUse` | 不分析自然语言，按可信宿主事件递增 `eventWatermark` 并置 dirty；检查点 MCP 自身事件不重复置 dirty |
+| 回合结束 | `Stop` | `Stop` | dirty 未被当前检查点覆盖时阻止结束并要求 AI 调用结构化 MCP；重复阻断不推进水位 |
+| 压缩前 | `PreCompact` 的 `manual`、`auto` | `PreCompact` 的 `manual`、`auto` | 只有检查点 `coveredEventWatermark` 等于当前水位且 dirty=false 时，才冻结 `attemptId + generation + watermark`；否则阻断并显式报错 |
+| 压缩完成 | `PostCompact` | `PostCompact` | 必须匹配已冻结 attempt，记录 completed generation/watermark；不把宿主压缩摘要提升为权威状态，错配或重复冲突即失败封闭 |
+| 压缩后续接 | `SessionStart` 的 `compact` | `SessionStart` 的 `compact` | 必须匹配已完成 attempt，在下一模型请求前注入同一 generation 的有界胶囊并原子记录 `injectedGeneration`；缺少完成记录时停止安全续接 |
+| 权威状态变化 | AI 调用插件 MCP 工具 | AI 调用插件 MCP 工具 | 工具使用隐式可信作用域，以明确字段和 authority 类型绑定当前 `eventWatermark` 创建新 authority generation；持久化成功后才清除 dirty |
 
 ### 2.2 版本与发布
 
