@@ -36,7 +36,10 @@ class AgentsGlobalContractTests(unittest.TestCase):
             "当前目标与阶段",
             "用户已确认决定",
             "明确排除",
+            "委托范围",
             "AI 候选身份",
+            "未决差量",
+            "当前问题",
             "活动交付范围",
             "有效证据",
             "文件与提交状态",
@@ -45,12 +48,18 @@ class AgentsGlobalContractTests(unittest.TestCase):
         ):
             self.assertIn(required, section)
         self.assertIn("不得把已回答事项重置为待确认", section)
+        self.assertIn("不得把候选决定提升为用户确认", section)
+        self.assertIn("不得把暂存范围提升为当前范围", section)
         self.assertIn("不得为了保险重复全文读取", section)
         self.assertIn("逐字模板、提交契约、Review 状态格式", section)
         self.assertIn("只询问缺失的具体差量", section)
         self.assertIn("秘密不得写入压缩摘要", section)
         self.assertIn("新会话不自动继承旧会话任务", section)
         self.assertIn("提示约束下的尽力保证", section)
+        self.assertIn(
+            "当前用户明确指令 > 项目规则 > 本文件全局默认规则", section
+        )
+        self.assertIn("不得阻断更高优先级的明确选择", section)
 
     def _section(self, title: str) -> str:
         marker = f"## {title}\n"

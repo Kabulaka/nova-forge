@@ -18,6 +18,11 @@ SKILL_NAMES = (
     "nova-review",
 )
 
+LEGACY_SKILL_NAMES = (
+    "project-brainstorming",
+    "nova-brainstorming",
+)
+
 
 class InstallError(RuntimeError):
     """Raised when installation cannot complete without violating link safety."""
@@ -52,6 +57,14 @@ def build_link_specs(
     return specs
 
 
+def build_legacy_targets(codex_home: Path, claude_home: Path) -> list[Path]:
+    return [
+        host_home / "skills" / name
+        for host_home in (codex_home, claude_home)
+        for name in LEGACY_SKILL_NAMES
+    ]
+
+
 def validate_sources(specs: list[LinkSpec]) -> list[str]:
     errors: list[str] = []
     for spec in specs:
@@ -63,7 +76,7 @@ def validate_sources(specs: list[LinkSpec]) -> list[str]:
     return list(dict.fromkeys(errors))
 
 
-def validate_targets(specs: list[LinkSpec]) -> list[str]:
+def validate_targets(specs: list[LinkSpec], legacy_targets: list[Path]) -> list[str]:
     errors: list[str] = []
     seen: set[Path] = set()
     for spec in specs:
@@ -84,6 +97,15 @@ def validate_targets(specs: list[LinkSpec]) -> list[str]:
             ancestor = ancestor.parent
         if not ancestor.is_dir():
             errors.append(f"install parent is not a directory: {ancestor}")
+
+    for target in legacy_targets:
+        target = target.absolute()
+        if target in seen:
+            errors.append(f"duplicate install target: {target}")
+        seen.add(target)
+        if not target.is_symlink() and target.exists():
+            kind = "directory" if target.is_dir() else "file"
+            errors.append(f"refusing to remove legacy {kind}: {target}")
     return errors
 
 
@@ -132,7 +154,8 @@ def _rollback(changes: list[PreviousLink], created_dirs: list[Path]) -> list[str
 
 def install(workspace: Path, codex_home: Path, claude_home: Path) -> list[LinkSpec]:
     specs = build_link_specs(workspace, codex_home, claude_home)
-    errors = validate_sources(specs) + validate_targets(specs)
+    legacy_targets = build_legacy_targets(codex_home, claude_home)
+    errors = validate_sources(specs) + validate_targets(specs, legacy_targets)
     if errors:
         raise InstallError("\n".join(errors))
 
@@ -140,6 +163,18 @@ def install(workspace: Path, codex_home: Path, claude_home: Path) -> list[LinkSp
     changes: list[PreviousLink] = []
     try:
         _create_parents(specs, created_dirs)
+        for target in legacy_targets:
+            if target.is_symlink():
+                changes.append(
+                    PreviousLink(
+                        target=target,
+                        raw_source=os.readlink(target),
+                        target_is_directory=target.is_dir(),
+                    )
+                )
+                target.unlink()
+            elif target.exists():
+                raise InstallError(f"legacy target changed after preflight: {target}")
         for spec in specs:
             target = spec.target
             if target.is_symlink():
