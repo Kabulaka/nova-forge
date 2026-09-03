@@ -195,10 +195,10 @@ flowchart LR
 | 层 | 职责 | 对应代码结构 | 允许依赖 |
 |----|------|--------------|----------|
 | 治理层 | 定义总体需求、公共架构契约和未完成工作 | `.nova/PRODUCT_REQUIREMENTS.md`、`.nova/PROJECT_BLUEPRINT.md`、`.nova/architecture/`、`.nova/design/` | 不依赖单个技能实现细节 |
-| 指令层 | 选择工作模式并路由必要资源 | `skill-name/SKILL.md` | 治理层、当前任务所需参考与工具 |
-| 资源层 | 提供条件性规范、完整示例和输出资产 | `skill-name/references/`、`skill-name/assets/` | 治理层，不反向决定技能触发 |
-| 执行层 | 执行确定性校验或转换 | `skill-name/scripts/` | 指令契约和被验证输入 |
-| 接口层 | 暴露 UI 元数据与发现入口 | `skill-name/agents/`、个人目录链接 | 指令层，不复制业务规则 |
+| 指令层 | 选择工作模式并路由必要资源 | `skills/nova-*/SKILL.md` | 治理层、当前任务所需参考与工具 |
+| 资源层 | 提供条件性规范、完整示例和输出资产 | `skills/nova-*/references/`、`skills/nova-*/assets/` | 治理层，不反向决定技能触发 |
+| 执行层 | 执行确定性校验或转换 | `skills/nova-*/scripts/` | 指令契约和被验证输入 |
+| 接口层 | 暴露 UI 元数据与发现入口 | `skills/nova-*/agents/`、个人目录兼容链接 | 指令层，不复制业务规则 |
 | 分发层 | 暴露双宿主 manifest、marketplace、版本和不可变发布产物 | `.codex-plugin/`、`.claude-plugin/`、`.agents/plugins/`、`package.json`、`.github/workflows/` | 权威技能与规则、宿主适配层 |
 | 宿主适配层 | 把 Codex 与 Claude Code 生命周期输入映射为共享检查点操作和上下文输出 | `hooks/`、`runtime/adapters/` | 状态核心；不得反向定义权威语义 |
 | 状态服务层 | 提供 MCP 结构化写入/查询、原子持久化、TTL 和恢复胶囊 | `runtime/mcp/`、`runtime/core/` | Node.js 标准库与宿主注入的私有状态根 |
