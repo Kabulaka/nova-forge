@@ -85,6 +85,16 @@
 
 `status=development` 要求 `total > 0` 且 `completed < total`；`status=implemented` 要求 `completed = total`、`total > 0` 且 current、remaining、blocked 都为空。蓝图必须投影全部未完成有效切片，并按需求展示上述五项；台账、蓝图和需求索引任一不一致时普通校验失败。
 
+### 2.3 本需求 bootstrap 台账
+
+新 schema 尚未实现时，`REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v1` 的完整初始依赖临时由本表保存；蓝图只投影活动未完成 PEND，不重复保存归档后会悬空的历史依赖。新台账机制落地后必须把本表逐字迁入 schema 1 台账并以校验结果替代该临时权威。
+
+| 工作项 | 交付结果 | 完整依赖 | 初始状态 |
+|--------|----------|----------|----------|
+| PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0 | 需求检查点提交机制 | PEND-01a06a50-2783-78bb-9fd4-c79347c4b6e6 Review PASS | planned |
+| PEND-01a06a50-281a-74ce-97a5-74e0385625e7 | 完整交付台账与需求状态聚合 | PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0 Review PASS | planned |
+| PEND-01a06a50-2864-7a54-a080-9c0c2e4385e6 | 技能流程、进度报告与端到端验证 | PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0、PEND-01a06a50-281a-74ce-97a5-74e0385625e7 Review PASS | planned |
+
 ## 3. 一致性与并发
 
 | 场景 | 原子边界 | 并发结果 | 幂等规则 |
