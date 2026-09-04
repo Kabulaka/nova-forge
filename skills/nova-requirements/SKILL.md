@@ -1,6 +1,6 @@
 ---
 name: nova-requirements
-description: 通过单问题访谈把绿地项目或新的业务需求收敛为精简的总体产品需求与可由一名全栈工程师独立交付的 REQ 需求块。用于从零项目、总体业务流程、业务模块、新需求或修改既有需求；不用于技术选型、API/数据设计、普通功能实现、局部 FIX 或 Review。
+description: 通过单问题访谈把绿地项目或新的业务需求收敛为精简的总体产品需求与可由一名全栈工程师独立交付的 REQ 需求块。用于从零项目、总体业务流程、业务模块、新需求或修改既有需求；不用于技术选型、API/数据设计、普通功能实现、局部 PATCH/FIX 或 Review。
 ---
 
 # Nova 需求
@@ -12,7 +12,7 @@ description: 通过单问题访谈把绿地项目或新的业务需求收敛为�
 1. 首轮只检查用户表达、`.nova/PRODUCT_REQUIREMENTS.md` 的标题/总体流程/业务模块/需求索引，以及 `.nova/PROJECT_BLUEPRINT.md` 是否存在；不得扫描需求块、设计正文或代码树。
 2. 无需求文档且无代码/蓝图时按绿地项目推进；由一名产品负责人先确认总体业务，再拆需求块。需求确认后转交 `nova-architecture`，不直接进入业务开发。
 3. 有代码和蓝图但无需求文档时，先问是否补建；用户拒绝时不阻断普通开发。
-4. 新增或改变业务结果、参与者、流程、权限、状态、规则或范围时进入本技能。已确认需求下的具体功能实现交给 `nova-development`；既有契约内局部缺陷直接交给 FIX。
+4. 新增或改变业务结果、参与者、流程、权限、状态、规则或范围时进入本技能。已确认需求下的具体功能实现交给 `nova-development`；不新增能力或公共契约的主动局部调整归 `PATCH-*`，有证据证明实现偏离既有契约并恢复预期行为时归 `FIX-*`。
 5. 用户指明既有 `REQ-*` 时，只读取索引和该需求块。无法确定是需求变化还是局部实现问题时，只问一个会改变路由的问题。
 
 ## 访谈
@@ -52,4 +52,8 @@ python3 scripts/validate_requirements.py --block /absolute/path/to/.nova/require
 
 需求确认同时授权在上述校验通过后立即创建精确范围本地 requirement 检查点，不等待架构或开发。提交前按 `../nova-review/references/commit-contract.md` 的 requirement 契约生成 trailers，并用 `../nova-review/scripts/nova_review.py validate-message --repo ... --message-file ... --diff-file ...` 校验完整 staged diff；任一步失败不得提交或进入下游阶段。检查点不进入人工 Review，Git push、远程配置和 SVN commit 仍须独立授权。
 
-检查点成功后判断共享边界：需要从零初始化或改变共享工程骨架、数据所有权、公共 API、事件或 Mock 时转入 `nova-architecture`；否则转入 `nova-development` 澄清具体实现。开发任务可在大需求内拆分，但每个 PEND 必须具备独立完整结果与验收，并能独立排期、暂停、恢复、Review 或取消；只按流程阶段、文件、模块、技能、代理或提交批次拆分的候选必须合并为同一 PEND 的内部里程碑。不得再次询问是否提交已确认需求，也不得把需求文件夹带进后续 Work-Item。
+检查点成功后判断共享边界：需要从零初始化或改变共享工程骨架、数据所有权、公共 API、事件或 Mock 时转入 `nova-architecture`；否则直接转入 `nova-development` 澄清具体实现。进入架构不等于必须产生成果；`nova-architecture` 判定零差量时不得创建 ARCH、修改文件或提交。
+
+开发任务可在大需求内拆分，但每个 `FEAT-*` 必须具备独立完整结果与验收，并能独立排期、暂停、恢复、Review 或取消；优先沿领域能力或端到端功能块边界拆分。只按流程阶段、文件、模块、技能、代理或提交批次拆分的候选必须合并为同一 FEAT 的内部里程碑。不得再次询问是否提交已确认需求，也不得把需求文件夹带进后续 Work-Item。
+
+发送需求阶段结果前，使用 `../nova-review/scripts/nova_review.py report-template --stage requirement` 取得固定结构，并把候选报告写入项目外临时文件后执行 `validate-report --stage requirement --report-file ...`。报告先写实际结果和明确未改范围，再列 REQ 基线、验证与本地 commit、下游路由、遗留和下一步；校验失败不得发送。临时文件随后清理，不在项目内新增报告模板或报告归档。

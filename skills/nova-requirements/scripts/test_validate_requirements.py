@@ -11,6 +11,8 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +24,14 @@ assert REVIEW_SPEC is not None and REVIEW_SPEC.loader is not None
 NOVA_REVIEW = importlib.util.module_from_spec(REVIEW_SPEC)
 sys.modules[REVIEW_SPEC.name] = NOVA_REVIEW
 REVIEW_SPEC.loader.exec_module(NOVA_REVIEW)
+VALIDATOR_SPEC = importlib.util.spec_from_file_location(
+    "nova_requirements_validator", VALIDATOR
+)
+assert VALIDATOR_SPEC is not None and VALIDATOR_SPEC.loader is not None
+VALIDATOR_MODULE = importlib.util.module_from_spec(VALIDATOR_SPEC)
+VALIDATOR_SPEC.loader.exec_module(VALIDATOR_MODULE)
 REQ = "REQ-019a1234-5678-7abc-8def-0123456789ab"
+FEAT = "FEAT-019a1234-5678-7abc-8def-0123456789ac"
 
 
 class RequirementsValidatorTests(unittest.TestCase):
@@ -246,6 +255,57 @@ class RequirementsValidatorTests(unittest.TestCase):
             target = self.audited_requirements(temporary)
             passed = self.run_validator("--index", str(target / "PRODUCT_REQUIREMENTS.md"))
             self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+
+    def test_schema_2_feature_and_historical_pend_are_valid_evidence_identities(self) -> None:
+        self.assertEqual(VALIDATOR_MODULE.implementation_evidence(FEAT), [FEAT])
+        self.assertEqual(
+            VALIDATOR_MODULE.implementation_evidence(f"{FEAT}、PEND-123"),
+            [FEAT, "PEND-123"],
+        )
+        self.assertIsNone(VALIDATOR_MODULE.implementation_evidence("PATCH-123"))
+
+    def test_trusted_review_pass_matches_feature_and_historical_classes(self) -> None:
+        design = f"> Requirement-Ref：{REQ}@v1\n".encode()
+
+        def completed(change_class: str) -> tuple[dict[str, object], dict[str, object]]:
+            return (
+                {
+                    "change_class": change_class,
+                    "design_ref": ".nova/design/example.md#wp-01-example",
+                    "commits": [{"repository": "main", "commit": "a" * 40}],
+                },
+                {},
+            )
+
+        fake_review = SimpleNamespace(
+            NovaError=RuntimeError,
+            load_completed_item=mock.Mock(return_value=completed("feature")),
+            run_git_bytes=mock.Mock(return_value=design),
+        )
+        with (
+            mock.patch.object(
+                VALIDATOR_MODULE, "nova_review_module", return_value=fake_review
+            ),
+            mock.patch.object(
+                VALIDATOR_MODULE, "git_repo_for_nova", return_value=Path("/repo")
+            ),
+        ):
+            self.assertTrue(
+                VALIDATOR_MODULE.trusted_review_pass(
+                    Path("/repo/.nova"), FEAT, REQ, "v1"
+                )
+            )
+            fake_review.load_completed_item.return_value = completed("designed")
+            self.assertFalse(
+                VALIDATOR_MODULE.trusted_review_pass(
+                    Path("/repo/.nova"), FEAT, REQ, "v1"
+                )
+            )
+            self.assertTrue(
+                VALIDATOR_MODULE.trusted_review_pass(
+                    Path("/repo/.nova"), "PEND-123", REQ, "v1"
+                )
+            )
 
     def test_unrelated_or_forged_pass_does_not_implement_requirement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

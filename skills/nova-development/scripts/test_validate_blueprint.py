@@ -382,6 +382,11 @@ class ValidatorTests(unittest.TestCase):
             self.assertNotEqual(ambiguous.returncode, 0)
             self.assertIn("must state the missing design decision", ambiguous.stdout)
 
+            path.write_text(valid.replace(work_item, "FEAT-001"), encoding="utf-8")
+            invalid_identity = self.run_validator(path)
+            self.assertNotEqual(invalid_identity.returncode, 0)
+            self.assertIn("invalid pending work id", invalid_identity.stdout)
+
     def test_current_delivery_table_allows_only_committed_historical_pend(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)

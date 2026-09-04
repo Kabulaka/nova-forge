@@ -114,12 +114,15 @@ class NovaReviewTests(unittest.TestCase):
         commit_message: str,
         diff: str | None = None,
         repo: Path | None = None,
+        amend: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         message_path = root / "message.txt"
         message_path.write_text(commit_message, encoding="utf-8")
         args = ["validate-message", "--message-file", str(message_path)]
         if repo is not None:
             args.extend(("--repo", str(repo)))
+        if amend:
+            args.append("--amend")
         if diff is not None:
             diff_path = root / "change.diff"
             diff_path.write_text(diff, encoding="utf-8")
@@ -162,23 +165,32 @@ class NovaReviewTests(unittest.TestCase):
         for item in manifest["items"]:
             assert isinstance(item, dict)
             paths.add(str(NOVA_TOOL.feature_index_path(repo, item["work_item"]).relative_to(repo)))
-            if item["change_class"] == "designed":
+            if item["change_class"] in {"designed", "feature"}:
                 paths.add(".nova/PROJECT_BLUEPRINT.md")
                 paths.add(str(item["design_file"]))
                 if (repo / ".nova/PRODUCT_REQUIREMENTS.md").is_file():
                     paths.add(".nova/PRODUCT_REQUIREMENTS.md")
+        schema = int(manifest.get("schema", 1))
+        if schema == 2:
+            for value in manifest["review_fix_scope"]:
+                assert isinstance(value, str) and value.startswith("main:")
+                paths.add(value.removeprefix("main:"))
         subprocess.run(["git", "-C", str(repo), "add", "--", *sorted(paths)], check=True)
         digest = NOVA_TOOL.hashlib.sha256(NOVA_TOOL.canonical_manifest(manifest)).hexdigest()
-        audit_message = textwrap.dedent(
-            f"""
-            audit: record {batch_id}
-
-            Nova-Audit-Schema: 1
-            Review-Batch: {batch_id}
-            Manifest-SHA256: {digest}
-            Validation: nova-review audit validation (pass)
-            """
-        ).strip() + "\n"
+        subject = (
+            f"review(review): 完成 {batch_id} 审查闭环"
+            if schema == 2
+            else f"audit: record {batch_id}"
+        )
+        trailers = [
+            f"Nova-Audit-Schema: {schema}",
+            f"Review-Batch: {batch_id}",
+            f"Manifest-SHA256: {digest}",
+        ]
+        if schema == 2:
+            trailers.append(f"Review-Fix-SHA256: {manifest['review_fix_sha256']}")
+        trailers.append("Validation: nova-review audit validation (pass)")
+        audit_message = subject + "\n\n" + "\n".join(trailers) + "\n"
         diff = NOVA_TOOL.run_git(repo, "diff", "--cached", "--binary", "--no-ext-diff")
         _, errors = NOVA_TOOL.validate_audit_message(repo, audit_message, diff)
         self.assertEqual(errors, [])
@@ -643,6 +655,232 @@ class NovaReviewTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(expected, result.stderr)
 
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for change_class, work_item, subject in (
+                ("feature", "FEAT-001", "feat(delivery): 完成功能交付"),
+                ("patch", "PATCH-001", "patch(delivery): 完成局部调整"),
+                ("fix", "FIX-001", "fix(delivery): 完成缺陷恢复"),
+                ("maintenance", "MAINT-001", "maint(delivery): 完成维护任务"),
+            ):
+                with self.subTest(change_class=change_class):
+                    design_ref = (
+                        ".nova/design/2026-09-04_x.md#wp-01-x"
+                        if change_class == "feature"
+                        else "none"
+                    )
+                    result = self.validate(
+                        root,
+                        message(
+                            work_item,
+                            change_class,
+                            design_ref,
+                            schema="2",
+                            subject=subject,
+                        ),
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Work-Item does not match", result.stderr)
+
+    def test_schema_2_review_fixes_and_audit_close_in_one_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            work_item = NOVA_TOOL.new_work_item("patch")
+            implementation = self.commit(
+                repo,
+                "src/value.txt",
+                "implemented\n",
+                message(
+                    work_item,
+                    "patch",
+                    schema="2",
+                    subject="patch(delivery): 完成局部交付调整",
+                ),
+            )
+            manifest: dict[str, object] = {
+                "schema": 2,
+                "batch_id": "NR-20260904-schema2",
+                "reviewed_at": "2026-09-04T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": work_item,
+                        "change_class": "patch",
+                        "commits": [implementation],
+                        "validation": "python3 -m unittest (pass)",
+                        "design_ref": "none",
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, manifest)
+
+            (repo / "src/value.txt").write_text("review-corrected\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "add", "src/value.txt"], check=True
+            )
+            fix_scope = ["main:src/value.txt"]
+            fix_digest, fix_paths, _ = NOVA_TOOL.review_fix_evidence(repo, fix_scope)
+            self.assertEqual(fix_paths, ["src/value.txt"])
+            manifest["review_fix_scope"] = fix_scope
+            manifest["review_fix_sha256"] = "0" * 64
+            manifest_path = repo / "review-schema2.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            rejected = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("review_fix_sha256 does not match", rejected.stderr)
+
+            manifest["review_fix_sha256"] = fix_digest
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            review_path = NOVA_TOOL.review_path_for_values(
+                repo,
+                NOVA_TOOL.parse_reviewed_at(manifest["reviewed_at"], "reviewed_at"),
+                str(manifest["batch_id"]),
+            )
+            review_record = json.loads(review_path.read_text(encoding="utf-8"))
+            self.assertEqual(review_record["schema"], 2)
+            self.assertEqual(review_record["review_fix_sha256"], fix_digest)
+            self.assertEqual(review_record["review_fix_scope"], fix_scope)
+
+            audit_commit = self.commit_audit(repo, manifest)
+            subject = NOVA_TOOL.run_git(repo, "show", "-s", "--format=%s", audit_commit).strip()
+            self.assertEqual(
+                subject,
+                f"review(review): 完成 {manifest['batch_id']} 审查闭环",
+            )
+            queried = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertEqual(queried.returncode, 0, queried.stderr)
+            result = json.loads(queried.stdout)
+            self.assertEqual(len(result["features"]), 1)
+            self.assertEqual(result["features"][0]["review_batch"], manifest["batch_id"])
+
+    def test_review_round_accepts_only_integer_one_through_three(self) -> None:
+        base = {
+            "schema": 1,
+            "batch_id": "NR-20260904-round",
+            "reviewed_at": "2026-09-04T12:00:00+08:00",
+            "reviewer": "review-agent",
+            "conclusion": "PASS",
+            "review_content_sha256": "a" * 64,
+            "review_scope": ["main:value.txt"],
+            "items": [{}],
+        }
+        with mock.patch.object(
+            NOVA_TOOL, "repository_uses_schema_2", return_value=False
+        ):
+            for value in (0, 4, True, 1.0, "1"):
+                with self.subTest(value=value):
+                    with self.assertRaisesRegex(
+                        NOVA_TOOL.NovaError, "integer from 1 to 3"
+                    ):
+                        NOVA_TOOL.validate_manifest(
+                            Path("/repo"), {**base, "review_round": value}
+                        )
+
+    def test_schema_2_audit_subject_is_chinese_review_scope(self) -> None:
+        values = {"Nova-Audit-Schema": "2"}
+        self.assertEqual(
+            NOVA_TOOL.validate_audit_subject(
+                "review(review): 完成审查闭环\n", values
+            ),
+            [],
+        )
+        for subject, expected in (
+            ("audit(review): 完成审查闭环", "type must be review"),
+            ("review(delivery): 完成审查闭环", "scope must be review"),
+            ("review(review): close review", "must contain Chinese"),
+        ):
+            with self.subTest(subject=subject):
+                self.assertIn(
+                    expected,
+                    "; ".join(NOVA_TOOL.validate_audit_subject(subject, values)),
+                )
+
+    def test_schema_2_patch_requires_one_result_commit_or_explicit_amend(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            work_item = NOVA_TOOL.new_work_item("patch")
+            commit_message = message(
+                work_item,
+                "patch",
+                schema="2",
+                subject="patch(delivery): 调整局部交付提示",
+            )
+            self.commit(repo, "src/value.txt", "first\n", commit_message)
+            (repo / "src/value.txt").write_text("corrected\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "add", "src/value.txt"], check=True
+            )
+            diff = NOVA_TOOL.run_git(
+                repo, "diff", "--cached", "--binary", "--no-ext-diff"
+            )
+
+            fragmented = self.validate(repo, commit_message, diff, repo)
+            self.assertNotEqual(fragmented.returncode, 0)
+            self.assertIn("allow one implementation result commit", fragmented.stderr)
+
+            amended = self.validate(repo, commit_message, diff, repo, amend=True)
+            self.assertEqual(amended.returncode, 0, amended.stderr)
+            other = message(
+                NOVA_TOOL.new_work_item("patch"),
+                "patch",
+                schema="2",
+                subject="patch(delivery): 调整另一个局部提示",
+            )
+            rejected = self.validate(repo, other, diff, repo, amend=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("HEAD to belong to the same Work-Item", rejected.stderr)
+
+    def test_additional_feat_commit_requires_completed_pre_registered_milestone(self) -> None:
+        work_item = NOVA_TOOL.new_work_item("feature")
+        values = {
+            "Nova-Schema": "2",
+            "Work-Item": work_item,
+            "Change-Class": "feature",
+            "Design-Ref": ".nova/design/2026-09-04_x.md#wp-01-x",
+        }
+        entry = {
+            "commit": "a" * 40,
+            "metadata": dict(values),
+            "errors": [],
+        }
+        eligible = {
+            "work_item": work_item,
+            "state": "active",
+            "milestones": [
+                {"state": "completed", "evidence": ["a" * 40]},
+                {"state": "active", "evidence": []},
+            ],
+        }
+        with mock.patch.object(NOVA_TOOL, "scan_commits", return_value=[entry]), mock.patch.object(
+            NOVA_TOOL, "delivery_item_for_commit_boundary", return_value=eligible
+        ):
+            self.assertEqual(
+                NOVA_TOOL.validate_work_item_commit_boundary(Path("/repo"), values), []
+            )
+
+        ineligible = {
+            **eligible,
+            "state": "review_pending",
+            "milestones": [{"state": "completed", "evidence": ["a" * 40]}],
+        }
+        with mock.patch.object(NOVA_TOOL, "scan_commits", return_value=[entry]), mock.patch.object(
+            NOVA_TOOL, "delivery_item_for_commit_boundary", return_value=ineligible
+        ):
+            errors = NOVA_TOOL.validate_work_item_commit_boundary(Path("/repo"), values)
+        self.assertIn("distinct active milestone", "; ".join(errors))
+
     def test_new_architecture_id_is_uuid7_and_never_a_work_item(self) -> None:
         architecture_ref = NOVA_TOOL.new_architecture_id()
         self.assertRegex(architecture_ref, NOVA_TOOL.ARCHITECTURE_REF_RE)
@@ -650,6 +888,91 @@ class NovaReviewTests(unittest.TestCase):
         generated = self.run_tool("new-architecture-id")
         self.assertEqual(generated.returncode, 0, generated.stderr)
         self.assertRegex(generated.stdout.strip(), NOVA_TOOL.ARCHITECTURE_REF_RE)
+
+    def test_stage_specific_completion_reports_are_deterministically_validated(self) -> None:
+        ids = {
+            "feature": "FEAT-019a1234-0001-7abc-8def-000000000001",
+            "patch": "PATCH-019a1234-0002-7abc-8def-000000000002",
+            "fix": "FIX-019a1234-0003-7abc-8def-000000000003",
+            "maintenance": "MAINT-019a1234-0004-7abc-8def-000000000004",
+        }
+        for stage, sections in NOVA_TOOL.REPORT_SECTIONS.items():
+            content = {section: "已记录具体结果" for section in sections}
+            content["实际结果"] = "已完成当前阶段的可验证交付结果"
+            content["未改范围"] = "未修改远程仓库、SVN 与范围外业务"
+            content["遗留与下一步"] = "遗留：无；下一步：按当前阶段路由继续"
+            if stage == "requirement":
+                content["需求基线"] = (
+                    "REQ-019a1234-0001-7abc-8def-000000000001@v1 已确认"
+                )
+                content["验证与提交"] = "验证通过；commit abcdef1"
+            elif stage == "architecture":
+                content["实际结果"] = "已确认本轮架构为零差量"
+                content["差量依据"] = "五类共享边界均无变化，结论为零差量"
+                content["提交与就绪"] = "未提交；既有架构可继续使用"
+            elif stage in ids:
+                identity_section = next(
+                    section
+                    for section in sections
+                    if section
+                    in {
+                        "工作项与分类",
+                        "局部调整边界",
+                        "缺陷证据与恢复结果",
+                        "维护边界与行为证据",
+                    }
+                )
+                content[identity_section] = f"{ids[stage]}；Change-Class: {stage}"
+                content["Review 状态"] = "未 Review；required 项为待Review；轮次：不适用"
+            else:
+                content["审查对象"] = (
+                    "FEAT-019a1234-0001-7abc-8def-000000000001；实现 commit abcdef1"
+                )
+                content["审查轮次与修改"] = "第 1 轮：PASS；修改：无"
+                content["闭环提交与审计"] = "closure commit abcdef2；审计已生成"
+            report = "\n".join(
+                [f"## {NOVA_TOOL.REPORT_TITLES[stage]}"]
+                + [
+                    f"\n### {section}\n{content[section]}"
+                    for section in sections
+                ]
+            ) + "\n"
+            with self.subTest(stage=stage):
+                self.assertEqual(NOVA_TOOL.validate_completion_report(stage, report), [])
+                missing = report.replace(
+                    f"\n### {sections[0]}\n{content[sections[0]]}", "", 1
+                )
+                self.assertTrue(NOVA_TOOL.validate_completion_report(stage, missing))
+
+                if stage in ids:
+                    false_pass = report.replace(
+                        content["Review 状态"], "Review PASS；第 1 轮"
+                    )
+                    self.assertIn(
+                        "delivery report must not claim Review PASS",
+                        NOVA_TOOL.validate_completion_report(stage, false_pass),
+                    )
+                if stage == "maintenance":
+                    exempt = report.replace(
+                        content["Review 状态"],
+                        "exempt：EX-DOC；Review 轮次：不适用",
+                    )
+                    self.assertEqual(
+                        NOVA_TOOL.validate_completion_report(stage, exempt), []
+                    )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            template = self.run_tool("report-template", "--stage", "review")
+            self.assertEqual(template.returncode, 0, template.stderr)
+            self.assertIn("## Review 完成报告", template.stdout)
+            path = root / "report.md"
+            path.write_text(template.stdout, encoding="utf-8")
+            invalid = self.run_tool(
+                "validate-report", "--stage", "review", "--report-file", str(path)
+            )
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn("placeholder", invalid.stderr)
 
     def test_new_commit_rejects_legacy_design_ref(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1137,7 +1460,7 @@ class NovaReviewTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "Related-Work-Item is not a trusted archived PEND: PEND-001",
+                "Related-Work-Item is not a trusted archived FEAT or legacy PEND: PEND-001",
                 result.stderr,
             )
 
@@ -1186,7 +1509,7 @@ class NovaReviewTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 NOVA_TOOL.NovaError,
-                "Related-Work-Item is not a trusted archived PEND: PEND-001",
+                "Related-Work-Item is not a trusted archived FEAT or legacy PEND: PEND-001",
             ):
                 NOVA_TOOL.validate_recorded_commits(repo, review, "HEAD")
 

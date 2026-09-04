@@ -122,7 +122,7 @@ Validation: python3 tests/example.py (pass)
 - fix → FIX，`Design-Ref: none`，必须 Review；
 - maintenance → MAINT，`Design-Ref: none`，默认 Review。
 
-一个工作项默认形成一个完整实现结果 commit。FEAT 只有在台账预先登记多个具有独立恢复价值的内部里程碑，且上一提交已绑定已完成里程碑时，才可追加同编号提交；PATCH/FIX/MAINT 在 Review 前只允许一个结果 commit。普通继续修改优先在安全边界内 amend，不按文件或修复轮次制造碎片。
+一个工作项默认形成一个完整实现结果 commit。FEAT 只有在台账预先登记多个具有独立恢复价值的内部里程碑，且全部既有 FEAT commit 已各自唯一绑定已完成里程碑、当前另有一个活动里程碑时，才可追加同编号提交；PATCH/FIX/MAINT 在 Review 前只允许一个结果 commit。普通继续修改优先在未 Review、未对外共享且 HEAD 是同一工作项时 amend，并在提交校验命令增加 `--amend`；不得按文件或修复轮次制造碎片。
 
 ## 8. 维护豁免
 
@@ -143,11 +143,11 @@ review(review): 完成交付状态校验审查
 Nova-Audit-Schema: 2
 Review-Batch: NR-20260904-01
 Manifest-SHA256: <64-lower-hex>
-Review-Fix-SHA256: <64-lower-hex-or-none>
+Review-Fix-SHA256: <64-lower-hex>
 Validation: nova-review validate-audit-message (pass)
 ```
 
-该提交同时包含全部 Review 修正、确定性审计、蓝图/设计关闭和台账/需求聚合更新。审计保存实现 commits 与 Review 修正摘要，不把尚不存在的 closure commit hash 写入自身内容；提交后通过审计文件的 Git 归属反查 closure commit，因此没有哈希自引用。staged diff、manifest、审查范围或 HEAD 任一漂移时整次失败，不产生部分关闭。schema 1 的既有独立 audit commit 保持兼容。
+该提交同时包含全部 Review 修正、确定性审计、蓝图/设计关闭和台账/需求聚合更新。没有 Review 修正时，`Review-Fix-SHA256` 取空 Git diff 的 SHA-256，仍必须是 64 位小写摘要。审计保存实现 commits 与 Review 修正摘要，不把尚不存在的 closure commit hash 写入自身内容；提交后通过审计文件的 Git 归属反查 closure commit，因此没有哈希自引用。逐轮问题与处置显示在 Review 完成报告，manifest 保存最终轮次、被审内容摘要和修正摘要，不新增过程状态。staged diff、manifest、审查范围或 HEAD 任一漂移时整次失败，不产生部分关闭。schema 1 的既有独立 audit commit 保持兼容。
 
 ## 10. 提交权限
 

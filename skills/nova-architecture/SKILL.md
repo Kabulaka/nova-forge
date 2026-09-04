@@ -1,6 +1,6 @@
 ---
 name: nova-architecture
-description: 在总体需求确认后，以单问题访谈确定足以指导开发和并行协作的技术架构、七章项目蓝图及共享 API/数据/事件/Mock 契约。用于绿地初始化、技术栈选择、公共接口或数据所有权设计、并行开发前置准备；不用于产品需求定义、单个功能实现、局部 FIX、ADR 或 Review。
+description: 在总体需求确认后，以单问题访谈确定足以指导开发和并行协作的技术架构、七章项目蓝图及共享 API/数据/事件/Mock 契约。用于绿地初始化、技术栈选择、公共接口或数据所有权设计、并行开发前置准备；不用于产品需求定义、单个功能实现、局部 PATCH/FIX、ADR 或 Review。
 ---
 
 # Nova 架构
@@ -51,4 +51,4 @@ python3 scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.
 
 架构交付在提交前把需要项及对应契约标记为 `已确认`，确认依据写本次 `ARCH-*`。按提交契约生成 `arch(scope): 中文结果摘要` 和 architecture trailers，以完整 staged diff 运行仓库感知 `validate-message`；成功提交后再运行 `--ready`。`--ready` 从 Git 归属验证 ARCH、需求 checkpoint、索引行及其确认时看到的契约字节；工作树变化、未提交 ARCH、ARCH 后漂移、无关工作项或手填批次名均不能解锁。schema 1 的既有 PEND Review 架构证据仅作历史兼容。
 
-阶段结束必须使用实施 SOP 的“架构完成报告”：先写实际结论（零差量或已形成 ARCH）和明确未改范围，再列差量依据、契约与验证、提交状态、就绪边界和下一步。零差量不得伪造空 ARCH、空文件或 Review 状态。
+阶段结束必须使用实施 SOP 的“架构完成报告”：先写实际结论（零差量或已形成 ARCH）和明确未改范围，再列差量依据、契约与验证、提交状态、就绪边界和下一步。发送前把候选报告写入项目外临时文件并执行 `../nova-review/scripts/nova_review.py validate-report --stage architecture --report-file ...`，失败不得发送；临时文件随后清理。零差量不得伪造空 ARCH、空文件或 Review 状态。

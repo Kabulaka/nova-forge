@@ -228,7 +228,7 @@ other body
         self.assertIn("既有版本 `4` 设计保持交接兼容", SKILL)
         self.assertIn("默认实施流程是编码、最低验收", SKILL)
         self.assertIn("不得自动启动 Review", SKILL)
-        self.assertIn("正式 `PEND-*` 在 Review PASS 前继续保留于蓝图", SKILL)
+        self.assertIn("正式 `FEAT-*` 在 Review PASS 前继续保留于蓝图", SKILL)
         self.assertIn("只有修正仍服务于原设计和验收才沿用同一编号", SKILL)
         self.assertIn("可信审计归档后编号永久封存", SKILL)
         self.assertIn("Related-Work-Item", SKILL)
@@ -238,8 +238,8 @@ other body
             "Review-Defer、新增待办及无关蓝图变化不自动进入当前范围，也不得复用当前工作项",
             SKILL,
         )
-        self.assertIn("当前 Review 的 `Observation-Fix`/Review 修复", IMPLEMENTATION_SOP)
-        self.assertIn("合法 `Review-Defer` 必须重新分类建项，不得复用当前编号", IMPLEMENTATION_SOP)
+        self.assertIn("REJECT 修正不提交", IMPLEMENTATION_SOP)
+        self.assertIn("合法 `Review-Defer` 不复用当前编号", IMPLEMENTATION_SOP)
 
     def test_active_delivery_slice_blocks_future_milestone_questions(self) -> None:
         scope_gate = markdown_section(CONVERSATION_SOP, "### 实施阶段范围闸门")
@@ -274,6 +274,11 @@ other body
 
         self.assertEqual(
             {
+                "PATCH-*": (
+                    "none",
+                    "none",
+                    "任务差异基线、固定验收矩阵与当前局部调整计划",
+                ),
                 "FIX-*": (
                     "none",
                     "none",
@@ -285,7 +290,7 @@ other body
                     "任务差异基线、最低验收与当前维护计划",
                 ),
             },
-            {key: slice_sources[key] for key in ("FIX-*", "MAINT-*")},
+            {key: slice_sources[key] for key in ("PATCH-*", "FIX-*", "MAINT-*")},
         )
         self.assertLess(
             CONVERSATION_SOP.index("### 实施阶段范围闸门"),
@@ -293,10 +298,14 @@ other body
         )
         self.assertIn("`activeDeliverySlice`", handoff)
         self.assertIn("实施阶段范围闸门", progression)
+        self.assertIn("`FEAT-*` 使用正式工作包及已有里程碑", scope_gate)
+        self.assertIn("`PATCH-*`/`FIX-*`/`MAINT-*`", scope_gate)
+        self.assertIn("schema 1 历史 `PEND-*` 仅按原交付身份继续兼容", scope_gate)
+        self.assertNotIn("`PEND-*` 使用正式工作包", scope_gate)
 
-    def test_new_pending_design_auto_enters_implementation_unless_blocked(self) -> None:
+    def test_new_feature_design_auto_enters_implementation_unless_blocked(self) -> None:
         handoff = SKILL.index("### 已确认工作包的实施交接")
-        auto_transition = SKILL.index("本轮从需求澄清新建正式 `PEND-*` 时")
+        auto_transition = SKILL.index("本轮从需求澄清新建正式 `FEAT-*` 时")
         default_flow = SKILL.index("默认实施流程是编码、最低验收")
         self.assertLess(handoff, auto_transition)
         self.assertLess(auto_transition, default_flow)
@@ -599,7 +608,9 @@ other body
         implementation_rules = markdown_section(IMPLEMENTATION_SOP, "## 3. 编码约束")
         blueprint_layers = markdown_section(BLUEPRINT_STANDARD, "### 3.4 系统架构")
         template_layers = markdown_section(BLUEPRINT_TEMPLATE, "### 分层与代码映射")
-        architecture_minimum = markdown_section(ARCHITECTURE_STANDARD, "## 1. 最小交付")
+        architecture_minimum = markdown_section(
+            ARCHITECTURE_STANDARD, "## 1. 最小交付与零差量"
+        )
         architecture_decisions = markdown_section(ARCHITECTURE_SKILL, "## 访谈与决策")
 
         self.assertIn(invariant, markdown_section(SKILL, "### 共享能力发现与决定"))

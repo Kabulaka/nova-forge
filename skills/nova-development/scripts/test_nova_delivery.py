@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -157,6 +158,71 @@ class DeliveryLedgerTests(unittest.TestCase):
                 "NR-20260904-example",
                 "2026-09-04T12:00:00+08:00",
             )
+
+    def test_completed_historical_ledger_remains_queryable_after_requirement_upgrade(self) -> None:
+        value = ledger(item_state="completed")
+        value["status"] = "implemented"
+        value["plan_version"] = 2
+        value["changes"].append(
+            {
+                "plan_version": 2,
+                "kind": "completed",
+                "reason": "trusted Review PASS",
+            }
+        )
+        key, _ = REQ.split("@", 1)
+        upgraded_product = (
+            "| Requirement Key | 版本 | 状态 | 业务模块 | 需求块 | 已实现版本 | 实现依据 |\n"
+            "|-----------------|------|------|----------|--------|------------|----------|\n"
+            f"| {key} | v2 | 已更新 | 交付 | [需求](requirements/{key}_example.md) | v1 | {PEND} |\n"
+        )
+        checkpoint = {
+            "commit": COMMIT,
+            "path": value["requirement_checkpoint"]["path"],
+            "sha256": SHA,
+        }
+        original_validate = NOVA.validate_delivery_ledger_data
+
+        def validate_without_git_evidence(
+            repo: Path,
+            candidate: dict,
+            *,
+            blueprint: str,
+            product: str,
+            **_: object,
+        ) -> dict:
+            return original_validate(
+                repo,
+                candidate,
+                blueprint=blueprint,
+                product=product,
+                verify_evidence=False,
+                verify_review_state=False,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            delivery_path = root / NOVA.delivery_relative_path(REQ)
+            delivery_path.parent.mkdir(parents=True)
+            delivery_path.write_bytes(NOVA.canonical_delivery_ledger(value))
+            (root / ".nova/PROJECT_BLUEPRINT.md").write_text(
+                blueprint(), encoding="utf-8"
+            )
+            (root / ".nova/PRODUCT_REQUIREMENTS.md").write_text(
+                upgraded_product, encoding="utf-8"
+            )
+            with (
+                mock.patch.object(NOVA, "query_requirement", return_value=checkpoint),
+                mock.patch.object(
+                    NOVA,
+                    "validate_delivery_ledger_data",
+                    side_effect=validate_without_git_evidence,
+                ),
+            ):
+                result = NOVA.query_delivery(root, requirement_ref=REQ)
+        self.assertEqual(result["requirement_ref"], REQ)
+        self.assertEqual(result["status"], "implemented")
+        self.assertEqual(result["completed"], 1)
 
     def test_plan_history_cannot_delete_task_or_milestone(self) -> None:
         previous = ledger(item_state="active", milestone_state="active")

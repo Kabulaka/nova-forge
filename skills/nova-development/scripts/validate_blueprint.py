@@ -78,7 +78,7 @@ TERMINAL_WORK_PACKAGE_STATES = {"已完成", "已废弃"}
 REFERENCED_WORK_PACKAGE_STATES = {"已确认", "开发中", "待Review"}
 
 TASK_ID_RE = re.compile(
-    r"^(?:FEAT-(?:[0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})|PEND-[A-Za-z0-9._-]+)$"
+    r"^(?:FEAT-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|PEND-[A-Za-z0-9._-]+)$"
 )
 LEGACY_TASK_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 REQUIREMENT_REF_RE = re.compile(

@@ -16,6 +16,7 @@ from types import ModuleType
 
 REQ_RE = re.compile(r"^REQ-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 VERSION_RE = re.compile(r"^v([1-9][0-9]*)$")
+FEAT_RE = re.compile(r"^FEAT-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 PEND_RE = re.compile(r"^PEND-(?:[0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$")
 INDEX_SECTIONS = ("产品定位", "端到端业务流程", "业务模块", "需求索引", "范围边界")
 BLOCK_SECTIONS = ("目标", "参与者与业务流程", "业务规则", "边界与异常", "独立交付边界", "验收")
@@ -207,8 +208,15 @@ def trusted_review_pass(
     if completed is None:
         return False
     feature, _ = completed
+    expected_class = (
+        "feature"
+        if FEAT_RE.fullmatch(work_item)
+        else "designed"
+        if PEND_RE.fullmatch(work_item)
+        else None
+    )
     design_ref = feature.get("design_ref")
-    if feature.get("change_class") != "designed" or not isinstance(design_ref, str):
+    if expected_class is None or feature.get("change_class") != expected_class or not isinstance(design_ref, str):
         return False
     design_path = design_ref.split("#", 1)[0]
     design_bytes = None
@@ -238,7 +246,10 @@ def implementation_evidence(value: str) -> list[str] | None:
     if (
         not items
         or len(items) != len(set(items))
-        or any(PEND_RE.fullmatch(item) is None for item in items)
+        or any(
+            FEAT_RE.fullmatch(item) is None and PEND_RE.fullmatch(item) is None
+            for item in items
+        )
     ):
         return None
     return items
@@ -317,7 +328,7 @@ def validate_index(path: Path) -> list[str]:
                     or evidence_items is None
                 ):
                     errors.append(
-                        f"{key}: 开发中 requires 无/无 or an older implemented version and PEND evidence"
+                        f"{key}: 开发中 requires 无/无 or an older implemented version and FEAT or historical PEND evidence"
                     )
                 elif not all(
                     trusted_review_pass(path.parent, item, key, implemented)
@@ -329,7 +340,7 @@ def validate_index(path: Path) -> list[str]:
         elif status == "已实现":
             evidence_items = implementation_evidence(evidence)
             if implemented != version or evidence_items is None:
-                errors.append(f"{key}: 已实现 requires current implemented version and PEND evidence")
+                errors.append(f"{key}: 已实现 requires current implemented version and FEAT or historical PEND evidence")
             elif not all(
                 trusted_review_pass(path.parent, item, key, implemented)
                 for item in evidence_items
@@ -340,7 +351,7 @@ def validate_index(path: Path) -> list[str]:
             implemented_match = VERSION_RE.fullmatch(implemented)
             evidence_items = implementation_evidence(evidence)
             if implemented_match is None or int(implemented_match.group(1)) >= current or evidence_items is None:
-                errors.append(f"{key}: 已更新 requires an older implemented version and PEND evidence")
+                errors.append(f"{key}: 已更新 requires an older implemented version and FEAT or historical PEND evidence")
             elif not all(
                 trusted_review_pass(path.parent, item, key, implemented)
                 for item in evidence_items

@@ -21,7 +21,8 @@ SPEC.loader.exec_module(NOVA_TOOL)
 
 ORDINARY_PROMPT = (
     "这是隔离 Git 行为探针。把 value.txt 从 old 改为 new，并运行足以证明内容为 new 的最低验证。"
-    "这是新发现的、既有契约内的小修复，尚未创建工作项。完成实际操作，不要只解释。"
+    "这是主动局部修改，不是既有契约偏离或缺陷，也不新增能力或公共契约；尚未创建工作项。"
+    "完成实际操作，不要只解释。"
 )
 
 
@@ -100,22 +101,22 @@ def review_invocations(transcript: str) -> list[str]:
     return forbidden
 
 
-def generated_adhoc_work_item(metadata: dict[str, str], transcript: str) -> str:
+def generated_patch_work_item(metadata: dict[str, str], transcript: str) -> str:
     work_item = metadata.get("Work-Item", "")
-    uuid_part = work_item.removeprefix("FIX-")
+    uuid_part = work_item.removeprefix("PATCH-")
     if (
-        not NOVA_TOOL.WORK_ITEM_PATTERNS["adhoc"].fullmatch(work_item)
+        not NOVA_TOOL.WORK_ITEM_PATTERNS["patch"].fullmatch(work_item)
         or uuid_part.isdigit()
     ):
-        raise ProbeError("ordinary implementation did not create a FIX UUIDv7 work item")
+        raise ProbeError("ordinary implementation did not create a PATCH UUIDv7 work item")
     commands = event_values(transcript, {"command"})
     if not any(
         "nova_review.py" in command
         and "new-id" in command
-        and "--class adhoc" in command
+        and "--class patch" in command
         for command in commands
     ):
-        raise ProbeError("ordinary implementation did not invoke new-id --class adhoc")
+        raise ProbeError("ordinary implementation did not invoke new-id --class patch")
     return work_item
 
 
@@ -167,7 +168,7 @@ def assert_default_commit(repo: Path, transcript: str, baseline: str) -> tuple[s
     metadata, errors = NOVA_TOOL.validate_message(message, diff)
     if errors:
         raise ProbeError("ordinary commit has invalid Nova trailers: " + "; ".join(errors))
-    work_item = generated_adhoc_work_item(metadata, transcript)
+    work_item = generated_patch_work_item(metadata, transcript)
     forbidden = review_invocations(transcript)
     if forbidden:
         raise ProbeError(f"ordinary implementation entered Review: {forbidden}")

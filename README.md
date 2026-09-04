@@ -10,7 +10,7 @@
 |------|------|----------|
 | [`nova-requirements`](./skills/nova-requirements/) | 总体业务、业务模块和可独立交付需求块 | 绿地项目、新需求或业务语义变化 |
 | [`nova-architecture`](./skills/nova-architecture/) | 技术栈、七章蓝图与 API/数据/事件/Mock 并行契约 | 绿地初始化或共享架构变化 |
-| [`nova-development`](./skills/nova-development/) | 功能设计、`PEND-*` / `FIX-*` / `MAINT-*` 的实施、测试与本地提交 | 已确认需求下的功能和普通开发 |
+| [`nova-development`](./skills/nova-development/) | 功能设计、`FEAT-*` / `PATCH-*` / `FIX-*` / `MAINT-*` 的实施、测试与本地提交 | 已确认需求下的功能和普通开发 |
 | [`nova-doctor`](./skills/nova-doctor/) | 只读检查当前项目的 Nova 数据、引用、审计与迁移状态 | 项目健康检查、校验失败诊断或迁移判断 |
 | [`nova-review`](./skills/nova-review/) | 按稳定工作项选择已提交变更，复用测试证据，执行独立 Review，并在 PASS 后写入分片审计 | 仅在用户明确提出 Review、复审、补审、全部未审项或查询 Review 状态时触发 |
 
@@ -19,13 +19,13 @@
 ```text
 总体需求与独立需求块
    ↓
-项目蓝图与并行架构契约
+必要的项目蓝图与并行架构契约（零差量不制造架构成果）
    ↓
 功能设计 → 编码 → 测试 → 精确范围本地提交
    ↓
 用户明确启动 Review
    ↓
-独立审查 → 修复复审 → PASS 后关闭与审计
+独立审查 → REJECT 修正不提交 → PASS 时一次关闭与审计
 ```
 
 默认开发不会自动启动 Review。Git push、远程配置和 SVN commit 也不会从本地提交授权中自动推导。
@@ -142,7 +142,7 @@ python3 skills/nova-review/scripts/validate_discovery.py \
 ```
 
 ```text
-使用 $nova-development，实施 PEND-001。
+使用 $nova-development，实施 FEAT-019a1234-5678-7abc-8def-0123456789ab。
 ```
 
 ```text
@@ -150,7 +150,7 @@ python3 skills/nova-review/scripts/validate_discovery.py \
 ```
 
 ```text
-使用 $nova-review，Review PEND-001。
+使用 $nova-review，Review FEAT-019a1234-5678-7abc-8def-0123456789ab。
 ```
 
 需求澄清每轮只确认一个会改变结果的信息维度；能够从代码、配置、测试或文档查明的事实会先研究，不要求用户重复提供。
@@ -200,7 +200,8 @@ python3 skills/nova-development/scripts/validate_blueprint.py \
 - 开发澄清先查共享能力目录与实际代码；新增共享能力由用户确认，最低验收后才登记。
 - 模块业务表、查询和 Repository 归模块所有，但代码落位和依赖方向必须服从蓝图分层。
 - 已实现或已废弃的设计是不可变历史；后续演进必须新建设计并链接来源。
-- 工作项使用稳定的 `PEND-*`、`FIX-*` 或 `MAINT-*` 编号，commit 只作为证据。
+- 需求、架构检查点和交付分别使用 `REQ-*`、`ARCH-*` 与 `FEAT-*`/`PATCH-*`/`FIX-*`/`MAINT-*`；历史 `PEND-*` 仅兼容，不再新建。
+- schema 2 提交首行使用 `type(scope): 中文结果摘要`；工作项默认一个实现结果 commit，Review 最终只产生一个 closure commit。
 - 本地提交必须包含 Nova trailers；人工 Review 结论不得伪造进不可变开发提交。
 - 校验器必须只读、确定性执行，并在失败时返回非零状态。
 

@@ -31,6 +31,44 @@ class NovaDoctorTests(unittest.TestCase):
             text=True,
         )
 
+    def init_repo(self, root: Path) -> None:
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.name", "Nova Doctor Test"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.email", "doctor@example.invalid"],
+            check=True,
+        )
+
+    def commit_file(self, root: Path, name: str, content: str, message: str) -> None:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", name], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "commit", "-q", "-F", "-"],
+            input=message,
+            text=True,
+            check=True,
+        )
+
+    def work_item_message(
+        self, work_item: str, change_class: str, schema: int, subject: str
+    ) -> str:
+        return (
+            subject
+            + "\n\n"
+            + f"Nova-Schema: {schema}\n"
+            + f"Work-Item: {work_item}\n"
+            + f"Change-Class: {change_class}\n"
+            + "Design-Ref: none\n"
+            + "Review-Policy: required\n"
+            + "Exemption-Rule: none\n"
+            + "Validation: doctor fixture (pass)\n"
+        )
+
     def test_current_repository_passes(self) -> None:
         before = subprocess.run(
             ["git", "status", "--porcelain=v1"],
@@ -173,6 +211,104 @@ class NovaDoctorTests(unittest.TestCase):
         self.assertEqual(result.status, "FAIL")
         self.assertEqual(result.message, "audit records are inconsistent")
         self.assertTrue(result.details)
+
+    def test_governance_history_rejects_new_pend_after_schema_2(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.init_repo(root)
+            self.commit_file(
+                root,
+                "value.txt",
+                "invalid\n",
+                self.work_item_message(
+                    "PEND-019a1234-5678-7abc-8def-0123456789ab",
+                    "feature",
+                    2,
+                    "feat(delivery): 错误创建旧任务编号",
+                ),
+            )
+            result = DOCTOR.check_governance_history(root, WORKSPACE)
+        self.assertEqual(result.status, "FAIL")
+        self.assertIn("commit governance violations", result.message)
+        self.assertIn("Work-Item does not match", result.details[0])
+
+    def test_governance_history_rejects_fragmented_patch_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.init_repo(root)
+            work_item = "PATCH-019a1234-5678-7abc-8def-0123456789ab"
+            commit_message = self.work_item_message(
+                work_item,
+                "patch",
+                2,
+                "patch(delivery): 调整局部交付行为",
+            )
+            self.commit_file(root, "value.txt", "one\n", commit_message)
+            self.commit_file(root, "value.txt", "two\n", commit_message)
+            result = DOCTOR.check_governance_history(root, WORKSPACE)
+        self.assertEqual(result.status, "FAIL")
+        self.assertIn("allow one implementation result commit", result.details[0])
+
+    def test_governance_history_rejects_schema_1_after_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.init_repo(root)
+            self.commit_file(
+                root,
+                "new.txt",
+                "schema2\n",
+                self.work_item_message(
+                    "PATCH-019a1234-5678-7abc-8def-0123456789ab",
+                    "patch",
+                    2,
+                    "patch(delivery): 建立新提交协议",
+                ),
+            )
+            self.commit_file(
+                root,
+                "legacy.txt",
+                "schema1\n",
+                self.work_item_message(
+                    "MAINT-001",
+                    "maintenance",
+                    1,
+                    "legacy maintenance",
+                ),
+            )
+            result = DOCTOR.check_governance_history(root, WORKSPACE)
+        self.assertEqual(result.status, "FAIL")
+        self.assertIn("after schema 2 activation", result.details[0])
+
+    def test_governance_history_rejects_schema_2_reuse_of_schema_1_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.init_repo(root)
+            work_item = "FIX-019a1234-5678-7abc-8def-0123456789ab"
+            self.commit_file(
+                root,
+                "legacy.txt",
+                "legacy\n",
+                self.work_item_message(
+                    work_item,
+                    "adhoc",
+                    1,
+                    "legacy fix",
+                ),
+            )
+            self.commit_file(
+                root,
+                "new.txt",
+                "new\n",
+                self.work_item_message(
+                    work_item,
+                    "fix",
+                    2,
+                    "fix(delivery): 恢复既有交付行为",
+                ),
+            )
+            result = DOCTOR.check_governance_history(root, WORKSPACE)
+        self.assertEqual(result.status, "FAIL")
+        self.assertIn("must not reuse a schema 1 work-item identity", result.details[0])
 
 
 if __name__ == "__main__":

@@ -87,11 +87,11 @@ Reviewer 必须审查完七个维度并一次性返回完整报告，禁止发�
 
 1. 主代理收到完整 REJECT 后逐条分析，统一修复全部 Blocker 和 Observation-Fix；这些修复仍属于未归档的当前工作项，必须沿用原编号，不得只修一部分就复审，也不得借机重构无关代码。
 2. Observation-Defer 按来源 `Review-Defer` 写入蓝图；无确认设计或依赖时标“待澄清”，不纳入本轮修复或任务范围，也不得复用当前工作项编号。
-3. 只有修复导致证据失效时才重跑受影响测试；其他证据必须复用。测试通过后提交完整新任务 diff。
+3. 只有修复导致证据失效时才重跑受影响测试；其他证据必须复用。测试通过后保留完整 Review 修正 diff 供复审，不创建中间 commit；需要使用暂存区固定内容时可暂存，但不得提交。
 4. 复审必须用 `followup_task` 复用上一轮 Reviewer，逐条确认旧问题，并只检查修复新增/修改行是否引入新问题；不得在上一轮未指出的区域搜索任何严重性的新问题。
 5. 复审新问题仅可来自修复直接触及的行，仍按 Blocker/Observation-Fix/Observation-Defer 分级。
 6. 同一变更最多三轮（初审 + 两次复审）；第 3 轮仍 REJECT 时停止并报告用户。
-7. 每轮只有“主代理提交 → Reviewer 完整报告”一个来回，不做交互式边审边改。
+7. 每轮只有“主代理提交审查输入 → Reviewer 完整报告”一个来回，不做交互式边审边改；这里的“提交审查输入”不是 Git commit。
 
 仅当原 Reviewer 为 `errored`、`interrupted`、`shutdown`、`not_found` 或因写入失去资格时可更换：
 
@@ -116,4 +116,6 @@ Reviewer 必须审查完七个维度并一次性返回完整报告，禁止发�
 
 ## 10. PASS 后边界
 
-PASS 或合法 PASS WITH NOTES 处置完成后，才可进入 `audit-contract.md` 的 `check-manifest` 与 `record-pass`。默认开发阶段已经存在本地 commits，因此旧规则中的“无结论不可 commit”明确替换为“无结论不可记录 Review、关闭蓝图或宣称 PASS”；push、远程配置和 SVN commit 仍需独立授权。
+PASS 或合法 PASS WITH NOTES 处置完成后，才可进入 `audit-contract.md` 的 `check-manifest` 与 `record-pass`。默认开发阶段已经存在实现 commits；REJECT 产生的所有修正持续保持未提交，最终与审计、蓝图/设计关闭和台账/需求聚合一起形成唯一 closure commit。因此“无结论不可 commit”在本流程中指不得创建 Review closure commit；无结论也不可记录 Review、关闭蓝图或宣称 PASS。push、远程配置和 SVN commit 仍需独立授权。
+
+closure commit 经 `query` 验证后，Review 完成报告必须逐轮列出结论、全部问题和对应修正，明确针对哪些工作项和实现 commits、Review 实际改了哪些路径、唯一 closure commit 与审计路径、哪些范围未改以及下一步。发送前使用 `nova_review.py validate-report --stage review` 校验；不得照搬开发任务报告。

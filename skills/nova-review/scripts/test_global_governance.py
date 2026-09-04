@@ -70,40 +70,25 @@ class GlobalGovernanceTests(unittest.TestCase):
         self.assertIn("禁止用 `filter`、`includes` 或宽泛正则枚举 `ALL_TOOLS`", GLOBAL)
         self.assertIn("不自动安装或重复探测", GLOBAL)
 
-    def test_implementation_sop_keeps_full_completion_report(self) -> None:
-        for heading in (
-            "### 概要",
-            "### 变更文件",
-            "### 关键决策",
-            "### 测试结果",
-            "### 提交结果",
-            "### Review 结果",
-            "### .nova/PROJECT_BLUEPRINT.md 与设计更新",
-            "### 基线与清理",
-            "### 遗留事项",
+    def test_implementation_sop_keeps_stage_specific_completion_reports(self) -> None:
+        for stage, title in (
+            ("requirement", "需求完成报告"),
+            ("architecture", "架构完成报告"),
+            ("feature", "FEAT 完成报告"),
+            ("patch", "PATCH 完成报告"),
+            ("fix", "FIX 完成报告"),
+            ("maintenance", "MAINT 完成报告"),
+            ("review", "Review 完成报告"),
         ):
-            self.assertIn(heading, IMPLEMENTATION)
-        self.assertIn("未 Review", IMPLEMENTATION)
-        self.assertIn("失效与重跑原因", IMPLEMENTATION)
-        for field in (
-            "**工作项**",
-            "**变更分类**",
-            "**Review 策略**",
-            "**执行命令与工作目录**",
-            "**相关状态**",
-            "**未验证事项**",
-            "**本地 commit**",
-            "**精确范围**",
-            "**远程与 SVN**",
-            "**内容标识与范围**",
-            "**历史工作副本隔离**",
-            "**临时基线材料**",
-        ):
-            self.assertIn(field, IMPLEMENTATION)
-        self.assertIn("章节不得省略", IMPLEMENTATION)
-        self.assertIn("两者都不是 Review PASS", IMPLEMENTATION)
-        self.assertIn("合法客观豁免写 `exempt` 并核对", IMPLEMENTATION)
-        self.assertIn("未 Review 或 exempt 时写“不适用”", IMPLEMENTATION)
+            self.assertIn(f"| `{stage}` | {title} |", IMPLEMENTATION)
+        self.assertIn("实际完成了什么", IMPLEMENTATION)
+        self.assertIn("刻意没有改什么", IMPLEMENTATION)
+        self.assertIn("测试命令、工作目录、结果、覆盖验收", IMPLEMENTATION)
+        self.assertIn("本地 commit hash 与中文主题", IMPLEMENTATION)
+        self.assertIn("Review 策略与“未 Review/待Review”", IMPLEMENTATION)
+        self.assertIn("validate-report --stage <stage>", IMPLEMENTATION)
+        self.assertIn("项目外", IMPLEMENTATION)
+        self.assertIn("校验失败不得发送", IMPLEMENTATION)
         self.assertIn("完整 diff 命中证据", IMPLEMENTATION)
         self.assertIn("不得把自检、测试或豁免表述为 Review PASS", GLOBAL)
 
@@ -128,13 +113,16 @@ class GlobalGovernanceTests(unittest.TestCase):
         self.assertEqual(actual, expected)
         self.assertIn("显式替换", MIGRATION)
 
-    def test_pending_and_adhoc_audit_boundaries_are_explicit(self) -> None:
-        self.assertIn("正式 `PEND-*` 在 Review PASS 前保留于蓝图", GLOBAL)
-        self.assertIn("`FIX-*` 不进入蓝图", GLOBAL)
-        self.assertIn("`adhoc` 使用 `FIX-*`，`Design-Ref: none`", GLOBAL)
+    def test_feature_patch_fix_and_audit_boundaries_are_explicit(self) -> None:
+        self.assertIn("正式 `FEAT-*` 在 Review PASS 前保留于蓝图", GLOBAL)
+        self.assertIn("`PATCH-*`、`FIX-*`、`MAINT-*` 不进入蓝图", GLOBAL)
+        self.assertIn("`patch` 使用 `PATCH-*`，`Design-Ref: none`", GLOBAL)
+        self.assertIn("`fix` 使用 `FIX-*`，`Design-Ref: none`", GLOBAL)
         self.assertIn("`maintenance` 使用 `MAINT-*`，`Design-Ref: none`", GLOBAL)
-        self.assertIn("不得在不可变 commit 中写 `Review-State`", GLOBAL)
-        self.assertIn("缺失、矛盾或无法证明的分类一律按需要 Review", GLOBAL)
+        self.assertIn("禁止写 `Review-State`", GLOBAL)
+        self.assertIn("缺失、矛盾或无法证明的分类一律停止并重新路由", GLOBAL)
+        self.assertIn("REJECT 轮次不产生 commit", GLOBAL)
+        self.assertIn("一个包含全部 Review 修正、审计和投影关闭的 closure commit", GLOBAL)
 
     def test_repeatable_runtime_probe_covers_default_commit_and_manual_review(self) -> None:
         probe = FLOW_PROBE.read_text(encoding="utf-8")
@@ -145,8 +133,8 @@ class GlobalGovernanceTests(unittest.TestCase):
         self.assertNotIn("commit", PROBE.ORDINARY_PROMPT.lower())
         self.assertNotIn("review", PROBE.ORDINARY_PROMPT.lower())
 
-    def test_runtime_probe_requires_new_fix_uuid7_and_reuses_it_for_review(self) -> None:
-        work_item = "FIX-018f22e2-79b0-7abc-8123-456789abcdef"
+    def test_runtime_probe_requires_new_patch_uuid7_and_reuses_it_for_review(self) -> None:
+        work_item = "PATCH-018f22e2-79b0-7abc-8123-456789abcdef"
         transcript = json.dumps(
             {
                 "type": "item.completed",
@@ -154,19 +142,19 @@ class GlobalGovernanceTests(unittest.TestCase):
                     "type": "command_execution",
                     "command": (
                         "python3 nova-review/scripts/nova_review.py "
-                        "new-id --class adhoc"
+                        "new-id --class patch"
                     ),
                 },
             }
         )
         metadata = {"Work-Item": work_item}
-        self.assertEqual(PROBE.generated_adhoc_work_item(metadata, transcript), work_item)
+        self.assertEqual(PROBE.generated_patch_work_item(metadata, transcript), work_item)
         self.assertIn(work_item, PROBE.explicit_review_prompt(work_item))
 
-        with self.assertRaisesRegex(PROBE.ProbeError, "FIX UUIDv7"):
-            PROBE.generated_adhoc_work_item({"Work-Item": "FIX-001"}, transcript)
-        with self.assertRaisesRegex(PROBE.ProbeError, "new-id --class adhoc"):
-            PROBE.generated_adhoc_work_item(metadata, "")
+        with self.assertRaisesRegex(PROBE.ProbeError, "PATCH UUIDv7"):
+            PROBE.generated_patch_work_item({"Work-Item": "PATCH-001"}, transcript)
+        with self.assertRaisesRegex(PROBE.ProbeError, "new-id --class patch"):
+            PROBE.generated_patch_work_item(metadata, "")
 
     def test_runtime_probe_detects_collaboration_and_select_event_shapes(self) -> None:
         collaboration = json.dumps(

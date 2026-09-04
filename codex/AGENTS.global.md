@@ -14,8 +14,8 @@
 
 - 绿地项目总体业务、端到端流程、业务模块、新需求或既有需求语义修改，使用 `nova-requirements`；只通过需求索引进行首次路由。
 - 总体需求确认后的技术栈、项目蓝图、公共 API、数据所有权、事件、Mock 与并行开发门禁，使用 `nova-architecture`。
-- 已确认需求下的具体功能澄清、史诗设计，以及任何 `PEND-*`、`FIX-*`、`MAINT-*` 的编码、测试、证据记录和本地提交，使用 `nova-development`；实施时必须完整读取其 `references/implementation-sop.md`。
-- 普通功能/FIX 不自动读取需求正文；无法判定需求变化、架构变化或局部实现问题时只问一个路由问题。
+- 已确认需求下的具体功能澄清、史诗设计，以及任何 `FEAT-*`、`PATCH-*`、`FIX-*`、`MAINT-*` 的编码、测试、证据记录和本地提交，使用 `nova-development`；实施时必须完整读取其 `references/implementation-sop.md`。
+- 普通功能/PATCH/FIX 不自动读取需求正文；无法判定需求变化、架构变化、主动局部调整或缺陷恢复时只问一个路由问题。
 - 用户要求检查当前项目的 Nova 文档、引用、审计或迁移状态时使用 `nova-doctor`；只读检查调用时所在项目，不检查全局技能安装、技能源码更新或远端版本，也不自动修复或迁移。
 - 只有用户明确提出 Review、复审、补审、全部未审项或 Review 状态查询时使用 `nova-review`。
 - 加载 `nova-review` 不等于获得审查授权；默认编码、测试和本地提交不得自动启动 Review。
@@ -59,22 +59,24 @@
 
 提交分类、豁免和 trailers 以 `skills/nova-review/references/commit-contract.md` 为唯一详细定义：
 
-工作项是独立、内聚、可控的交付单元，必须具有完整结果与验收，并能独立排期、暂停、恢复、Review 或取消。大需求可沿稳定能力边界拆成多个开发任务；需求、架构、编码、测试等流程阶段，以及文件、模块、技能、代理或提交批次不得作为拆项依据。多个步骤只有共同完成才有价值或共同修改同一规模可控能力时，必须沿用一个工作项，并以内部里程碑和多次提交跟踪。
+工作项是独立、内聚、可控的交付单元，必须具有完整结果与验收，并能独立排期、暂停、恢复、Review 或取消。大需求可沿领域能力或端到端功能块边界拆成多个开发任务；需求、架构、编码、测试等流程阶段，以及文件、模块、技能、代理或提交批次不得作为拆项依据。多个步骤只有共同完成才有价值或共同修改同一规模可控能力时，必须沿用一个工作项并以内部里程碑跟踪。一个工作项默认只有一个实现结果 commit；只有预先登记、失败后可安全恢复且有独立恢复价值的里程碑允许同编号追加。
 
-- `designed` 使用 `PEND-*`，`Design-Ref` 必须指向设计锚点，且需要 Review；
-- `adhoc` 使用 `FIX-*`，`Design-Ref: none`，仅限不新增能力或公共契约的小修复，仍需要 Review；
+- `feature` 使用 `FEAT-*`，`Design-Ref` 必须指向设计锚点，且需要 Review；
+- `patch` 使用 `PATCH-*`，`Design-Ref: none`，仅限不新增能力或公共契约的主动局部调整，仍需要 Review；
+- `fix` 使用 `FIX-*`，`Design-Ref: none`，必须有实现偏离既有契约的证据并恢复预期行为，仍需要 Review；
 - `maintenance` 使用 `MAINT-*`，`Design-Ref: none`，默认需要 Review，只有客观白名单可豁免；
-- 缺失、矛盾或无法证明的分类一律按需要 Review 处理。
+- schema 1 历史 `PEND-*`、`designed / adhoc / maintenance` 及可信审计只读兼容；新入口不得创建 PEND；
+- 缺失、矛盾或无法证明的分类一律停止并重新路由，不得靠更宽泛分类掩盖语义。
 
-普通 Nova Work-Item commit 必须包含 `Nova-Schema`、`Work-Item`、`Change-Class`、`Design-Ref`、`Review-Policy`、`Exemption-Rule`、`Validation`，明确源于已归档 PEND 的新 FIX 还必须包含 `Related-Work-Item`。requirement 与 delivery-plan 检查点使用各自 `Commit-Kind` 契约，不携带 Work-Item 或进入 Review。不得在不可变 commit 中写 `Review-State`。工作项未归档且修正仍属原范围、内部里程碑或当前 Review 时沿用相同编号并追加 commit；可信审计归档后编号永久封存，后续变化必须重新分类建项。
+schema 2 首行固定为 `type(scope): 中文结果摘要`，scope 仅限 `requirements / architecture / delivery / review / doctor / plugin / discovery / release`。Work-Item commit 必含 `Nova-Schema`、`Work-Item`、`Change-Class`、`Design-Ref`、`Review-Policy`、`Exemption-Rule`、`Validation`；源于已归档 FEAT 或历史 PEND 的 FIX 还须有 `Related-Work-Item`。requirement、architecture、delivery-plan 使用各自 `Commit-Kind`，不进入 Review。禁止写 `Review-State`。Review 前同范围修正优先安全 amend；REJECT 不提交；归档后重新分类建项。
 
 ## 人工 Review
 
 - 用户裸“开始 Review”只审当前会话 ready 且要求 Review 的工作项；显式编号可包含多个任务；只有“全部未审查项”才跨会话扩围。
 - 用户可随时要求先调试、暂停或取消，工作项保持未审状态，后续可补齐 Review。
 - Review 的自检、独立子代理、问题分级、证据复用、复审和关闭全部服从 `nova-review`，本文件不重复 SOP。
-- 正式 `PEND-*` 在 Review PASS 前保留于蓝图并处于 `待Review`；PASS 后才关闭并写分片审计。`FIX-*` 不进入蓝图，通过提交元数据减 Review 记录发现待审状态。
+- 正式 `FEAT-*` 在 Review PASS 前保留于蓝图并处于 `待Review`；PASS 后才关闭并写分片审计。`PATCH-*`、`FIX-*`、`MAINT-*` 不进入蓝图，通过提交元数据及 Review 记录发现待审状态。REJECT 轮次不产生 commit；最终 PASS 只产生一个包含全部 Review 修正、审计和投影关闭的 closure commit。
 
 ## Plan mode 与完成报告
 
-Plan mode 只由用户手动启用，方案须经用户批准才编码；完整追加约束和固定代码完成报告模板由 `skills/nova-development/references/implementation-sop.md` 定义。Plan mode 本身不自动授权或启动 Review。`required` 项未运行 Review 时报告必须保留 Review 章节并明确写“未 Review”；合法客观豁免写 `exempt` 并列规则与完整 diff 证据；两者轮次均为“不适用”，不得把自检、测试或豁免表述为 Review PASS。
+Plan mode 只由用户手动启用，方案须经用户批准才编码；完整追加约束和需求、架构、FEAT、PATCH、FIX、MAINT、Review 七类固定完成报告由 `skills/nova-development/references/implementation-sop.md` 定义。发送前必须使用 `nova_review.py validate-report --stage <stage>` 校验项目外临时候选报告。Plan mode 本身不自动授权或启动 Review。`required` 项未运行 Review 时报告必须保留 Review 状态并明确写“未 Review / 待Review”；合法客观豁免写 `exempt` 并列规则与完整 diff 证据；两者轮次均为“不适用”，不得把自检、测试或豁免表述为 Review PASS。

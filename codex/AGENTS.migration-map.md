@@ -11,7 +11,7 @@
 | A5 | 先推理后动 | 同上 | 保留原文 |
 | A6 | 缺口先问 | 同上 | 保留原文 |
 | A7 | 不多言、不饰非 | 同上 | 保留原文 |
-| L1 | L0 客观条件与流程 | `nova-review/references/commit-contract.md#1-身份与分类`、`#2-豁免白名单` | 显式替换为 designed/adhoc/maintenance 与更严格客观豁免 |
+| L1 | L0 客观条件与流程 | `nova-review/references/commit-contract.md#1-身份与分类`、`#2-豁免白名单` | 显式替换为 FEAT/PATCH/FIX/MAINT，schema 1 历史分类只读兼容，并保留更严格客观豁免 |
 | L2 | 项目管理文档脚注 | `nova-review/references/commit-contract.md#2-豁免白名单` | 保留为 EX-DOC 的完整 diff 双侧路径规则 |
 | L3 | 禁止主观降级 | 同上 | 保留并 fail closed |
 | L4 | plan mode 前后阶段 | `nova-development/references/implementation-sop.md#6-plan-mode-追加约束` | 保留；Review 改为人工触发 |
@@ -26,7 +26,7 @@
 | K9 | 待澄清禁止实施 | 同上 | 保留 |
 | B1 | 编辑前记录仓库、状态、范围与既有变更 | `implementation-sop.md#1`、`review-sop.md#1` | 保留 |
 | B2 | 同文件既有修改需可重建快照 | 同上 | 保留 |
-| B3 | 基线保存、清理和禁止重建 | 同上、`implementation-sop.md#7-代码完成报告` | 保留 |
+| B3 | 基线保存、清理和禁止重建 | 同上、`implementation-sop.md#7-阶段完成报告` | 保留 |
 | B4 | 当前任务差异排除历史未提交代码 | 同上 | 保留 |
 | B5 | 无法分离时停止并让用户选择 | 同上 | 保留 |
 | B6 | Review 只按当前任务差异 | `review-sop.md#1` | 保留 |
@@ -115,7 +115,7 @@
 | W1 | 禁止主动 close；超时继续等终态 | `review-sop.md#9-等待终止与人工中断` | 保留 |
 | W2 | turn_aborted 后同 diff 重启，最多两次 | 同上 | 保留 |
 | W3 | 空响应/中间态不是 PASS | 同上 | 保留；“不可提交”改为“不可关闭/宣称 PASS” |
-| F1 | 完成报告固定模板且章节不得省略 | `implementation-sop.md#7-代码完成报告` | 保留并适配新分类 |
+| F1 | 完成报告固定模板且章节不得省略 | `implementation-sop.md#7-阶段完成报告` | 保留并适配七类阶段 |
 | F2 | 概要、文件、关键决策、测试、Review、蓝图、遗留 | 同上 | 保留，并新增提交/基线章节；required 未启动写“未 Review”，合法豁免写 `exempt` 和客观证据，均无 Review 轮次且不得冒充 PASS |
 | F3 | L0 可省略 Review 章节 | 同上 | 显式替换为任何情况都保留；未审或 exempt 的轮次均写“不适用” |
 | F4 | 相对路径与非空泛关键决策 | 同上 | 保留 |
