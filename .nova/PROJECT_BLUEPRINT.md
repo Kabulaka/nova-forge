@@ -38,6 +38,7 @@
 ├── PRODUCT_REQUIREMENTS.md          总体业务、需求索引与状态契约（按需）
 ├── PROJECT_BLUEPRINT.md             工作区公共技术契约和待办索引
 ├── requirements/                    可独立交付的长期需求块（按需）
+├── delivery/                        每个需求版本的完整切片台账（按需）
 ├── architecture/                    并行开发前置共享契约（按需）
 ├── design/                          已确认或已实现的功能设计
 └── audit/                           分片 Review 与完成审计
@@ -71,6 +72,7 @@ compat/                              软链接安装、检查与回滚
 |----------|------|--------------|
 | `.nova/` | 项目治理文档 | 总体需求、技术蓝图、按需架构契约、功能设计和审计统一落位；不创建空占位目录 |
 | `.nova/requirements/` | 长期需求块 | 一个文件保存一个可由全栈工程师独立交付的完整业务定义 |
+| `.nova/delivery/` | 需求版本交付台账 | 一个严格 JSON 文件保存一个 `REQ@版本` 的完整切片、依赖、计划变化和聚合状态；蓝图仅作未完成投影 |
 | `.nova/architecture/` | 并行开发前置 | 只保存共享 API、数据、事件与 Mock 契约，不保存实现代码或 ADR |
 | `.nova/design/` | 工作区功能设计 | 一个史诗可含多个相关工作包，已完成设计继续保留 |
 | `.nova/audit/` | Review 与完成功能审计 | 年度功能 JSONL、月度严格 JSON-in-YAML、工作项哈希索引，不建立无限增长总账 |
@@ -91,8 +93,11 @@ compat/                              软链接安装、检查与回滚
 
 ```mermaid
 flowchart LR
-    Requirements[Nova Requirements] --> Architecture[Nova Architecture]
-    Architecture --> Development[Nova Development]
+    Requirements[Nova Requirements] --> RequirementCheckpoint[Requirement Checkpoint]
+    RequirementCheckpoint --> Architecture[Nova Architecture]
+    RequirementCheckpoint --> DeliveryPlan[Delivery Ledger]
+    Architecture --> DeliveryPlan
+    DeliveryPlan --> Development[Nova Development]
     Development --> Review[Nova Review]
     Governance[工作区治理] --> Instructions[技能说明]
     Instructions --> References[按需规范]
@@ -129,6 +134,7 @@ flowchart LR
 | 分片审计 | 保存工作项、commit、验证与 Review 批次的可追踪关系 | 年度 JSONL、月度 JSON-in-YAML 和工作项哈希索引 |
 | 需求治理 | 收敛总体业务与可独立交付需求块，维护稳定 REQ 身份、版本和状态 | `nova-requirements` 与 `.nova/PRODUCT_REQUIREMENTS.md` |
 | 架构治理 | 冻结足以指导开发和并行协作的技术栈、API、数据、事件和 Mock 契约 | `nova-architecture`、蓝图与 `.nova/architecture/` |
+| 交付治理 | 固化已确认需求基线，在首个切片前登记完整交付台账并从可信审计聚合进度 | requirement/delivery-plan commit、`.nova/delivery/` 与蓝图投影 |
 | 开发交付 | 将目标需求或普通功能收敛为自包含设计并完成实现、测试和本地提交 | `nova-development`、PEND/FIX/MAINT 与 `.nova/design/` |
 | 插件分发 | 向 Codex 与 Claude Code 暴露同版本的静态规则、技能、Hook 和 MCP | 双 manifest、双 marketplace 与 GitHub Release |
 | 宿主适配 | 把两个宿主的会话与压缩事件映射为共享状态操作 | `hooks/` 与 `runtime/adapters/`，不承载权威状态机 |
@@ -172,12 +178,17 @@ flowchart LR
 | C-28 | MCP frame、检查点字段/集合/嵌套/总字节、每宿主会话数与磁盘、全局磁盘均有确定上限；超限在解析、规范化、哈希或临时写入的对应最早阶段拒绝，只清理已过期未锁定作用域，未过期状态不因配额被静默逐出 | 边界值、超限、30 天内大量会话、备份放大、配额清理顺序与零临时文件负例 |
 | C-29 | Codex 与 Claude Code 的用户级全局规则入口解析到同一份工作区权威规则；插件安装或启用前必须原子移除该宿主兼容软链接，禁用、卸载或故障恢复只能在插件退出后原子恢复链接并新开会话；所有切换先完成全目标预检，规范入口和旧别名软链接只解除链接本身，普通文件或真实目录一律拒绝覆盖或清理，任一失败恢复切换前状态且不得遗留双入口 | 隔离用户目录中的插件启用/禁用/卸载、兼容恢复、首次安装、重复安装、正常与失效软链接、旧别名清理、普通文件、真实目录、中途失败回滚及链接解析测试 |
 | C-30 | 轻量压缩提示应保留当前任务与阶段、已确认决定、排除、委托与候选身份、未决差量、当前问题、活动范围、证据、文件与提交状态、下一动作及已加载控制内容的绝对路径和指纹；压缩后按用户明确指令、项目规则、全局默认的顺序复用未变化内容，只在当前动作需要逐字正文而摘要不足时精确恢复；该静态规则本身不借助 Hook 或独立状态系统，验收不得承诺宿主绝不遗漏 | 两个宿主真实规则加载、至少一次宿主真实压缩前后对照、普通任务与 Nova 任务静态契约、控制内容读取记录、缺失信息定向恢复及能力边界检查 |
+| C-31 | 每个经用户整份确认且校验通过的 `REQ-...@vN` 立即形成独立 requirement 本地检查点，绑定 commit、逐字 Requirement-Ref、需求块路径和内容 SHA-256；不得等待架构或开发夹带提交，且不进入人工 Review 或功能完成审计 | 提交分型、内容指纹、精确暂存、下游绑定、Review 排除和中断恢复测试 |
+| C-32 | 架构只在共享工程骨架、数据所有权、公共 API、事件或 Mock 变化时进入；一旦进入，对应架构 PEND 必须从可信审计派生 Review PASS 后才允许提交开发中台账或激活受影响切片 | 架构跳过与进入判定、ready 门禁、无形式性架构和 Review 前阻断测试 |
+| C-33 | 首个开发切片前，每个 `REQ@版本` 必须有一份完整严格 JSON 台账，一次性登记全部稳定 PEND、依赖、可执行完成定义和逐字 Requirement-Ref；delivery-plan 检查点成功后需求进入开发中，详细设计可在逐项激活时补齐 | 台账 schema、完整性、依赖图、需求交叉引用、计划提交和首片准入测试 |
+| C-34 | 单个 PEND 的可信 Review PASS 只更新切片进度；只有当前需求版本全部有效 PEND 均 PASS 且当前、剩余和阻塞为空时需求才已实现，并保存全部可验证实现依据；Review 发现不得选择 requirement 或 delivery-plan 检查点 | 多切片顺序关闭、可信审计、聚合状态、实现依据与 Review 选择正反用例 |
+| C-35 | 已登记切片不得静默删除或复用；新增、拆分、合并、替代、重排、取消和阻塞变化必须递增计划版本并保留原身份、关系和原因，减少或无法证明等价的业务验收必须返回需求阶段升级版本；所有入口固定展示总数、已完成、当前、剩余和阻塞 | 计划演进、范围减少拒绝、历史保留、跨会话恢复、稳定排序和五项进度测试 |
 
 ### 开发决策边界
 
 | 边界 | 内容 |
 |------|------|
-| 本期必须实现 | 需求—架构—开发分层、`.nova` 统一布局、有限加载、并行契约门禁、默认快速提交、人工 Review/分片审计，以及 Codex/Claude Code 版本化插件与同会话压缩续接 |
+| 本期必须实现 | 需求—架构—开发分层、确认需求独立检查点、完整需求版本交付台账与状态聚合、`.nova` 统一布局、有限加载、并行契约门禁、默认快速提交、人工 Review/分片审计，以及 Codex/Claude Code 版本化插件与同会话压缩续接 |
 | 明确不做 | 不申请官方公共目录，不建设跨会话/宿主/设备/团队同步、远程状态服务、遥测、账号系统或第二份技能实体源码 |
 | 后续候选 | 仅限第 6 节尚未完成的工作包，澄清前不获得实施授权 |
 | AI 可自行决定 | 不改变触发、外部行为、安全和数据语义的内部命名、排版及脚本组织 |
@@ -190,7 +201,11 @@ flowchart LR
 | PEND-002 | P2 | 历史迁移 | 工作区统一验证入口 | 待澄清 | 待澄清 | 一条本地命令可发现全部技能并分别执行结构与行为校验 | 无 |
 | PEND-003 | P2 | 历史迁移 | 技能目录索引 | 待澄清 | 待澄清 | 自动生成技能名称、用途、入口和验证状态，不复制技能正文 | 无 |
 | PEND-004 | P3 | 历史迁移 | 持续集成 | 待澄清 | 待澄清 | 在受控环境执行无网络的结构、语法和正反用例检查 | 无 |
-| PEND-01a06626-fe17-7569-b31b-303218cc9c3b | P1 | Review-Defer | 版本化插件入口迁移与真实宿主闭环 | 待澄清 | PEND-01a06672-b741-7246-9aa3-a0fccfc1e59a | 插件实现后可原子迁移兼容链接，并在双宿主完成启用、禁用、卸载、故障回退和新会话 E2E | REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff@v1 |
+| PEND-01a06626-fe17-7569-b31b-303218cc9c3b | P1 | Review-Defer | 版本化插件入口迁移与真实宿主闭环 | 待澄清 | 无 | 插件实现后可原子迁移兼容链接，并在双宿主完成启用、禁用、卸载、故障回退和新会话 E2E | REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff@v1 |
+| PEND-01a06a50-2783-78bb-9fd4-c79347c4b6e6 | P0 | 用户提出 | 需求基线与完整交付台账架构 | [WP-01](design/2026-09-04_需求基线与完整交付台账架构.md#wp-01-delivery-governance-architecture) | 无 | 需求检查点提交、台账 schema、状态聚合、Review 隔离、计划变化和失败恢复公共契约通过校验并等待 Review | 无 |
+| PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0 | P0 | 用户提出 | 需求检查点提交机制 | 待澄清 | PEND-01a06a50-2783-78bb-9fd4-c79347c4b6e6 | 确认需求可立即形成独立 requirement commit，下游校验精确绑定且 Review 不选择该提交 | REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v1 |
+| PEND-01a06a50-281a-74ce-97a5-74e0385625e7 | P0 | 用户提出 | 完整交付台账与需求状态聚合 | 待澄清 | PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0 | 首片前完整登记切片；单片 PASS 只更新进度，全部有效切片 PASS 后需求才已实现 | REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v1 |
+| PEND-01a06a50-2864-7a54-a080-9c0c2e4385e6 | P1 | 用户提出 | 技能流程、进度报告与端到端验证 | 待澄清 | PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0、PEND-01a06a50-281a-74ce-97a5-74e0385625e7 | 需求、架构、开发和 Review 全链路执行新门禁，并固定展示总数、已完成、当前、剩余和阻塞 | REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v1 |
 
 ## 7. 系统架构
 
@@ -199,6 +214,7 @@ flowchart LR
 | 层 | 职责 | 对应代码结构 | 允许依赖 |
 |----|------|--------------|----------|
 | 治理层 | 定义总体需求、公共架构契约和未完成工作 | `.nova/PRODUCT_REQUIREMENTS.md`、`.nova/PROJECT_BLUEPRINT.md`、`.nova/architecture/`、`.nova/design/` | 不依赖单个技能实现细节 |
+| 交付台账层 | 保存每个需求版本的完整切片、依赖、计划变化和聚合状态，并投影未完成工作 | `.nova/delivery/`、蓝图待开发表和需求状态索引 | 已提交需求基线、必要且 ready 的架构与可信 Review 审计 |
 | 指令层 | 选择工作模式并路由必要资源 | `skills/nova-*/SKILL.md` | 治理层、当前任务所需参考与工具 |
 | 资源层 | 提供条件性规范、完整示例和输出资产 | `skills/nova-*/references/`、`skills/nova-*/assets/` | 治理层，不反向决定技能触发 |
 | 执行层 | 执行确定性校验、转换或安全安装 | `skills/nova-*/scripts/`、`codex/scripts/` | 指令契约和被验证输入，不依赖宿主运行时服务 |
@@ -220,6 +236,8 @@ flowchart LR
 | 外部研究 | 有超时、取消和证据不足状态，不保存凭据或生产数据 | 研究记录和敏感内容扫描 |
 | Git 提交 | 只暂存当前子任务文件，不配置或推送远程 | staged diff、remote 和提交检查 |
 | 需求状态 | Review 只按活动蓝图中的 `REQ-...@vN` 更新总体需求索引，不读取需求块正文；旧版本实现不得覆盖较新需求状态 | Review 状态回写正反用例 |
+| 需求基线 | 下游同时绑定 ancestor 中合法 requirement commit、逐字 Requirement-Ref、需求块路径与内容 SHA-256；工作树或字段不一致均不得成为正式输入 | 提交 schema、Git 祖先、内容指纹、精确范围和篡改负例 |
+| 交付台账 | 每个需求版本恰有一份严格 JSON 权威台账；蓝图只投影未完成有效切片，完成只从可信 Review 审计派生，计划变化保留原身份与原因 | schema、交叉引用、依赖无环、历史比较、并发写入和投影一致性测试 |
 | 插件状态 | 检查点位于宿主私有本机状态根而非插件安装/缓存目录，升级或卸载不得把另一版本缓存当权威 | 缓存切换、升级、卸载与状态路径检查 |
 | 会话隔离 | `host + sessionId 摘要` 只来自宿主适配器建立的可信当前会话能力，是唯一查询边界；MCP 参数不能选择会话，不做模糊搜索或跨边界回退 | 双宿主、双会话、能力伪造/重放、设备目录与 fork/clear 负例 |
 | 检查点内容 | 只存恢复必需结构化字段、控制文档路径和指纹；密码、令牌、秘密和控制文档正文拒绝落盘 | schema、secretScan 与内容扫描 |

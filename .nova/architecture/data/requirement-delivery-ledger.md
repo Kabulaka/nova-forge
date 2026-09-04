@@ -1,0 +1,118 @@
+# AI Skills 工作区 — 需求交付台账数据契约
+
+> 数据契约版本：1
+> Contract-Key：DATA-REQUIREMENT-DELIVERY-LEDGER-01
+> 所有者：交付治理
+
+## 1. 所有权
+
+| 数据对象 | 权威写入方 | 允许读取方 | 禁止行为 |
+|----------|------------|------------|----------|
+| 需求基线三元组 | `nova-requirements` 在用户整份确认、校验和 requirement commit 成功后写入 | 架构、开发、Review 与交付治理校验器 | 从未提交工作树、会话状态或模糊 Git 历史推断基线 |
+| 需求版本交付台账 | `nova-development` 通过确定性工具创建；后续由交付计划或 Review 原子更新 | 需求、开发、Review 技能与进度查询 | 各技能维护副本、物理删除历史切片或绕过 plan_version |
+| 蓝图未完成投影 | 交付治理从同一候选台账确定性生成并与台账同提交 | 路由、开发、Review 和用户 | 把蓝图投影反向当作完成权威或只投影当前切片 |
+| 切片完成证据 | `nova-review` 的可信批次、年度功能行和哈希索引 | 交付治理聚合器与审计查询 | 由台账字段、commit message 或会话声明自证 Review PASS |
+
+## 2. 数据约束
+
+| 字段或关系 | 类型或范围 | 不变量 | 兼容规则 |
+|------------|------------|--------|----------|
+| 文件路径 | `.nova/delivery/<Requirement-Key>_v<正整数>.json` | 每个 `REQ@版本` 恰好一份普通文件，UTF-8、结尾换行、两空格缩进和稳定 key 顺序 | 未知路径、符号链接、非普通文件或跨目录引用拒绝 |
+| `schema` | 正整数，首版为 1 | 未知 schema 拒绝读写，不用默认值补齐 | 只有确定性迁移器可升级旧版本 |
+| `requirement_ref` | 规范 `REQ-{uuidv7}@vN` | 逐字匹配需求索引当前版本、需求块元数据、蓝图有效切片和检查点 trailer | 新需求版本使用新文件，不覆盖旧版本台账 |
+| `requirement_checkpoint` | commit、path、sha256 对象 | commit 是当前仓库 ancestor 中合法 requirement commit，path 和 sha256 与该 commit 中需求块字节一致 | 历史提交没有合法 kind 时不得伪造迁移 |
+| `plan_version` | 从 1 开始的正整数 | 任何切片集合、依赖、完成定义、设计引用、状态或阻塞变化均严格递增 | 相同候选与幂等键复用既有版本 |
+| `status` | `development` 或 `implemented` | development 要求存在未完成有效切片；implemented 要求所有有效切片可信 PASS 且当前、剩余、阻塞为空 | 本需求 bootstrap 在机制落地前不创建台账并保持待实现 |
+| `slices[].work_item` | 唯一规范 `PEND-{uuidv7}` | 同台账和全仓库唯一稳定，归档、替代或取消后不得复用 | 既有合法数字 PEND 只读兼容，不用于新切片 |
+| `slices[].dependencies` | 同台账 PEND 或已 PASS 外部 PEND 数组 | 依赖无环，未满足时不得 active | 顺序变化规范化后不改变语义 |
+| `slices[].done_definition` | 非空可执行结果 | 不接受过程描述、待定或同义占位 | 措辞调整只有语义不变时可保留工作项 |
+| `slices[].design_ref` | null 或稳定设计锚点 | planned 可为 null；active、review_pending、blocked、completed 必须为通过校验的已确认设计 | 设计演进使用稳定锚点和既有演进规则 |
+| `slices[].state` | planned、active、review_pending、blocked、completed、superseded、cancelled | 同一需求默认最多一个 active；completed 只从可信 Review PASS 派生 | 新状态需要 schema 升级和聚合正反用例 |
+| `blocked_reason` | null 或非空具体原因 | blocked 时必填，其他状态为 null | 解除阻塞必须留下 change 记录 |
+| `supersedes` | 同台账历史 PEND 数组 | 只用于技术拆分、合并或替代，不得成环 | 原切片保留为 superseded/cancelled |
+| `changes` | 按 plan_version 排序的对象数组 | 完整记录 created、added、split、merged、replaced、reordered、blocked、unblocked、cancelled；既有记录不删除不改写 | 未知 kind 拒绝，扩展需 schema 升级 |
+
+### 2.1 Schema 1
+
+```json
+{
+  "schema": 1,
+  "requirement_ref": "REQ-<uuidv7>@v1",
+  "requirement_checkpoint": {
+    "commit": "<40-or-64-lower-hex>",
+    "path": ".nova/requirements/REQ-<uuidv7>_<name>.md",
+    "sha256": "<64-lower-hex>"
+  },
+  "plan_version": 1,
+  "status": "development",
+  "slices": [
+    {
+      "work_item": "PEND-<uuidv7>",
+      "title": "<non-empty>",
+      "dependencies": [],
+      "done_definition": "<executable result>",
+      "design_ref": null,
+      "state": "planned",
+      "blocked_reason": null,
+      "supersedes": [],
+      "change_reason": "initial-plan"
+    }
+  ],
+  "changes": [
+    {
+      "plan_version": 1,
+      "kind": "created",
+      "work_items": ["PEND-<uuidv7>"],
+      "reason": "initial-plan"
+    }
+  ]
+}
+```
+
+文件使用 UTF-8、结尾换行、两空格缩进和稳定 key 顺序；未知字段、重复 key、符号链接、非普通文件、跨目录路径或非规范 UUIDv7 一律拒绝。
+
+### 2.2 聚合与投影
+
+有效切片为 state 不属于 `superseded`、`cancelled` 的记录。`completed` 只能从该 work item 的可信 Review PASS 派生；文档字段、commit message 或会话声明不能直接写成完成。
+
+| 输出 | 计算规则 |
+|------|----------|
+| `total` | 当前有效切片数 |
+| `completed` | 有可信 Review PASS 的有效切片数 |
+| `current` | state 为 active、review_pending 或 blocked 的切片；默认至多一个，并显示状态 |
+| `remaining` | 有效且非 completed、非 current 的切片，按依赖拓扑和登记顺序稳定排列 |
+| `blocked` | current 中 blocked 的切片及原因；没有时为“无” |
+
+`status=development` 要求 `total > 0` 且 `completed < total`；`status=implemented` 要求 `completed = total`、`total > 0` 且 current、remaining、blocked 都为空。蓝图必须投影全部未完成有效切片，并按需求展示上述五项；台账、蓝图和需求索引任一不一致时普通校验失败。
+
+## 3. 一致性与并发
+
+| 场景 | 原子边界 | 并发结果 | 幂等规则 |
+|------|----------|----------|----------|
+| 创建初始台账 | 锁定 requirement checkpoint、候选台账、蓝图投影和需求状态的同一 Git 基线后一次提交 | 任一文件或 HEAD 漂移整次拒绝，不形成开发中状态 | 相同基线、候选字节和幂等键返回既有 delivery-plan commit |
+| 调整交付计划 | 重读上一有效 plan commit，校验历史保留、依赖、范围等价和新投影后一次提交 | 并发 plan_version 只允许基于最新版本的一个候选成功 | 相同上一版本和规范化候选只产生一个新 plan_version |
+| 激活切片 | 同时校验依赖、当前切片唯一性、设计确认指纹和蓝图引用 | 已有 active 或依赖状态变化时拒绝旧候选 | 重复激活同一 work item 不增加版本或重复当前项 |
+| Review PASS 聚合 | 在现有审计关闭锁内同时写审计、设计状态、台账状态、蓝图投影和需求索引 | 字节漂移或并发关闭整次失败，不产生部分完成 | 同一批次与 commit 集重复关闭返回既有审计结果 |
+| 查询进度 | 从同一 commit 快照读取台账、蓝图和审计索引 | 读取中 HEAD 变化则重试一次最新快照，仍漂移时失败 | 相同 commit 与 Requirement-Ref 返回逐字等价五项进度 |
+
+### 3.1 计划变化与范围保护
+
+新增、重排、阻塞解除以及不改变业务验收的技术拆分、合并或替代可以升级 plan_version。原切片必须保留为 superseded/cancelled，changes 记录原因和新旧身份；禁止从数组物理删除。
+
+校验器必须比较上一有效 plan commit 与候选：若有效完成定义的业务结果减少、弱化或无法证明等价，则拒绝 delivery-plan 更新，并要求回到需求阶段创建同一 REQ 的新版本。旧版本台账保持可读，不能被新版本覆盖。
+
+### 3.2 原子写入
+
+计划写入先验证 requirement checkpoint、架构 ready、完整切片、依赖无环、身份唯一、蓝图投影和状态聚合，再以同一精确范围本地 commit 固化。任一步失败不产生部分检查点，不改变需求状态，不激活切片。Review PASS 更新必须在现有审计原子关闭流程内同时写台账投影；并发或字节漂移时整次拒绝并重试最新基线。
+
+## 4. 失败与恢复
+
+| 失败点 | 对外结果 | 恢复或补偿 | 责任方 |
+|--------|----------|------------|--------|
+| requirement checkpoint 缺失、不是 ancestor、字段混合或内容指纹失配 | 拒绝创建或读取台账，不进入开发中 | 恢复上一合法需求检查点；当前需求重新校验并精确提交 | 需求治理与交付治理 |
+| 架构变化存在但没有可信 Review PASS | 可保留未提交规划候选，不激活受影响切片 | 完成对应架构 PEND Review 后重新验证同一需求基线 | 架构治理 |
+| 台账 schema、身份、依赖或完成定义非法 | 整份计划拒绝，不形成部分切片登记 | 修正候选并重新执行完整校验；不得只提交首个合法切片 | 开发交付 |
+| 蓝图投影与台账不一致或写入中并发漂移 | 整个 delivery-plan/audit 更新失败，上一投影保持有效 | 基于最新 commit 重建台账与蓝图后原子重试 | 交付治理 |
+| Review 审计缺失、伪造或与 work item 不一致 | 切片不计 completed，需求保持开发中 | 由 Review 流程补齐可信审计，不接受文档或会话声明替代 | Review 治理 |
+| 计划变化物理删除历史或减少业务验收 | 拒绝新计划版本 | 恢复原台账；技术变化保留替代关系，业务变化返回需求阶段升级版本 | 交付治理与需求治理 |
+| 进度查询无法唯一定位需求或证据冲突 | 返回明确失败，不输出推测进度 | 要求精确 Requirement-Ref，修复持久化冲突后重查 | 交付治理 |
