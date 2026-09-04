@@ -30,7 +30,7 @@
 | `slices[].state` | planned、active、review_pending、blocked、completed、superseded、cancelled | `active/review_pending/blocked` 合计最多一个；completed 只从可信 Review PASS 派生 | 新状态需要 schema 升级和聚合正反用例 |
 | `blocked_reason` | null 或非空具体原因 | blocked 时必填，其他状态为 null | 解除阻塞必须留下 change 记录 |
 | `supersedes` | 同台账历史 PEND 数组 | 只用于技术拆分、合并或替代，不得成环 | 原切片保留为 superseded/cancelled |
-| `changes` | 与 plan_version 一一对应的对象数组 | 完整记录 created、added、split、merged、replaced、reordered、design-bound、activated、review-submitted、blocked、unblocked、completed、cancelled；既有记录不删除不改写 | 每次修订恰有一个 change；未知 kind 或跳号拒绝，扩展需 schema 升级 |
+| `changes` | 与 plan_version 一一对应的对象数组 | 完整记录 created、added、split、merged、replaced、reordered、dependencies-updated、done-definition-updated、design-bound、activated、review-submitted、blocked、unblocked、completed、cancelled；既有记录不删除不改写 | 每次修订恰有一个 change；未知 kind 或跳号拒绝，扩展需 schema 升级 |
 
 ### 2.1 Schema 1
 
@@ -109,7 +109,9 @@
 
 ### 3.1 计划变化与范围保护
 
-新增、重排、激活、设计绑定、提交 Review、完成、阻塞变化以及不改变业务验收的技术拆分、合并或替代都升级 plan_version，并追加与该转换逐字匹配的受限 kind。原切片必须保留为 superseded/cancelled，changes 记录原因和新旧身份；禁止从数组物理删除。
+新增、重排、依赖调整、完成定义等价修订、激活、设计绑定、提交 Review、完成、阻塞变化以及不改变业务验收的技术拆分、合并或替代都升级 plan_version，并追加与该转换逐字匹配的受限 kind。原切片必须保留为 superseded/cancelled，changes 记录原因和新旧身份；禁止从数组物理删除。
+
+`dependencies-updated` 必须保存目标 work item、变更前后完整依赖数组和非空原因；变更前数组必须逐字匹配上一版本，变更后必须通过身份、Review 状态和无环校验。`done-definition-updated` 必须保存目标 work item、变更前后完整定义及非空等价性依据；变更前定义必须逐字匹配上一版本，变更后只有可确定证明业务结果不减少且语义等价时才允许沿用原 work item。无法证明等价时不得使用该 kind，必须按新增/替代切片处理；涉及业务验收变化时返回需求阶段升级版本。
 
 校验器必须比较上一有效 plan commit 与候选：若有效完成定义的业务结果减少、弱化或无法证明等价，则拒绝 delivery-plan 更新，并要求回到需求阶段创建同一 REQ 的新版本。旧版本台账保持可读，不能被新版本覆盖。
 
