@@ -2,6 +2,7 @@
 import { handleHook } from "../runtime/adapters/hook.mjs";
 import { HOOK_INPUT_LIMIT } from "../runtime/core/constants.mjs";
 import { NovaError, redactError } from "../runtime/core/util.mjs";
+import { pathToFileURL } from "node:url";
 
 export async function readHookInput(stream, inputLimit = HOOK_INPUT_LIMIT) {
   if (!Number.isSafeInteger(inputLimit) || inputLimit <= 0) {
@@ -54,4 +55,4 @@ export async function main({
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

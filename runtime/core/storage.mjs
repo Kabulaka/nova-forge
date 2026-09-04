@@ -134,6 +134,44 @@ function syncDirectory(directory) {
   }
 }
 
+function transactionFiles(directory) {
+  return {
+    temporary: path.join(directory, ".current-next.tmp"),
+    stagedCurrent: path.join(directory, ".current-old.tmp"),
+    stagedBackup: path.join(directory, ".backup-old.tmp"),
+  };
+}
+
+function recoverStateWrite(directory) {
+  const currentFile = path.join(directory, "current.json");
+  const backupFile = path.join(directory, "backup.json");
+  const { temporary, stagedCurrent, stagedBackup } = transactionFiles(directory);
+  let changed = false;
+
+  if (fs.existsSync(stagedCurrent)) {
+    if (fs.existsSync(currentFile)) tryRemove(stagedCurrent);
+    else fs.renameSync(stagedCurrent, currentFile);
+    changed = true;
+  }
+  if (fs.existsSync(stagedBackup)) {
+    if (fs.existsSync(currentFile)) {
+      if (fs.existsSync(backupFile)) tryRemove(stagedBackup);
+      else fs.renameSync(stagedBackup, backupFile);
+    } else if (fs.existsSync(backupFile)) {
+      fs.renameSync(backupFile, currentFile);
+      fs.renameSync(stagedBackup, backupFile);
+    } else {
+      fs.renameSync(stagedBackup, backupFile);
+    }
+    changed = true;
+  }
+  if (fs.existsSync(temporary)) {
+    tryRemove(temporary);
+    changed = true;
+  }
+  if (changed) syncDirectory(directory);
+}
+
 function directorySize(directory) {
   if (!fs.existsSync(directory)) return 0;
   let size = 0;
@@ -201,6 +239,7 @@ function rebuildQuotaUsage(dataRoot, observer) {
     for (const scopeEntry of fs.readdirSync(hostRoot, { withFileTypes: true })) {
       if (!scopeEntry.isDirectory() || !/^[a-f0-9]{64}$/.test(scopeEntry.name)) continue;
       const binding = { host: hostEntry.name, sessionKey: scopeEntry.name };
+      recoverStateWrite(stateDirectory(dataRoot, binding));
       const bytes = scopeBytes(dataRoot, binding);
       if (bytes > 0) {
         usage.scopes[quotaScopeKey(binding)] = {
@@ -240,6 +279,7 @@ function loadQuotaUsage(dataRoot, observer) {
   }
   for (const [key, entry] of Object.entries(usage.scopes)) {
     if (!entry?.pending) continue;
+    recoverStateWrite(stateDirectory(dataRoot, entry));
     const bytes = scopeBytes(dataRoot, entry);
     if (bytes === 0) delete usage.scopes[key];
     else usage.scopes[key] = { ...entry, bytes, pending: false };
@@ -399,7 +439,10 @@ export function cleanupExpiredScopes(
           tryRemove(path.join(candidate.directory, name));
         }
         for (const entry of fs.readdirSync(candidate.directory, { withFileTypes: true })) {
-          if (entry.isFile() && /^\.current\..+\.tmp$/.test(entry.name)) {
+          if (
+            entry.isFile() &&
+            [".current-next.tmp", ".current-old.tmp", ".backup-old.tmp"].includes(entry.name)
+          ) {
             tryRemove(path.join(candidate.directory, entry.name));
           }
         }
@@ -515,7 +558,10 @@ function rollbackStateWrite(
   try {
     if (installed) tryRemove(currentFile);
     if (promoted && fs.existsSync(backupFile)) fs.renameSync(backupFile, currentFile);
-    else if (fs.existsSync(stagedCurrent)) fs.renameSync(stagedCurrent, currentFile);
+    else if (fs.existsSync(stagedCurrent)) {
+      if (fs.existsSync(currentFile)) tryRemove(stagedCurrent);
+      else fs.renameSync(stagedCurrent, currentFile);
+    }
     if (fs.existsSync(stagedBackup)) fs.renameSync(stagedBackup, backupFile);
     tryRemove(temporary);
     syncDirectory(directory);
@@ -544,13 +590,11 @@ export function writeEnvelope(
   ensurePrivateDirectory(directory);
   const currentFile = path.join(directory, "current.json");
   const backupFile = path.join(directory, "backup.json");
-  const transactionId = `${process.pid}.${randomId(8)}`;
-  const temporary = path.join(directory, `.current.${transactionId}.tmp`);
-  const stagedCurrent = path.join(directory, `.current-old.${transactionId}.tmp`);
-  const stagedBackup = path.join(directory, `.backup-old.${transactionId}.tmp`);
+  const { temporary, stagedCurrent, stagedBackup } = transactionFiles(directory);
   const sealed = sealEnvelope(envelope);
   const serialized = `${stableStringify(sealed)}\n`;
   return withQuotaLock(dataRoot, () => {
+    recoverStateWrite(directory);
     const reservation = reserveQuota(
       dataRoot,
       binding,
@@ -589,7 +633,8 @@ export function writeEnvelope(
           fs.renameSync(currentFile, backupFile);
           state.promoted = true;
         } else {
-          fs.renameSync(currentFile, stagedCurrent);
+          fs.linkSync(currentFile, stagedCurrent);
+          syncDirectory(directory);
         }
       }
       faultInjector?.("install-current");
@@ -613,6 +658,11 @@ export function writeEnvelope(
       } catch {
         // The authoritative current/backup pair is already committed and directory-synced.
       }
+    }
+    try {
+      syncDirectory(directory);
+    } catch {
+      // The authoritative current/backup pair was already synced before cleanup.
     }
     settleQuota(dataRoot, reservation, binding);
     return sealed;

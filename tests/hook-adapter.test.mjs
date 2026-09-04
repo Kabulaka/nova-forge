@@ -5,7 +5,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { main, readHookInput } from "../hooks/run.mjs";
+import { readHookInput } from "../hooks/run.mjs";
 import { detectHost, handleHook, resolvePluginPaths } from "../runtime/adapters/hook.mjs";
 import { HOOK_INPUT_LIMIT } from "../runtime/core/constants.mjs";
 import { getCheckpoint, saveCheckpoint } from "../runtime/core/state-machine.mjs";
@@ -292,5 +292,30 @@ test("oversized hook input fails closed for both hosts before state advances", (
     } finally {
       temp.cleanup();
     }
+  }
+});
+
+test("hook entrypoint runs from installation paths requiring URL escaping", () => {
+  const temp = temporaryDirectory("nova 插件 ");
+  try {
+    const copiedRoot = path.join(temp.directory, "Plugin With 空格");
+    fs.mkdirSync(copiedRoot);
+    fs.cpSync(path.join(pluginRoot, "hooks"), path.join(copiedRoot, "hooks"), { recursive: true });
+    fs.cpSync(path.join(pluginRoot, "runtime"), path.join(copiedRoot, "runtime"), { recursive: true });
+    const result = spawnSync(process.execPath, [path.join(copiedRoot, "hooks", "run.mjs")], {
+      cwd: copiedRoot,
+      input: "{not-json",
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NOVA_HOST: "claude-code",
+        NOVA_PLUGIN_ROOT: copiedRoot,
+        NOVA_PLUGIN_DATA: path.join(temp.directory, "data"),
+      },
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Nova hook failed/);
+  } finally {
+    temp.cleanup();
   }
 });

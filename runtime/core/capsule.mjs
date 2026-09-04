@@ -2,11 +2,14 @@ import { INJECTION_CHARACTER_LIMIT, STAGE_PROJECTION_FIELDS } from "./constants.
 import { NovaError } from "./util.mjs";
 
 function safeJson(value) {
-  return JSON.stringify(value).replace(/[<>&]/g, (character) => {
-    if (character === "<") return "\\u003c";
-    if (character === ">") return "\\u003e";
-    return "\\u0026";
-  });
+  return JSON.stringify(value)
+    .replace(/[<>&]/g, (character) => {
+      if (character === "<") return "\\u003c";
+      if (character === ">") return "\\u003e";
+      return "\\u0026";
+    })
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 function authorityLine(label, item) {

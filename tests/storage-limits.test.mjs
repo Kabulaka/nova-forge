@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { SESSION_TTL_MS } from "../runtime/core/constants.mjs";
 import {
   cleanupExpiredScopes,
   initialEnvelope,
+  readEnvelope,
   withScopeLock,
   writeEnvelope,
 } from "../runtime/core/storage.mjs";
 import { withOwnerLock } from "../runtime/core/util.mjs";
-import { binding, temporaryDirectory } from "./helpers.mjs";
+import { binding, pluginRoot, temporaryDirectory } from "./helpers.mjs";
 
 function stateDirectory(root, current) {
   return path.join(root, "state", current.host, current.sessionKey);
@@ -313,6 +316,60 @@ test("an invalid quota ledger is rebuilt without following forged paths", () => 
     const ledger = JSON.parse(fs.readFileSync(path.join(stateRoot, ".quota-usage.json"), "utf8"));
     assert.equal(Object.keys(ledger.scopes).length, 1);
     assert.equal(Object.values(ledger.scopes)[0].host, "codex");
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("a killed writer preserves the only current envelope and recovers its transaction", () => {
+  const temp = temporaryDirectory();
+  try {
+    const current = binding("codex", "killed-writer");
+    const first = initialEnvelope(current, "0.1.0", 1_000);
+    writeEnvelope(temp.directory, current, first, { rotateCurrentToBackup: false, now: 1_000 });
+    const replacement = initialEnvelope(current, "0.1.0", 2_000);
+    replacement.leaseVersion = 2;
+    const storageUrl = pathToFileURL(
+      path.join(pluginRoot, "runtime", "core", "storage.mjs"),
+    ).href;
+    const childScript = `
+      import { writeEnvelope } from ${JSON.stringify(storageUrl)};
+      writeEnvelope(
+        ${JSON.stringify(temp.directory)},
+        ${JSON.stringify(current)},
+        ${JSON.stringify(replacement)},
+        {
+          rotateCurrentToBackup: false,
+          now: 2000,
+          faultInjector(step) { if (step === "install-current") process.exit(97); },
+        },
+      );
+    `;
+    const child = spawnSync(process.execPath, ["--input-type=module", "--eval", childScript], {
+      cwd: pluginRoot,
+      encoding: "utf8",
+    });
+    assert.equal(child.status, 97, child.stderr);
+    assert.equal(readEnvelope(temp.directory, current, { now: 2_000 }).envelope.leaseVersion, 1);
+
+    const finalEnvelope = initialEnvelope(current, "0.1.0", 3_000);
+    finalEnvelope.leaseVersion = 3;
+    writeEnvelope(temp.directory, current, finalEnvelope, {
+      rotateCurrentToBackup: false,
+      now: 3_000,
+    });
+    const directory = stateDirectory(temp.directory, current);
+    assert.equal(readEnvelope(temp.directory, current, { now: 3_000 }).envelope.leaseVersion, 3);
+    assert.deepEqual(
+      fs.readdirSync(directory).filter((name) => name.endsWith(".tmp")),
+      [],
+    );
+    const ledger = JSON.parse(
+      fs.readFileSync(path.join(temp.directory, "state", ".quota-usage.json"), "utf8"),
+    );
+    const entry = Object.values(ledger.scopes)[0];
+    assert.equal(entry.pending, false);
+    assert.equal(entry.bytes, fs.statSync(path.join(directory, "current.json")).size);
   } finally {
     temp.cleanup();
   }
