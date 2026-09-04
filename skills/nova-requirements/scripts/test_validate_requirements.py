@@ -186,6 +186,51 @@ class RequirementsValidatorTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("已实现 requires", result.stdout)
 
+    def test_development_state_without_previous_implementation_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_example(temporary)
+            product = target / "PRODUCT_REQUIREMENTS.md"
+            product.write_text(
+                product.read_text(encoding="utf-8").replace(
+                    "| v1 | 待实现 |", "| v1 | 开发中 |"
+                ),
+                encoding="utf-8",
+            )
+            result = self.run_validator("--index", str(product))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_development_state_rejects_unpaired_or_current_implementation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_example(temporary)
+            product = target / "PRODUCT_REQUIREMENTS.md"
+            text = product.read_text(encoding="utf-8").replace(
+                "| v1 | 待实现 |", "| v1 | 开发中 |"
+            ).replace("| 无 | 无 |", "| v1 | 无 |")
+            product.write_text(text, encoding="utf-8")
+            result = self.run_validator("--index", str(product))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("开发中 requires", result.stdout)
+
+    def test_development_state_may_retain_trusted_previous_implementation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.audited_requirements(temporary)
+            block = next((target / "requirements").glob("REQ-*.md"))
+            block.write_text(
+                block.read_text(encoding="utf-8").replace(
+                    "> 需求版本：v1", "> 需求版本：v2"
+                ),
+                encoding="utf-8",
+            )
+            product = target / "PRODUCT_REQUIREMENTS.md"
+            product.write_text(
+                product.read_text(encoding="utf-8").replace(
+                    f"| {REQ} | v1 | 已实现 |", f"| {REQ} | v2 | 开发中 |"
+                ),
+                encoding="utf-8",
+            )
+            result = self.run_validator("--index", str(product))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_implemented_state_requires_trusted_review_pass(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.copy_example(temporary)

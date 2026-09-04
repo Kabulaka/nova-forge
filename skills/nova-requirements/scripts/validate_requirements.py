@@ -20,7 +20,7 @@ PEND_RE = re.compile(r"^PEND-(?:[0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89a
 INDEX_SECTIONS = ("产品定位", "端到端业务流程", "业务模块", "需求索引", "范围边界")
 BLOCK_SECTIONS = ("目标", "参与者与业务流程", "业务规则", "边界与异常", "独立交付边界", "验收")
 INDEX_HEADERS = ("Requirement Key", "版本", "状态", "业务模块", "需求块", "已实现版本", "实现依据")
-STATUS_VALUES = {"待实现", "已实现", "已更新"}
+STATUS_VALUES = {"待实现", "开发中", "已实现", "已更新"}
 PLACEHOLDER_RE = re.compile(r"<(?!/?a\b)[^>\n]+>|\b(?:TODO|TBD)\b|\{\{[^}\n]+\}\}", re.IGNORECASE)
 RULE_RE = re.compile(r"^R-[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
@@ -293,6 +293,24 @@ def validate_index(path: Path) -> list[str]:
                 errors.append(f"{key}: block {field} does not match index")
         if status == "待实现" and (implemented != "无" or evidence != "无"):
             errors.append(f"{key}: 待实现 requires 无 implemented version and evidence")
+        elif status == "开发中":
+            if implemented == "无" and evidence == "无":
+                pass
+            else:
+                current = int(version_match.group(1)) if version_match else 0
+                implemented_match = VERSION_RE.fullmatch(implemented)
+                if (
+                    implemented_match is None
+                    or int(implemented_match.group(1)) >= current
+                    or PEND_RE.fullmatch(evidence) is None
+                ):
+                    errors.append(
+                        f"{key}: 开发中 requires 无/无 or an older implemented version and PEND evidence"
+                    )
+                elif not trusted_review_pass(path.parent, evidence, key, implemented):
+                    errors.append(
+                        f"{key}: implementation evidence is not a trusted Review PASS: {evidence}"
+                    )
         elif status == "已实现":
             if implemented != version or PEND_RE.fullmatch(evidence) is None:
                 errors.append(f"{key}: 已实现 requires current implemented version and PEND evidence")

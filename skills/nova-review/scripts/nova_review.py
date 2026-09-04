@@ -35,6 +35,14 @@ TRAILERS = (
 )
 OPTIONAL_TRAILERS = ("Related-Work-Item",)
 STANDARD_TRAILERS = TRAILERS + OPTIONAL_TRAILERS
+REQUIREMENT_TRAILERS = (
+    "Nova-Schema",
+    "Commit-Kind",
+    "Requirement-Ref",
+    "Requirement-Path",
+    "Requirement-SHA256",
+    "Validation",
+)
 AUDIT_TRAILERS = (
     "Nova-Audit-Schema",
     "Review-Batch",
@@ -56,6 +64,17 @@ LEGACY_DESIGN_REF_RE = re.compile(r"^docs/design/[^#\s]+\.md#[A-Za-z0-9][A-Za-z0
 REQUIREMENT_REF_RE = re.compile(
     r"^REQ-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}@v[1-9][0-9]*$"
 )
+REQUIREMENT_PATH_RE = re.compile(
+    rf"^\.nova/requirements/(?P<key>REQ-{UUID7_PATTERN})_[^/\n]+\.md$"
+)
+LOWER_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+BOOTSTRAP_REQUIREMENT_REF = "REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v1"
+BOOTSTRAP_CHECKPOINT_WORK_ITEM = "PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0"
+BOOTSTRAP_WORK_ITEMS = {
+    BOOTSTRAP_CHECKPOINT_WORK_ITEM,
+    "PEND-01a06a50-281a-74ce-97a5-74e0385625e7",
+    "PEND-01a06a50-2864-7a54-a080-9c0c2e4385e6",
+}
 BATCH_ID_RE = re.compile(r"^NR-[0-9]{8}-[A-Za-z0-9._-]+$")
 REPOSITORY_ALIAS_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 DOC_SUFFIXES = {".md", ".txt", ".rst"}
@@ -212,8 +231,33 @@ def trailing_fields(text: str) -> list[tuple[str, str]]:
 
 
 def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
+    fields = trailing_fields(text)
+    if any(key == "Commit-Kind" for key, _ in fields):
+        found: dict[str, list[str]] = defaultdict(list)
+        known = set(REQUIREMENT_TRAILERS) | set(STANDARD_TRAILERS) | {"Review-State"}
+        for key, value in fields:
+            if key in known:
+                found[key].append(value)
+
+        errors: list[str] = []
+        values: dict[str, str] = {}
+        for key in REQUIREMENT_TRAILERS:
+            entries = found.get(key, [])
+            if len(entries) != 1:
+                errors.append(f"{key} must appear exactly once")
+            if entries:
+                values[key] = entries[0]
+        forbidden = (set(STANDARD_TRAILERS) - {"Nova-Schema", "Validation"}) | {
+            "Review-State"
+        }
+        if any(found.get(key) for key in forbidden):
+            errors.append(
+                "requirement commits must not contain work-item or Review-State trailers"
+            )
+        return values, errors
+
     found: dict[str, list[str]] = defaultdict(list)
-    for key, value in trailing_fields(text):
+    for key, value in fields:
         if key in STANDARD_TRAILERS or key == "Review-State":
             found[key].append(value)
 
@@ -485,6 +529,137 @@ def validate_metadata(
     return errors
 
 
+def validate_requirement_metadata(
+    values: dict[str, str],
+    diff: str | None,
+    repo: Path | None,
+    *,
+    commit_hash: str | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    if values.get("Nova-Schema") != SCHEMA:
+        errors.append(f"Nova-Schema must be {SCHEMA}")
+    if values.get("Commit-Kind") != "requirement":
+        errors.append("Commit-Kind must be requirement")
+
+    requirement_ref = values.get("Requirement-Ref", "")
+    ref_match = REQUIREMENT_REF_RE.fullmatch(requirement_ref)
+    if ref_match is None:
+        errors.append("Requirement-Ref must be REQ-<UUIDv7>@vN")
+    requirement_path = values.get("Requirement-Path", "")
+    path_match = REQUIREMENT_PATH_RE.fullmatch(requirement_path)
+    if path_match is None:
+        errors.append("Requirement-Path must be .nova/requirements/REQ-<UUIDv7>_<name>.md")
+    elif ref_match is not None and path_match.group("key") != requirement_ref.split("@", 1)[0]:
+        errors.append("Requirement-Path key must match Requirement-Ref")
+    expected_sha = values.get("Requirement-SHA256", "")
+    if LOWER_SHA256_RE.fullmatch(expected_sha) is None:
+        errors.append("Requirement-SHA256 must be 64 lowercase hexadecimal characters")
+    if re.search(r"\(pass\)\s*$", values.get("Validation", ""), re.IGNORECASE) is None:
+        errors.append("Validation must end with (pass)")
+
+    if diff is None:
+        errors.append("requirement commits require the complete staged diff")
+    if repo is None:
+        errors.append("requirement commits require --repo")
+    if errors or diff is None or repo is None:
+        return errors
+
+    try:
+        if commit_hash is None:
+            staged = run_git(repo, "diff", "--cached", "--binary", "--no-ext-diff")
+            if diff != staged:
+                errors.append("requirement diff must exactly match the repository staged diff")
+                return errors
+        changes = diff_changes(diff)
+        expected_paths = {".nova/PRODUCT_REQUIREMENTS.md", requirement_path}
+        if set(diff_paths(diff)) != expected_paths:
+            errors.append(
+                "requirement commit must contain exactly PRODUCT_REQUIREMENTS.md and Requirement-Path"
+            )
+            return errors
+        if any(old != new for old, new in changes):
+            errors.append("requirement commit must not rename paths")
+            return errors
+
+        entry_args = (
+            ("ls-files", "--stage", "-z", "--")
+            if commit_hash is None
+            else ("ls-tree", "-z", commit_hash, "--")
+        )
+        staged_entries = run_git(
+            repo, *entry_args, ".nova/PRODUCT_REQUIREMENTS.md", requirement_path
+        ).split("\0")
+        modes: dict[str, str] = {}
+        for entry in staged_entries:
+            metadata, separator, path = entry.partition("\t")
+            if separator:
+                modes[path] = metadata.split(" ", 1)[0]
+        if modes != {path: "100644" for path in expected_paths}:
+            errors.append("requirement commit paths must be ordinary 100644 Git index files")
+            return errors
+
+        if commit_hash is None:
+            block_bytes = git_index_blob(repo, requirement_path)
+            product_bytes = git_index_blob(repo, ".nova/PRODUCT_REQUIREMENTS.md")
+        else:
+            block_bytes = run_git_bytes(
+                repo, "show", f"{commit_hash}:{requirement_path}", allow_missing=True
+            )
+            product_bytes = run_git_bytes(
+                repo,
+                "show",
+                f"{commit_hash}:.nova/PRODUCT_REQUIREMENTS.md",
+                allow_missing=True,
+            )
+        if block_bytes is None or product_bytes is None:
+            errors.append("requirement commit paths must exist in the Git index")
+            return errors
+        if hashlib.sha256(block_bytes).hexdigest() != expected_sha:
+            errors.append("Requirement-SHA256 does not match the staged requirement block")
+
+        block = block_bytes.decode("utf-8")
+        key = requirement_ref.split("@", 1)[0]
+        version = requirement_ref.split("@", 1)[1]
+        if re.findall(r"^>\s*Requirement-Key[：:]\s*(.+?)\s*$", block, re.MULTILINE) != [key]:
+            errors.append("staged requirement block key does not match Requirement-Ref")
+        if re.findall(r"^>\s*需求版本[：:]\s*(.+?)\s*$", block, re.MULTILINE) != [version]:
+            errors.append("staged requirement block version does not match Requirement-Ref")
+
+        product = product_bytes.decode("utf-8")
+        rows = []
+        for line in product.splitlines():
+            if not line.lstrip().startswith("|"):
+                continue
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) == 7 and cells[0] == key:
+                rows.append(cells)
+        if len(rows) != 1 or rows[0][1] != version:
+            errors.append("staged requirement index row does not match Requirement-Ref")
+
+        if commit_hash is None:
+            history = run_git(
+                repo,
+                "log",
+                "--format=%H%x1f%B%x1e",
+                "--fixed-strings",
+                f"--grep=Requirement-Ref: {requirement_ref}",
+            )
+            for record in history.split("\x1e"):
+                if "\x1f" not in record:
+                    continue
+                _, message = record.strip("\n").split("\x1f", 1)
+                metadata, commit_errors = parse_message(message)
+                if not commit_errors and metadata.get("Commit-Kind") == "requirement":
+                    errors.append(
+                        f"Requirement-Ref already has a requirement checkpoint: {requirement_ref}"
+                    )
+                    break
+    except (NovaError, OSError, UnicodeError) as exc:
+        errors.append(str(exc))
+    return errors
+
+
 def validate_repository_lifecycle(repo: Path, values: dict[str, str]) -> list[str]:
     errors: list[str] = []
     work_item = values.get("Work-Item", "")
@@ -507,8 +682,11 @@ def validate_message(
 ) -> tuple[dict[str, str], list[str]]:
     values, errors = parse_message(message)
     if not errors:
-        errors.extend(validate_metadata(values, diff))
-    if not errors and repo is not None:
+        if values.get("Commit-Kind") == "requirement":
+            errors.extend(validate_requirement_metadata(values, diff, repo))
+        else:
+            errors.extend(validate_metadata(values, diff))
+    if not errors and repo is not None and values.get("Commit-Kind") is None:
         errors.extend(validate_repository_lifecycle(repo, values))
     return values, errors
 
@@ -527,15 +705,22 @@ def validate_committed_message(
 ) -> tuple[dict[str, str], list[str]]:
     values, errors = parse_message(message)
     if not errors:
-        errors.extend(
-            validate_metadata(
-                values,
-                diff,
-                allow_legacy_design_ref=legacy_design_ref_allowed(
-                    repo, commit_hash, values.get("Design-Ref", "")
-                ),
+        if values.get("Commit-Kind") == "requirement":
+            errors.extend(
+                validate_requirement_metadata(
+                    values, diff, repo, commit_hash=commit_hash
+                )
             )
-        )
+        else:
+            errors.extend(
+                validate_metadata(
+                    values,
+                    diff,
+                    allow_legacy_design_ref=legacy_design_ref_allowed(
+                        repo, commit_hash, values.get("Design-Ref", "")
+                    ),
+                )
+            )
     return values, errors
 
 
@@ -556,6 +741,15 @@ def scan_commits(
         commit_hash, message = record.split("\x1f", 1)
         values, errors = parse_message(message)
         trailer_keys = {key for key, _ in trailing_fields(message)}
+        work_item_keys = {
+            "Work-Item",
+            "Change-Class",
+            "Design-Ref",
+            "Review-Policy",
+            "Exemption-Rule",
+        }
+        if "Commit-Kind" in trailer_keys and not trailer_keys.intersection(work_item_keys):
+            continue
         is_nova = bool(
             trailer_keys.intersection({"Nova-Schema", "Work-Item", "Change-Class"})
         )
@@ -1044,7 +1238,7 @@ def expected_audit_snapshot(
                     )
                 product = product_bytes.decode("utf-8")
             text_updates[product_relative] = update_product_requirement_status(
-                product, requirement_ref, item["work_item"]
+                product, requirement_ref, item["work_item"], blueprint
             )
         text_updates[blueprint_relative] = remove_blueprint_row(
             blueprint, item["work_item"], item["design_ref"], legacy_layout=legacy_layout
@@ -1956,7 +2150,20 @@ def blueprint_requirement_ref(text: str, work_item: str) -> str:
     return value
 
 
-def update_product_requirement_status(text: str, requirement_ref: str, work_item: str) -> str:
+def blueprint_work_items_for_requirement(text: str, requirement_ref: str) -> set[str]:
+    items: set[str] = set()
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 8 and cells[7] == requirement_ref and valid_work_item(cells[0]):
+            items.add(cells[0])
+    return items
+
+
+def update_product_requirement_status(
+    text: str, requirement_ref: str, work_item: str, blueprint: str
+) -> str:
     key, referenced_version_text = requirement_ref.split("@v", 1)
     referenced_version = int(referenced_version_text)
     lines = text.splitlines(keepends=True)
@@ -1976,6 +2183,25 @@ def update_product_requirement_status(text: str, requirement_ref: str, work_item
     current_version = int(current_match.group(1))
     if referenced_version > current_version:
         raise NovaError(f"reviewed requirement version is newer than current index for {key}")
+    if work_item == BOOTSTRAP_CHECKPOINT_WORK_ITEM:
+        if requirement_ref != BOOTSTRAP_REQUIREMENT_REF:
+            raise NovaError("bootstrap checkpoint work item has an unexpected Requirement-Ref")
+        actual_items = blueprint_work_items_for_requirement(blueprint, requirement_ref)
+        if actual_items != BOOTSTRAP_WORK_ITEMS:
+            raise NovaError(
+                "bootstrap requirement work items do not match the confirmed temporary ledger; "
+                f"expected={sorted(BOOTSTRAP_WORK_ITEMS)}; actual={sorted(actual_items)}"
+            )
+        if cells[2] != "待实现" or cells[5:] != ["无", "无"]:
+            raise NovaError(
+                "bootstrap requirement must be 待实现 with no implemented version or evidence"
+            )
+        if referenced_version != current_version:
+            raise NovaError("bootstrap checkpoint must reference the current requirement version")
+        cells[2] = "开发中"
+        ending = "\n" if lines[index].endswith("\n") else ""
+        lines[index] = "| " + " | ".join(cells) + " |" + ending
+        return "".join(lines)
     implemented_match = re.fullmatch(r"v([1-9][0-9]*)", cells[5])
     implemented_version = int(implemented_match.group(1)) if implemented_match else 0
     if referenced_version >= implemented_version:
@@ -2228,7 +2454,7 @@ def build_updates(
                     )
                 product = expected[product_path].decode("utf-8")
             text_updates[product_path] = update_product_requirement_status(
-                product, requirement_ref, item["work_item"]
+                product, requirement_ref, item["work_item"], blueprint
             )
         text_updates[blueprint_path] = remove_blueprint_row(
             blueprint, item["work_item"], item["design_ref"]
@@ -2667,6 +2893,49 @@ def query(repo: Path, work_item: str | None, year: int | None, month: int | None
     }
 
 
+def query_requirement(repo: Path, requirement_ref: str) -> dict[str, str]:
+    if REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
+        raise NovaError("Requirement-Ref must be REQ-<UUIDv7>@vN")
+    raw = run_git(
+        repo,
+        "log",
+        "--format=%H%x1f%B%x1e",
+        "--fixed-strings",
+        f"--grep=Requirement-Ref: {requirement_ref}",
+    )
+    matches: list[dict[str, str]] = []
+    for record in raw.split("\x1e"):
+        record = record.strip("\n")
+        if not record or "\x1f" not in record:
+            continue
+        commit_hash, message = record.split("\x1f", 1)
+        values, parse_errors = parse_message(message)
+        if values.get("Commit-Kind") != "requirement" or values.get("Requirement-Ref") != requirement_ref:
+            continue
+        diff = run_git(repo, "show", "--format=", "--binary", "--no-ext-diff", commit_hash)
+        _, errors = validate_committed_message(repo, commit_hash, message, diff)
+        errors = parse_errors + [error for error in errors if error not in parse_errors]
+        if errors:
+            raise NovaError(
+                f"invalid requirement checkpoint {commit_hash}: " + "; ".join(errors)
+            )
+        matches.append(
+            {
+                "requirement_ref": requirement_ref,
+                "commit": commit_hash,
+                "path": values["Requirement-Path"],
+                "sha256": values["Requirement-SHA256"],
+                "validation": values["Validation"],
+            }
+        )
+    if len(matches) != 1:
+        raise NovaError(
+            f"Requirement-Ref must have exactly one trusted checkpoint; "
+            f"found={len(matches)}: {requirement_ref}"
+        )
+    return matches[0]
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
@@ -2703,6 +2972,9 @@ def parser() -> argparse.ArgumentParser:
     find.add_argument("--work-item")
     find.add_argument("--year", type=int)
     find.add_argument("--month", type=int)
+    requirement = commands.add_parser("query-requirement")
+    requirement.add_argument("--repo", type=Path, required=True)
+    requirement.add_argument("--requirement-ref", required=True)
     return root
 
 
@@ -2732,6 +3004,9 @@ def main() -> int:
             result = select_pending(
                 args.repo.resolve(), args.mode, set(args.session_item), set(args.work_item)
             )
+            print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        elif args.command == "query-requirement":
+            result = query_requirement(args.repo.resolve(), args.requirement_ref)
             print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         elif args.command in {"check-manifest", "record-pass"}:
             repo = args.repo.resolve()

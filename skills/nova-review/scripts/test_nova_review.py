@@ -50,6 +50,24 @@ def message(
     return f"test: change {work_item}\n\n" + "\n".join(trailers) + "\n"
 
 
+def requirement_message(
+    requirement_ref: str,
+    requirement_path: str,
+    requirement_sha256: str,
+    *extra_trailers: str,
+) -> str:
+    trailers = [
+        "Nova-Schema: 1",
+        "Commit-Kind: requirement",
+        f"Requirement-Ref: {requirement_ref}",
+        f"Requirement-Path: {requirement_path}",
+        f"Requirement-SHA256: {requirement_sha256}",
+        "Validation: requirements index/block (pass)",
+        *extra_trailers,
+    ]
+    return "docs(requirements): checkpoint confirmed requirement\n\n" + "\n".join(trailers) + "\n"
+
+
 class NovaReviewTests(unittest.TestCase):
     def run_tool(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -323,6 +341,118 @@ class NovaReviewTests(unittest.TestCase):
                 with self.subTest(commit_message=commit_message.splitlines()[0]):
                     result = self.validate(root, commit_message, diff)
                     self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_requirement_checkpoint_validates_queries_and_stays_out_of_review(self) -> None:
+        requirement = "REQ-019a1234-5678-7abc-8def-0123456789ab"
+        requirement_ref = f"{requirement}@v1"
+        requirement_path = f".nova/requirements/{requirement}_创建.md"
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            self.commit(repo, "README.md", "seed\n", "chore: seed\n")
+            block = (
+                "# 创建\n\n"
+                f"> Requirement-Key：{requirement}\n"
+                "> 需求版本：v1\n"
+            )
+            product = (
+                "| Requirement Key | 版本 | 状态 | 业务模块 | 需求块 | 已实现版本 | 实现依据 |\n"
+                "|-----------------|------|------|----------|--------|------------|----------|\n"
+                f"| {requirement} | v1 | 待实现 | 订单 | [创建](requirements/{requirement}_创建.md) | 无 | 无 |\n"
+            )
+            block_path = repo / requirement_path
+            block_path.parent.mkdir(parents=True)
+            block_path.write_text(block, encoding="utf-8")
+            product_path = repo / ".nova/PRODUCT_REQUIREMENTS.md"
+            product_path.write_text(product, encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "add", requirement_path, ".nova/PRODUCT_REQUIREMENTS.md"],
+                check=True,
+            )
+            diff = NOVA_TOOL.run_git(repo, "diff", "--cached", "--binary", "--no-ext-diff")
+            digest = NOVA_TOOL.hashlib.sha256(block.encode("utf-8")).hexdigest()
+            checkpoint_message = requirement_message(
+                requirement_ref, requirement_path, digest
+            )
+            accepted = self.validate(repo, checkpoint_message, diff, repo)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            wrong_digest = self.validate(
+                repo,
+                requirement_message(requirement_ref, requirement_path, "0" * 64),
+                diff,
+                repo,
+            )
+            self.assertNotEqual(wrong_digest.returncode, 0)
+            self.assertIn("does not match", wrong_digest.stderr)
+            mixed = self.validate(
+                repo,
+                requirement_message(
+                    requirement_ref, requirement_path, digest, "Work-Item: PEND-001"
+                ),
+                diff,
+                repo,
+            )
+            self.assertNotEqual(mixed.returncode, 0)
+            self.assertIn("must not contain work-item", mixed.stderr)
+
+            unrelated = repo / "unrelated.txt"
+            unrelated.write_text("unrelated\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "unrelated.txt"], check=True)
+            expanded_diff = NOVA_TOOL.run_git(
+                repo, "diff", "--cached", "--binary", "--no-ext-diff"
+            )
+            expanded = self.validate(repo, checkpoint_message, expanded_diff, repo)
+            self.assertNotEqual(expanded.returncode, 0)
+            self.assertIn("must contain exactly", expanded.stderr)
+            subprocess.run(
+                ["git", "-C", str(repo), "restore", "--staged", "--", "unrelated.txt"],
+                check=True,
+            )
+
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+                input=checkpoint_message,
+                text=True,
+                check=True,
+            )
+            queried = self.run_tool(
+                "query-requirement",
+                "--repo",
+                str(repo),
+                "--requirement-ref",
+                requirement_ref,
+            )
+            self.assertEqual(queried.returncode, 0, queried.stderr)
+            result = json.loads(queried.stdout)
+            self.assertEqual(result["path"], requirement_path)
+            self.assertEqual(result["sha256"], digest)
+            selected = self.run_tool("select", "--repo", str(repo), "--mode", "all")
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(json.loads(selected.stdout), [])
+
+            updated_block = block + "\n"
+            block_path.write_text(updated_block, encoding="utf-8")
+            product_path.write_text(product + "\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "add", requirement_path, ".nova/PRODUCT_REQUIREMENTS.md"],
+                check=True,
+            )
+            duplicate_diff = NOVA_TOOL.run_git(
+                repo, "diff", "--cached", "--binary", "--no-ext-diff"
+            )
+            duplicate = self.validate(
+                repo,
+                requirement_message(
+                    requirement_ref,
+                    requirement_path,
+                    NOVA_TOOL.hashlib.sha256(updated_block.encode("utf-8")).hexdigest(),
+                ),
+                duplicate_diff,
+                repo,
+            )
+            self.assertNotEqual(duplicate.returncode, 0)
+            self.assertIn("already has a requirement checkpoint", duplicate.stderr)
 
     def test_uuid7_work_items_generate_validate_and_remain_unique(self) -> None:
         generated: set[str] = set()
@@ -1189,6 +1319,77 @@ class NovaReviewTests(unittest.TestCase):
             )
             queried = self.run_tool("query", "--repo", str(repo), "--work-item", "PEND-001")
             self.assertEqual(queried.returncode, 0, queried.stdout + queried.stderr)
+
+    def test_bootstrap_first_slice_pass_keeps_requirement_in_development(self) -> None:
+        requirement_ref = NOVA_TOOL.BOOTSTRAP_REQUIREMENT_REF
+        requirement = requirement_ref.split("@", 1)[0]
+        work_item = NOVA_TOOL.BOOTSTRAP_CHECKPOINT_WORK_ITEM
+        remaining = sorted(NOVA_TOOL.BOOTSTRAP_WORK_ITEMS - {work_item})
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            blueprint, design = self.designed_documents(requirement_ref=requirement_ref)
+            blueprint = blueprint.replace("PEND-001", work_item)
+            blueprint += "".join(
+                f"| {item} | P1 | 用户提出 | 后续 | 待澄清 | 无 | pass | {requirement_ref} |\n"
+                for item in remaining
+            )
+            blueprint_path = repo / ".nova/PROJECT_BLUEPRINT.md"
+            blueprint_path.parent.mkdir()
+            blueprint_path.write_text(blueprint, encoding="utf-8")
+            design = design.replace("PEND-001", work_item)
+            design_path = repo / ".nova/design/2026-08-27_x.md"
+            design_path.parent.mkdir(parents=True)
+            design_path.write_text(design, encoding="utf-8")
+            product = (
+                "| Requirement Key | 版本 | 状态 | 业务模块 | 需求块 | 已实现版本 | 实现依据 |\n"
+                "|-----------------|------|------|----------|--------|------------|----------|\n"
+                f"| {requirement} | v1 | 待实现 | 交付治理 | [需求](requirements/{requirement}_需求.md) | 无 | 无 |\n"
+            )
+            (repo / ".nova/PRODUCT_REQUIREMENTS.md").write_text(product, encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", ".nova"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+                input=message(
+                    work_item, "designed", ".nova/design/2026-08-27_x.md#wp-01-x"
+                ),
+                text=True,
+                check=True,
+            )
+            commit_hash = NOVA_TOOL.run_git(repo, "rev-parse", "HEAD").strip()
+            manifest = {
+                "schema": 1,
+                "batch_id": "NR-20260827-bootstrap",
+                "reviewed_at": "2026-08-27T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [{
+                    "work_item": work_item,
+                    "change_class": "designed",
+                    "commits": [commit_hash],
+                    "validation": "bootstrap fixture (pass)",
+                    "design_ref": ".nova/design/2026-08-27_x.md#wp-01-x",
+                    "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                    "design_file": ".nova/design/2026-08-27_x.md",
+                    "package_ids": ["WP-01", "WP-02"],
+                }],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review-bootstrap.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            updated_product = (repo / ".nova/PRODUCT_REQUIREMENTS.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn(f"| {requirement} | v1 | 开发中 |", updated_product)
+            self.assertIn("| 无 | 无 |", updated_product)
+            updated_blueprint = blueprint_path.read_text(encoding="utf-8")
+            self.assertNotIn(work_item, updated_blueprint)
+            for item in remaining:
+                self.assertIn(item, updated_blueprint)
 
     def test_newer_requirement_reference_rejects_without_any_write(self) -> None:
         requirement = "REQ-019a1234-5678-7abc-8def-0123456789ab"

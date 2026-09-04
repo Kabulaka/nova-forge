@@ -55,7 +55,7 @@ python3 scripts/validate_discovery.py --workspace /path/to/skills --codex-home /
 python3 scripts/probe_default_flow.py
 ```
 
-工具只使用 Python 标准库。`validate-message`、`validate-audit-message`、`select`、`check-manifest` 和 `query` 只读；`validate-message --repo` 额外校验当前编号未归档及 `Related-Work-Item` 的可信归档来源，不传 `--repo` 时只做兼容的消息与 diff 语法校验。`record-pass` 是唯一写审计/关闭入口。`probe_default_flow.py` 只在隔离临时 Git 仓库调用本机 Codex，验证普通开发自动 commit 且不 Review、显式 Review 才进入选择。关闭生成的文件使用提交契约中的 `Nova-Audit-Schema` trailers 单独提交，不形成新工作项或递归 Review。
+工具只使用 Python 标准库。`validate-message`、`validate-audit-message`、`select`、`check-manifest`、`query` 和 `query-requirement` 只读；Work-Item 的 `validate-message --repo` 额外校验当前编号未归档及 `Related-Work-Item` 的可信归档来源，requirement 检查点则强制同时提供 `--repo` 与完整 staged diff，并校验精确范围、路径、内容指纹和唯一性。`select` 只发现 PEND/FIX/MAINT，排除 requirement 与 audit commit。`record-pass` 是唯一写审计/关闭入口。`probe_default_flow.py` 只在隔离临时 Git 仓库调用本机 Codex，验证普通开发自动 commit 且不 Review、显式 Review 才进入选择。关闭生成的文件使用提交契约中的 `Nova-Audit-Schema` trailers 单独提交，不形成新工作项或递归 Review。
 
 ## 资源路由
 
