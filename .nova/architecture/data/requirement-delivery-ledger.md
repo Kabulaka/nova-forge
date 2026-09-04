@@ -19,18 +19,18 @@
 |------------|------------|--------|----------|
 | 文件路径 | `.nova/delivery/<Requirement-Key>_v<正整数>.json` | 每个 `REQ@版本` 恰好一份普通文件，UTF-8、结尾换行、两空格缩进和稳定 key 顺序 | 未知路径、符号链接、非普通文件或跨目录引用拒绝 |
 | `schema` | 正整数，首版为 1 | 未知 schema 拒绝读写，不用默认值补齐 | 只有确定性迁移器可升级旧版本 |
-| `requirement_ref` | 规范 `REQ-{uuidv7}@vN` | 逐字匹配需求索引当前版本、需求块元数据、蓝图有效切片和检查点 trailer | 新需求版本使用新文件，不覆盖旧版本台账 |
+| `requirement_ref` | 规范 `REQ-{uuidv7}@vN` | 始终逐字匹配本文件 `requirement_checkpoint` commit 中的需求索引和需求块；只有当前活动台账额外匹配工作树当前需求版本与蓝图有效切片 | 新需求版本使用新文件；旧版本继续按自身 checkpoint 校验和查询，不覆盖也不要求匹配新版本索引 |
 | `requirement_checkpoint` | commit、path、sha256 对象 | commit 是当前仓库 ancestor 中合法 requirement commit，path 和 sha256 与该 commit 中需求块字节一致 | 历史提交没有合法 kind 时不得伪造迁移 |
-| `plan_version` | 从 1 开始的正整数 | 任何切片集合、依赖、完成定义、设计引用、状态或阻塞变化均严格递增 | 相同候选与幂等键复用既有版本 |
+| `plan_version` | 从 1 开始的台账修订正整数 | 任何切片集合、依赖、完成定义、设计引用、状态或阻塞变化均严格递增且追加一个对应 change | 相同上一版本、规范化候选与幂等键复用既有版本 |
 | `status` | `development` 或 `implemented` | development 要求存在未完成有效切片；implemented 要求所有有效切片可信 PASS 且当前、剩余、阻塞为空 | 本需求 bootstrap 在机制落地前不创建台账并保持待实现 |
 | `slices[].work_item` | 唯一规范 `PEND-{uuidv7}` | 同台账和全仓库唯一稳定，归档、替代或取消后不得复用 | 既有合法数字 PEND 只读兼容，不用于新切片 |
 | `slices[].dependencies` | 同台账 PEND 或已 PASS 外部 PEND 数组 | 依赖无环，未满足时不得 active | 顺序变化规范化后不改变语义 |
 | `slices[].done_definition` | 非空可执行结果 | 不接受过程描述、待定或同义占位 | 措辞调整只有语义不变时可保留工作项 |
 | `slices[].design_ref` | null 或稳定设计锚点 | planned 可为 null；active、review_pending、blocked、completed 必须为通过校验的已确认设计 | 设计演进使用稳定锚点和既有演进规则 |
-| `slices[].state` | planned、active、review_pending、blocked、completed、superseded、cancelled | 同一需求默认最多一个 active；completed 只从可信 Review PASS 派生 | 新状态需要 schema 升级和聚合正反用例 |
+| `slices[].state` | planned、active、review_pending、blocked、completed、superseded、cancelled | `active/review_pending/blocked` 合计最多一个；completed 只从可信 Review PASS 派生 | 新状态需要 schema 升级和聚合正反用例 |
 | `blocked_reason` | null 或非空具体原因 | blocked 时必填，其他状态为 null | 解除阻塞必须留下 change 记录 |
 | `supersedes` | 同台账历史 PEND 数组 | 只用于技术拆分、合并或替代，不得成环 | 原切片保留为 superseded/cancelled |
-| `changes` | 按 plan_version 排序的对象数组 | 完整记录 created、added、split、merged、replaced、reordered、blocked、unblocked、cancelled；既有记录不删除不改写 | 未知 kind 拒绝，扩展需 schema 升级 |
+| `changes` | 与 plan_version 一一对应的对象数组 | 完整记录 created、added、split、merged、replaced、reordered、design-bound、activated、review-submitted、blocked、unblocked、completed、cancelled；既有记录不删除不改写 | 每次修订恰有一个 change；未知 kind 或跳号拒绝，扩展需 schema 升级 |
 
 ### 2.1 Schema 1
 
@@ -85,14 +85,16 @@
 
 `status=development` 要求 `total > 0` 且 `completed < total`；`status=implemented` 要求 `completed = total`、`total > 0` 且 current、remaining、blocked 都为空。蓝图必须投影全部未完成有效切片，并按需求展示上述五项；台账、蓝图和需求索引任一不一致时普通校验失败。
 
+状态只允许以下转换：`planned → active`；`active → review_pending`；`active/review_pending → blocked`；`blocked → active`（解除后必须重新提交 Review）；`review_pending → completed` 仅由可信 Review PASS 触发；planned 或 current 切片只有在业务范围等价校验通过的计划变化中才能转为 superseded/cancelled。激活前只要存在任一 active、review_pending 或 blocked 就必须拒绝，保证 current 始终至多一个。
+
 ### 2.3 本需求 bootstrap 台账
 
 新 schema 尚未实现时，`REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v1` 的完整初始依赖临时由本表保存；蓝图只投影活动未完成 PEND，不重复保存归档后会悬空的历史依赖。新台账机制落地后必须把本表逐字迁入 schema 1 台账并以校验结果替代该临时权威。
 
 | 工作项 | 交付结果 | 完整依赖 | 初始状态 |
 |--------|----------|----------|----------|
-| PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0 | 需求检查点提交机制 | PEND-01a06a50-2783-78bb-9fd4-c79347c4b6e6 Review PASS | planned |
-| PEND-01a06a50-281a-74ce-97a5-74e0385625e7 | 完整交付台账与需求状态聚合 | PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0 Review PASS | planned |
+| PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0 | 需求检查点、开发中状态及 bootstrap 多切片关闭门禁 | PEND-01a06a50-2783-78bb-9fd4-c79347c4b6e6 Review PASS | planned |
+| PEND-01a06a50-281a-74ce-97a5-74e0385625e7 | 完整交付台账与最终状态聚合 | PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0 Review PASS | planned |
 | PEND-01a06a50-2864-7a54-a080-9c0c2e4385e6 | 技能流程、进度报告与端到端验证 | PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0、PEND-01a06a50-281a-74ce-97a5-74e0385625e7 Review PASS | planned |
 
 ## 3. 一致性与并发
@@ -101,13 +103,13 @@
 |------|----------|----------|----------|
 | 创建初始台账 | 锁定 requirement checkpoint、候选台账、蓝图投影和需求状态的同一 Git 基线后一次提交 | 任一文件或 HEAD 漂移整次拒绝，不形成开发中状态 | 相同基线、候选字节和幂等键返回既有 delivery-plan commit |
 | 调整交付计划 | 重读上一有效 plan commit，校验历史保留、依赖、范围等价和新投影后一次提交 | 并发 plan_version 只允许基于最新版本的一个候选成功 | 相同上一版本和规范化候选只产生一个新 plan_version |
-| 激活切片 | 同时校验依赖、当前切片唯一性、设计确认指纹和蓝图引用 | 已有 active 或依赖状态变化时拒绝旧候选 | 重复激活同一 work item 不增加版本或重复当前项 |
+| 激活切片 | 同时校验依赖、active/review_pending/blocked 总数为零、设计确认指纹和蓝图引用 | 已有任一 current 或依赖状态变化时拒绝旧候选 | 重复激活同一 work item 不增加版本或重复当前项 |
 | Review PASS 聚合 | 在现有审计关闭锁内同时写审计、设计状态、台账状态、蓝图投影和需求索引 | 字节漂移或并发关闭整次失败，不产生部分完成 | 同一批次与 commit 集重复关闭返回既有审计结果 |
 | 查询进度 | 从同一 commit 快照读取台账、蓝图和审计索引 | 读取中 HEAD 变化则重试一次最新快照，仍漂移时失败 | 相同 commit 与 Requirement-Ref 返回逐字等价五项进度 |
 
 ### 3.1 计划变化与范围保护
 
-新增、重排、阻塞解除以及不改变业务验收的技术拆分、合并或替代可以升级 plan_version。原切片必须保留为 superseded/cancelled，changes 记录原因和新旧身份；禁止从数组物理删除。
+新增、重排、激活、设计绑定、提交 Review、完成、阻塞变化以及不改变业务验收的技术拆分、合并或替代都升级 plan_version，并追加与该转换逐字匹配的受限 kind。原切片必须保留为 superseded/cancelled，changes 记录原因和新旧身份；禁止从数组物理删除。
 
 校验器必须比较上一有效 plan commit 与候选：若有效完成定义的业务结果减少、弱化或无法证明等价，则拒绝 delivery-plan 更新，并要求回到需求阶段创建同一 REQ 的新版本。旧版本台账保持可读，不能被新版本覆盖。
 
