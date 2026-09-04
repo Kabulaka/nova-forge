@@ -45,7 +45,7 @@
 | REQ-01a05ba8-f944-7de8-83ba-599a04745d83 | v2 | 已实现 | 访谈治理 | [AI委托决策与外部参考研究闭环](requirements/REQ-01a05ba8-f944-7de8-83ba-599a04745d83_AI委托决策与外部参考研究闭环.md) | v2 | PEND-01a065b2-a963-7d1a-84e3-3898fba6b1bf |
 | REQ-01a0621d-6904-7a4f-bd7e-4552e3c8f994 | v1 | 已实现 | 会话连续性 | [跨压缩任务状态恢复](requirements/REQ-01a0621d-6904-7a4f-bd7e-4552e3c8f994_跨压缩任务状态恢复.md) | v1 | PEND-005 |
 | REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff | v1 | 已实现 | 插件分发与会话续接 | [Codex与Claude Code插件分发及同会话压缩续接](requirements/REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff_Codex与Claude_Code插件分发及同会话压缩续接.md) | v1 | PEND-01a06672-b741-7246-9aa3-a0fccfc1e59a |
-| REQ-01a06a50-2732-704d-97d0-7a98b205a4ea | v2 | 待实现 | 交付治理 | [需求基线与完整切片跟踪](requirements/REQ-01a06a50-2732-704d-97d0-7a98b205a4ea_需求基线与完整切片跟踪.md) | 无 | 无 |
+| REQ-01a06a50-2732-704d-97d0-7a98b205a4ea | v2 | 开发中 | 交付治理 | [需求基线与完整切片跟踪](requirements/REQ-01a06a50-2732-704d-97d0-7a98b205a4ea_需求基线与完整切片跟踪.md) | 无 | 无 |
 
 ## 5. 范围边界
 

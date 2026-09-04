@@ -1,0 +1,68 @@
+{
+  "changes": [
+    {
+      "kind": "created",
+      "plan_version": 1,
+      "reason": "bootstrap consolidation after task-boundary correction",
+      "work_items": [
+        "PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0"
+      ]
+    }
+  ],
+  "plan_version": 1,
+  "requirement_checkpoint": {
+    "commit": "b6e22e8c5cd481558d023894b505dcb49fa4301c",
+    "path": ".nova/requirements/REQ-01a06a50-2732-704d-97d0-7a98b205a4ea_需求基线与完整切片跟踪.md",
+    "sha256": "3d9e851fcd6195d694bc5e06e6c929c6d655f75ac4ea2bdb99609ba882bfb893"
+  },
+  "requirement_ref": "REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v2",
+  "schema": 1,
+  "status": "development",
+  "work_items": [
+    {
+      "blocked_reason": null,
+      "change_reason": "three step-level candidates consolidated into one controllable delivery task",
+      "dependencies": [
+        "PEND-01a06a50-2783-78bb-9fd4-c79347c4b6e6"
+      ],
+      "design_ref": ".nova/design/2026-09-04_需求检查点与bootstrap状态门禁.md#wp-01-requirement-checkpoint-bootstrap-gate",
+      "done_definition": "需求检查点、可控任务台账、状态聚合、技能流程和端到端验证整体可用，当前小修改只保留一个工作项并统一进入人工 Review",
+      "milestones": [
+        {
+          "blocked_reason": null,
+          "done_definition": "requirement 检查点、开发中状态与 Review 选择隔离通过正反用例",
+          "evidence": [
+            "aad9165f529d186f3472b01b38a3df656003ea3f"
+          ],
+          "id": "M-01",
+          "state": "completed",
+          "title": "需求检查点与状态门禁"
+        },
+        {
+          "blocked_reason": null,
+          "done_definition": "严格交付台账保存独立任务和内部里程碑，Review PASS 可原子聚合最终状态",
+          "evidence": [
+            "7977021e1a8539ee58c23b05938d7e17d97f3575"
+          ],
+          "id": "M-02",
+          "state": "completed",
+          "title": "完整交付台账与最终状态聚合"
+        },
+        {
+          "blocked_reason": null,
+          "done_definition": "需求、架构、开发和 Review 契约统一任务边界，并可查询任务级与里程碑级进度",
+          "evidence": [
+            "7977021e1a8539ee58c23b05938d7e17d97f3575"
+          ],
+          "id": "M-03",
+          "state": "completed",
+          "title": "技能流程、进度报告与端到端验证"
+        }
+      ],
+      "state": "review_pending",
+      "supersedes": [],
+      "title": "需求基线与可控任务交付",
+      "work_item": "PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0"
+    }
+  ]
+}
