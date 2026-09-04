@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "nova-checkpoint": {
+      "command": "node",
+      "args": [
+        "${PLUGIN_ROOT}/runtime/mcp/server.mjs",
+        "--host",
+        "codex"
+      ],
+      "env": {
+        "NOVA_PLUGIN_DATA": "${PLUGIN_DATA}",
+        "NOVA_PLUGIN_ROOT": "${PLUGIN_ROOT}"
+      }
+    }
+  }
+}

@@ -13,7 +13,7 @@ description: 只读检查当前项目的 Nova 文档、引用、审计与迁移�
 2. 使用本技能目录中的 `scripts/nova_doctor.py`，保持当前工作目录不变：
 
    ```bash
-   python3 /absolute/path/to/nova-doctor/scripts/nova_doctor.py
+   python3 /absolute/path/to/skills/nova-doctor/scripts/nova_doctor.py
    ```
 
 3. 原样保留每项 `PASS / WARN / FAIL` 结论。失败时引用脚本给出的证据和定向校验命令，不用推测替代诊断。

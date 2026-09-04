@@ -57,7 +57,7 @@
 立即升级：
 
 - 保留原待办顺序、稳定编号、优先级、名称、有效设计链接、可转换依赖和完成定义；
-- 缺少编号时逐项调用 `nova-review/scripts/nova_review.py new-id --class designed` 生成 `PEND-<UUIDv7>`，不带业务推断；
+- 缺少编号时逐项调用 `skills/nova-review/scripts/nova_review.py new-id --class designed` 生成 `PEND-<UUIDv7>`，不带业务推断；
 - 来源统一写 `历史迁移`；
 - 没有已确认设计时写“待澄清”；
 - 旧“前置条件”不是当前待办编号时不得伪装成依赖，写“待澄清”；

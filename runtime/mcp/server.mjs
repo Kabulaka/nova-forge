@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { JSON_RPC_FRAME_LIMIT } from "../core/constants.mjs";
-import { consumeBinding, registerMcpInstance } from "../core/rendezvous.mjs";
+import { JSON_RPC_FRAME_LIMIT, MCP_PROTOCOL_VERSION } from "../core/constants.mjs";
+import { registerMcpInstance, waitForBinding } from "../core/rendezvous.mjs";
 import { getCheckpoint, saveCheckpoint } from "../core/state-machine.mjs";
 import { NovaError, readPluginVersion, redactError } from "../core/util.mjs";
 
@@ -40,6 +40,19 @@ const AUTHORITY_ARRAY_SCHEMA = {
   items: AUTHORITY_VALUE_SCHEMA,
 };
 
+function authorityArraySchema(states) {
+  return {
+    ...AUTHORITY_ARRAY_SCHEMA,
+    items: {
+      ...AUTHORITY_VALUE_SCHEMA,
+      properties: {
+        ...AUTHORITY_VALUE_SCHEMA.properties,
+        authorityState: { type: "string", enum: states },
+      },
+    },
+  };
+}
+
 const TASK_CAPSULE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -61,7 +74,7 @@ const TASK_CAPSULE_SCHEMA = {
   properties: {
     objective: AUTHORITY_VALUE_SCHEMA,
     stage: AUTHORITY_VALUE_SCHEMA,
-    confirmedDecisions: AUTHORITY_ARRAY_SCHEMA,
+    confirmedDecisions: authorityArraySchema(["user-confirmed"]),
     exclusions: AUTHORITY_ARRAY_SCHEMA,
     delegatedScope: AUTHORITY_ARRAY_SCHEMA,
     currentQuestion: { anyOf: [AUTHORITY_VALUE_SCHEMA, { type: "null" }] },
@@ -77,11 +90,16 @@ const TASK_CAPSULE_SCHEMA = {
         "resolutionBasis",
       ],
       properties: {
-        inheritedContracts: AUTHORITY_ARRAY_SCHEMA,
-        stageEvidence: AUTHORITY_ARRAY_SCHEMA,
-        stageDecisions: AUTHORITY_ARRAY_SCHEMA,
-        unresolvedDeltas: AUTHORITY_ARRAY_SCHEMA,
-        resolutionBasis: AUTHORITY_ARRAY_SCHEMA,
+        inheritedContracts: authorityArraySchema(["user-confirmed"]),
+        stageEvidence: authorityArraySchema(["verified-evidence"]),
+        stageDecisions: authorityArraySchema(["delegated-ai-candidate"]),
+        unresolvedDeltas: authorityArraySchema(["pending"]),
+        resolutionBasis: authorityArraySchema([
+          "user-confirmed",
+          "verified-evidence",
+          "delegated-ai-candidate",
+          "explicitly-excluded",
+        ]),
       },
     },
     activeDeliveryScope: AUTHORITY_ARRAY_SCHEMA,
@@ -130,7 +148,7 @@ export class McpRuntime {
 
   currentBinding() {
     if (this.binding) return this.binding;
-    this.binding = consumeBinding(this.dataRoot, this.registration);
+    this.binding = waitForBinding(this.dataRoot, this.registration);
     if (!this.binding) {
       throw new NovaError(
         "BINDING_UNAVAILABLE",
@@ -199,22 +217,61 @@ function failure(id, code, message) {
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validRequestId(id) {
+  return id === null || typeof id === "string" || (typeof id === "number" && Number.isFinite(id));
+}
+
 export function handleRpc(runtime, request) {
-  if (request === null || typeof request !== "object" || request.jsonrpc !== "2.0") {
+  if (!isPlainObject(request) || request.jsonrpc !== "2.0") {
     return failure(request?.id ?? null, -32600, "Invalid Request");
   }
+  const hasId = Object.hasOwn(request, "id");
+  if (typeof request.method !== "string" || (hasId && !validRequestId(request.id))) {
+    return failure(null, -32600, "Invalid Request");
+  }
+  if (!hasId) return null;
   if (request.method === "initialize") {
+    if (request.params !== undefined && !isPlainObject(request.params)) {
+      return failure(request.id, -32602, "Invalid params");
+    }
+    if (
+      request.params?.protocolVersion !== undefined &&
+      typeof request.params.protocolVersion !== "string"
+    ) {
+      return failure(request.id, -32602, "Invalid params");
+    }
     return success(request.id, {
-      protocolVersion: request.params?.protocolVersion || "2025-06-18",
+      protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: {} },
       serverInfo: { name: "nova-checkpoint", version: runtime.pluginVersion },
     });
   }
-  if (request.method === "ping") return success(request.id, {});
-  if (request.method === "tools/list") return success(request.id, { tools: runtime.listTools() });
+  if (request.method === "ping") {
+    if (request.params !== undefined && !isPlainObject(request.params)) {
+      return failure(request.id, -32602, "Invalid params");
+    }
+    return success(request.id, {});
+  }
+  if (request.method === "tools/list") {
+    if (request.params !== undefined && !isPlainObject(request.params)) {
+      return failure(request.id, -32602, "Invalid params");
+    }
+    return success(request.id, { tools: runtime.listTools() });
+  }
   if (request.method === "tools/call") {
+    if (
+      !isPlainObject(request.params) ||
+      typeof request.params.name !== "string" ||
+      (request.params.arguments !== undefined && !isPlainObject(request.params.arguments))
+    ) {
+      return failure(request.id, -32602, "Invalid params");
+    }
     try {
-      const value = runtime.callTool(request.params?.name, request.params?.arguments || {});
+      const value = runtime.callTool(request.params.name, request.params.arguments ?? {});
       return success(request.id, {
         content: [{ type: "text", text: JSON.stringify(value) }],
         structuredContent: value,
@@ -228,9 +285,6 @@ export function handleRpc(runtime, request) {
         isError: true,
       });
     }
-  }
-  if (typeof request.method === "string" && request.method.startsWith("notifications/")) {
-    return null;
   }
   return failure(request.id ?? null, -32601, "Method not found");
 }

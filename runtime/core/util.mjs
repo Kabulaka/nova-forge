@@ -98,6 +98,72 @@ export function sleepSync(milliseconds) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
+export function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+export function withOwnerLock(
+  lockFile,
+  callback,
+  {
+    timeoutMs,
+    timeoutCode = "LOCK_TIMEOUT",
+    timeoutMessage = "lock timed out",
+  },
+) {
+  ensurePrivateDirectory(path.dirname(lockFile));
+  const owner = stableStringify({ pid: process.pid, token: randomId(16) });
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      fs.writeFileSync(lockFile, owner, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      try {
+        const observed = fs.readFileSync(lockFile, "utf8");
+        const parsed = JSON.parse(observed);
+        if (
+          Number.isInteger(parsed.pid) &&
+          parsed.pid > 0 &&
+          !processIsAlive(parsed.pid) &&
+          fs.readFileSync(lockFile, "utf8") === observed
+        ) {
+          fs.unlinkSync(lockFile);
+          continue;
+        }
+      } catch (lockError) {
+        if (lockError?.code === "ENOENT") continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new NovaError(timeoutCode, timeoutMessage);
+      }
+      sleepSync(10);
+    }
+  }
+  try {
+    return callback();
+  } finally {
+    try {
+      if (fs.readFileSync(lockFile, "utf8") !== owner) {
+        throw new NovaError("LOCK_OWNERSHIP_LOST", `lock ownership changed: ${lockFile}`);
+      }
+      fs.unlinkSync(lockFile);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        throw new NovaError("LOCK_OWNERSHIP_LOST", `lock ownership disappeared: ${lockFile}`);
+      }
+      throw error;
+    }
+  }
+}
+
 export function redactError(error) {
   if (error instanceof NovaError) return `${error.code}: ${error.message}`;
   return `INTERNAL_ERROR: ${error instanceof Error ? error.message : String(error)}`;

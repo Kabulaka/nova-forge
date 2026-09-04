@@ -1,15 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
-import { LOCK_TIMEOUT_MS, RENDEZVOUS_TTL_MS } from "./constants.mjs";
+import {
+  LOCK_TIMEOUT_MS,
+  RENDEZVOUS_SETTLE_MS,
+  RENDEZVOUS_TTL_MS,
+} from "./constants.mjs";
 import {
   NovaError,
   cwdKey,
   ensurePrivateDirectory,
   hmac,
+  processIsAlive,
   randomId,
   readJsonFile,
   sleepSync,
   stableStringify,
+  withOwnerLock,
   writePrivateFile,
 } from "./util.mjs";
 
@@ -44,45 +50,11 @@ function removeIfExists(file) {
 
 function withLock(dataRoot, callback) {
   const value = initialize(dataRoot);
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  while (true) {
-    try {
-      fs.mkdirSync(value.lock, { mode: 0o700 });
-      break;
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - fs.statSync(value.lock).mtimeMs > LOCK_TIMEOUT_MS * 5) {
-          fs.rmdirSync(value.lock);
-        }
-      } catch (lockError) {
-        if (lockError?.code !== "ENOENT") throw lockError;
-      }
-      if (Date.now() >= deadline) {
-        throw new NovaError("RENDEZVOUS_LOCK_TIMEOUT", "session rendezvous lock timed out");
-      }
-      sleepSync(10);
-    }
-  }
-  try {
-    return callback(value);
-  } finally {
-    try {
-      fs.rmdirSync(value.lock);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-  }
-}
-
-function livePid(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === "EPERM";
-  }
+  return withOwnerLock(value.lock, () => callback(value), {
+    timeoutMs: LOCK_TIMEOUT_MS,
+    timeoutCode: "RENDEZVOUS_LOCK_TIMEOUT",
+    timeoutMessage: "session rendezvous lock timed out",
+  });
 }
 
 function listJson(directory) {
@@ -100,7 +72,7 @@ function prune(value, now) {
         const old =
           directory !== value.active &&
           (!Number.isFinite(record.createdAt) || now - record.createdAt > RENDEZVOUS_TTL_MS);
-        const dead = Number.isInteger(record.pid) && !livePid(record.pid);
+        const dead = Number.isInteger(record.pid) && !processIsAlive(record.pid);
         if (old || dead) {
           removeIfExists(file);
           if (record.instanceId) removeIfExists(path.join(value.instances, `${record.instanceId}.secret`));
@@ -132,6 +104,10 @@ function pair(value, host, cwdHash, now) {
   }
   const instance = instances[0];
   const claim = claims[0];
+  const newestArrival = Math.max(instance.record.createdAt, claim.record.createdAt);
+  if (!Number.isFinite(newestArrival) || now - newestArrival < RENDEZVOUS_SETTLE_MS) {
+    return { status: "pending", instances: 1, claims: 1, settling: true };
+  }
   const secretFile = path.join(value.instances, `${instance.record.instanceId}.secret`);
   const secret = fs.readFileSync(secretFile, "utf8");
   const proofPayload = {
@@ -164,7 +140,7 @@ export function claimSession(dataRoot, { host, cwd, sessionKey, now = Date.now()
           record.host === host &&
           record.cwdHash === cwdHash &&
           record.sessionKey === sessionKey &&
-          livePid(record.pid),
+          processIsAlive(record.pid),
       );
     if (active) return { status: "active", instanceId: active.instanceId };
 
@@ -215,6 +191,7 @@ export function consumeBinding(
 ) {
   return withLock(dataRoot, (value) => {
     const file = path.join(value.bindings, `${registration.instanceId}.json`);
+    if (!fs.existsSync(file)) pair(value, registration.host, registration.cwdHash, now);
     if (!fs.existsSync(file)) return null;
     const binding = readJsonFile(file);
     const payload = {

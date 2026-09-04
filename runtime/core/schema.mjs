@@ -34,6 +34,18 @@ const SAVE_KEYS = new Set([
 ]);
 const CONTROL_DOCUMENT_KEYS = new Set(["path", "sha256", "loadState"]);
 const LOAD_STATES = new Set(["loaded", "needs-reload", "unavailable"]);
+const PROJECTION_AUTHORITY = {
+  inheritedContracts: new Set(["user-confirmed"]),
+  stageEvidence: new Set(["verified-evidence"]),
+  stageDecisions: new Set(["delegated-ai-candidate"]),
+  unresolvedDeltas: new Set(["pending"]),
+  resolutionBasis: new Set([
+    "user-confirmed",
+    "verified-evidence",
+    "delegated-ai-candidate",
+    "explicitly-excluded",
+  ]),
+};
 
 function assertPlainObject(value, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -72,18 +84,26 @@ function assertArray(value, label) {
   }
 }
 
-function validateAuthorityValue(value, label) {
+function validateAuthorityValue(value, label, allowedStates = AUTHORITY_STATES) {
   assertExactKeys(value, AUTHORITY_KEYS, label);
   assertString(value.value, `${label}.value`);
   assertString(value.source, `${label}.source`, { max: 1024 });
   if (!AUTHORITY_STATES.has(value.authorityState)) {
     throw new NovaError("INVALID_AUTHORITY", `${label}.authorityState is invalid`);
   }
+  if (!allowedStates.has(value.authorityState)) {
+    throw new NovaError(
+      "AUTHORITY_MISMATCH",
+      `${label}.authorityState ${value.authorityState} is not allowed in this field`,
+    );
+  }
 }
 
-function validateAuthorityArray(value, label) {
+function validateAuthorityArray(value, label, allowedStates = AUTHORITY_STATES) {
   assertArray(value, label);
-  value.forEach((entry, index) => validateAuthorityValue(entry, `${label}[${index}]`));
+  value.forEach((entry, index) =>
+    validateAuthorityValue(entry, `${label}[${index}]`, allowedStates),
+  );
 }
 
 function validateDepthAndStrings(value, label = "payload", depth = 0) {
@@ -132,7 +152,8 @@ export function validateTaskCapsule(capsule) {
   validateAuthorityValue(capsule.stage, "taskCapsule.stage");
   validateAuthorityValue(capsule.nextAction, "taskCapsule.nextAction");
   for (const field of CAPSULE_ARRAY_FIELDS) {
-    validateAuthorityArray(capsule[field], `taskCapsule.${field}`);
+    const allowed = field === "confirmedDecisions" ? new Set(["user-confirmed"]) : AUTHORITY_STATES;
+    validateAuthorityArray(capsule[field], `taskCapsule.${field}`, allowed);
   }
   if (capsule.currentQuestion !== null) {
     validateAuthorityValue(capsule.currentQuestion, "taskCapsule.currentQuestion");
@@ -146,6 +167,7 @@ export function validateTaskCapsule(capsule) {
     validateAuthorityArray(
       capsule.stageProjection[field],
       `taskCapsule.stageProjection.${field}`,
+      PROJECTION_AUTHORITY[field],
     );
   }
 }

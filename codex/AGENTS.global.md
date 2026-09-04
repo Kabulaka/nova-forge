@@ -53,11 +53,11 @@
 3. 默认流程为固定任务差异基线与验收 → 编码 → 测试 → 精确范围本地 Git commit；只有 `Review-Policy: required` 才标记待 Review，合法 exempt 项以豁免证据直接完成；不得自动启动 Review。
 4. 本文件代表用户对最低验收通过且无阻断后的精确范围本地 Git commit 的持续授权；用户可在当次任务明确撤回。
 5. Git push、远程配置和 SVN commit 始终需要用户对具体操作的独立授权；不得从本地 Git 授权外推。
-6. 任务范围、编码契约、测试证据复用、依赖、失败停止、提交门禁、plan mode 和固定完成报告的完整约束，以 `nova-development/references/implementation-sop.md` 为准。
+6. 任务范围、编码契约、测试证据复用、依赖、失败停止、提交门禁、plan mode 和固定完成报告的完整约束，以 `skills/nova-development/references/implementation-sop.md` 为准。
 
 ## 工作项与提交
 
-提交分类、豁免和 trailers 以 `nova-review/references/commit-contract.md` 为唯一详细定义：
+提交分类、豁免和 trailers 以 `skills/nova-review/references/commit-contract.md` 为唯一详细定义：
 
 - `designed` 使用 `PEND-*`，`Design-Ref` 必须指向设计锚点，且需要 Review；
 - `adhoc` 使用 `FIX-*`，`Design-Ref: none`，仅限不新增能力或公共契约的小修复，仍需要 Review；
@@ -75,4 +75,4 @@ Nova commit 必须包含 `Nova-Schema`、`Work-Item`、`Change-Class`、`Design-
 
 ## Plan mode 与完成报告
 
-Plan mode 只由用户手动启用，方案须经用户批准才编码；完整追加约束和固定代码完成报告模板由 `nova-development/references/implementation-sop.md` 定义。Plan mode 本身不自动授权或启动 Review。`required` 项未运行 Review 时报告必须保留 Review 章节并明确写“未 Review”；合法客观豁免写 `exempt` 并列规则与完整 diff 证据；两者轮次均为“不适用”，不得把自检、测试或豁免表述为 Review PASS。
+Plan mode 只由用户手动启用，方案须经用户批准才编码；完整追加约束和固定代码完成报告模板由 `skills/nova-development/references/implementation-sop.md` 定义。Plan mode 本身不自动授权或启动 Review。`required` 项未运行 Review 时报告必须保留 Review 章节并明确写“未 Review”；合法客观豁免写 `exempt` 并列规则与完整 diff 证据；两者轮次均为“不适用”，不得把自检、测试或豁免表述为 Review PASS。

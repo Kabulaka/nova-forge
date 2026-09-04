@@ -1,8 +1,16 @@
 import { INJECTION_CHARACTER_LIMIT, STAGE_PROJECTION_FIELDS } from "./constants.mjs";
 import { NovaError } from "./util.mjs";
 
+function safeJson(value) {
+  return JSON.stringify(value).replace(/[<>&]/g, (character) => {
+    if (character === "<") return "\\u003c";
+    if (character === ">") return "\\u003e";
+    return "\\u0026";
+  });
+}
+
 function authorityLine(label, item) {
-  return `- ${label} [${item.authorityState}; ${item.source}]: ${item.value}`;
+  return `- ${label}: ${safeJson(item)}`;
 }
 
 function appendRequired(lines, line, limit) {
@@ -52,7 +60,7 @@ export function buildRecoveryContext(rules, envelope, limit = INJECTION_CHARACTE
   appendArray(lines, "fileState", capsule.fileState, limit, omitted, false);
   appendArray(lines, "commitState", capsule.commitState, limit, omitted, false);
   envelope.controlDocuments.forEach((document, index) => {
-    const line = `- controlDocuments[${index}]: ${document.path} sha256:${document.sha256} ${document.loadState}`;
+    const line = `- controlDocuments[${index}]: ${safeJson(document)}`;
     if ([...lines, line].join("\n").length <= limit) lines.push(line);
     else omitted.push(`controlDocuments[${index}]`);
   });

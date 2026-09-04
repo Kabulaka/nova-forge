@@ -1,5 +1,8 @@
 export const SCHEMA_VERSION = 1;
 export const CHECKPOINT_PAYLOAD_LIMIT = 256 * 1024;
+// Hook events can carry large prompts or tool responses even though they do not
+// contain the model's full context. Keep enough headroom for 1M-context hosts.
+export const HOOK_INPUT_LIMIT = 256 * 1024 * 1024;
 export const JSON_RPC_FRAME_LIMIT = 320 * 1024;
 export const STRING_LIMIT = 8 * 1024;
 export const ARRAY_LIMIT = 128;
@@ -9,8 +12,10 @@ export const HOST_QUOTA_BYTES = 512 * 1024 * 1024;
 export const GLOBAL_QUOTA_BYTES = 1024 * 1024 * 1024;
 export const HOST_SESSION_LIMIT = 2000;
 export const RENDEZVOUS_TTL_MS = 30_000;
+export const RENDEZVOUS_SETTLE_MS = 100;
 export const LOCK_TIMEOUT_MS = 2_000;
 export const INJECTION_CHARACTER_LIMIT = 9_500;
+export const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 export const AUTHORITY_STATES = new Set([
   "user-confirmed",

@@ -32,6 +32,16 @@ test("checkpoint schema rejects secrets and unknown authority", () => {
   assert.throws(() => validateSaveInput(authority), { code: "INVALID_AUTHORITY" });
 });
 
+test("checkpoint schema rejects authority states in the wrong projection group", () => {
+  const projection = saveInput(0);
+  projection.taskCapsule.stageProjection.inheritedContracts[0].authorityState = "pending";
+  assert.throws(() => validateSaveInput(projection), { code: "AUTHORITY_MISMATCH" });
+
+  const confirmed = saveInput(0);
+  confirmed.taskCapsule.confirmedDecisions[0].authorityState = "delegated-ai-candidate";
+  assert.throws(() => validateSaveInput(confirmed), { code: "AUTHORITY_MISMATCH" });
+});
+
 test("checkpoint schema rejects a normalized payload over the capacity limit", () => {
   const oversized = saveInput(0);
   oversized.taskCapsule.evidence = Array.from({ length: 40 }, (_, index) => ({
@@ -160,10 +170,33 @@ test("control document changes advance authority and invalidate a frozen compact
       changedDocuments,
       { now: 5_000 },
     );
-    assert.equal(changed.envelope.authorityGeneration, 2);
+    assert.equal(changed.envelope.authorityGeneration, 1);
+    assert.equal(changed.envelope.compactionHandshake.status, "failed");
     assert.throws(
       () => completeCompaction(temp.directory, current, "0.1.0", "manual", { now: 6_000 }),
       { code: "COMPACTION_HANDSHAKE_MISMATCH" },
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("compaction trigger validation fails before state mutation", () => {
+  const temp = temporaryDirectory();
+  try {
+    const current = binding();
+    startSession(temp.directory, current, "0.1.0", "startup", { now: 1_000 });
+    assert.throws(
+      () => freezeCompaction(temp.directory, current, "0.1.0", "scheduled", { now: 2_000 }),
+      { code: "INVALID_COMPACTION_TRIGGER" },
+    );
+    assert.throws(
+      () => completeCompaction(temp.directory, current, "0.1.0", undefined, { now: 3_000 }),
+      { code: "INVALID_COMPACTION_TRIGGER" },
+    );
+    assert.equal(
+      getCheckpoint(temp.directory, current, { now: 3_000 }).envelope.compactionHandshake.status,
+      "idle",
     );
   } finally {
     temp.cleanup();

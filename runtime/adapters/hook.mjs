@@ -12,7 +12,27 @@ import {
   recordResumeInjection,
   startSession,
 } from "../core/state-machine.mjs";
-import { NovaError, cwdKey, readPluginVersion, redactError, scopeKey } from "../core/util.mjs";
+import {
+  NovaError,
+  cwdKey,
+  randomId,
+  readPluginVersion,
+  redactError,
+  scopeKey,
+} from "../core/util.mjs";
+
+const OWN_CHECKPOINT_TOOLS = {
+  codex: new Set([
+    "mcp__nova-checkpoint__nova_checkpoint_get",
+    "mcp__nova-checkpoint__nova_checkpoint_save",
+    "mcp__nova_checkpoint__nova_checkpoint_get",
+    "mcp__nova_checkpoint__nova_checkpoint_save",
+  ]),
+  "claude-code": new Set([
+    "mcp__plugin_nova-forge_nova-checkpoint__nova_checkpoint_get",
+    "mcp__plugin_nova-forge_nova-checkpoint__nova_checkpoint_save",
+  ]),
+};
 
 export function detectHost(environment = process.env) {
   if (environment.NOVA_HOST === "codex" || environment.NOVA_HOST === "claude-code") {
@@ -51,12 +71,17 @@ function trustedBinding(host, input) {
   };
 }
 
-function eventId(input) {
+function eventId(host, input) {
   const id = input.tool_use_id || input.turn_id;
-  if (typeof id !== "string" || id.length === 0) {
+  if (typeof id === "string" && id.length > 0) {
+    return `${input.hook_event_name}:${id}`;
+  }
+  if (host === "claude-code" && input.hook_event_name === "UserPromptSubmit") {
+    return `UserPromptSubmit:${randomId(16)}`;
+  }
+  {
     throw new NovaError("EVENT_ID_UNAVAILABLE", "trusted hook turn_id or tool_use_id is required");
   }
-  return `${input.hook_event_name}:${id}`;
 }
 
 function contextOutput(event, context, systemMessage) {
@@ -71,32 +96,31 @@ function contextOutput(event, context, systemMessage) {
 }
 
 function blockingOutput(host, event, reason) {
-  if (event === "Stop") return { decision: "block", reason };
   if (
     host === "claude-code" &&
-    (event === "PreCompact" || event === "UserPromptSubmit")
+    (event === "Stop" || event === "PreCompact" || event === "UserPromptSubmit")
   ) {
     return { decision: "block", reason };
   }
   return { continue: false, stopReason: reason, systemMessage: reason };
 }
 
-function isOwnCheckpointTool(toolName) {
-  return typeof toolName === "string" && /nova[_-]checkpoint_(?:get|save)$/i.test(toolName);
+function isOwnCheckpointTool(host, toolName) {
+  return typeof toolName === "string" && OWN_CHECKPOINT_TOOLS[host].has(toolName);
 }
 
 export function handleHook(input, environment = process.env, options = {}) {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    throw new NovaError("INVALID_HOOK_INPUT", "hook input must be a JSON object");
-  }
-  const event = input.hook_event_name;
-  const host = detectHost(environment);
-  const { pluginRoot, dataRoot } = resolvePluginPaths(environment);
-  const pluginVersion = readPluginVersion(pluginRoot);
-  const binding = trustedBinding(host, input);
-  const now = options.now ?? Date.now();
-
+  const event = input?.hook_event_name;
+  let host;
   try {
+    if (input === null || typeof input !== "object" || Array.isArray(input)) {
+      throw new NovaError("INVALID_HOOK_INPUT", "hook input must be a JSON object");
+    }
+    host = detectHost(environment);
+    const { pluginRoot, dataRoot } = resolvePluginPaths(environment);
+    const pluginVersion = readPluginVersion(pluginRoot);
+    const binding = trustedBinding(host, input);
+    const now = options.now ?? Date.now();
     if (event === "SessionStart") {
       const source = input.source;
       if (!["startup", "resume", "clear", "compact"].includes(source)) {
@@ -131,12 +155,12 @@ export function handleHook(input, environment = process.env, options = {}) {
     }
 
     if (event === "UserPromptSubmit") {
-      markEvent(dataRoot, binding, pluginVersion, eventId(input), { now });
+      markEvent(dataRoot, binding, pluginVersion, eventId(host, input), { now });
       return {};
     }
     if (event === "PostToolUse") {
-      if (!isOwnCheckpointTool(input.tool_name)) {
-        markEvent(dataRoot, binding, pluginVersion, eventId(input), { now });
+      if (!isOwnCheckpointTool(host, input.tool_name)) {
+        markEvent(dataRoot, binding, pluginVersion, eventId(host, input), { now });
       }
       return {};
     }

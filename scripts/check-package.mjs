@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
   encoding: "utf8",
@@ -14,6 +19,7 @@ const files = new Set(report.files.map((entry) => entry.path));
 const required = [
   "package.json",
   ".codex-plugin/plugin.json",
+  ".mcp.json",
   ".claude-plugin/plugin.json",
   "hooks/hooks.json",
   "hooks/run.mjs",
@@ -31,9 +37,18 @@ const forbidden = [...files].filter(
     file.startsWith("tests/") ||
     /^nova-(?:requirements|architecture|development|doctor|review)(?:\/|$)/.test(file),
 );
-if (missing.length || forbidden.length) {
+const invalidReferences = [...files]
+  .filter((file) => file.endsWith(".md"))
+  .filter((file) => {
+    const text = fs.readFileSync(path.join(root, file), "utf8");
+    return /(?<!skills\/)(?<!\.\.\/)nova-(?:requirements|architecture|development|doctor|review)\//.test(text);
+  });
+if (missing.length || forbidden.length || invalidReferences.length) {
   if (missing.length) process.stderr.write(`Missing package files: ${missing.join(", ")}\n`);
   if (forbidden.length) process.stderr.write(`Forbidden package files: ${forbidden.join(", ")}\n`);
+  if (invalidReferences.length) {
+    process.stderr.write(`Broken packaged root references: ${invalidReferences.join(", ")}\n`);
+  }
   process.exitCode = 1;
 } else {
   process.stdout.write(`PASS: package contains ${files.size} files (${report.size} bytes)\n`);

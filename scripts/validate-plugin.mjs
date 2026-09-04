@@ -23,6 +23,7 @@ function requireValue(condition, message, errors) {
 const errors = [];
 const packageJson = readJson("package.json");
 const codex = readJson(".codex-plugin/plugin.json");
+const codexMcp = readJson(".mcp.json");
 const claude = readJson(".claude-plugin/plugin.json");
 const codexMarketplace = readJson(".agents/plugins/marketplace.json");
 const claudeMarketplace = readJson(".claude-plugin/marketplace.json");
@@ -35,18 +36,27 @@ requireValue(packageJson.engines?.node === ">=22.5.0", "Node engine must be >=22
 requireValue(!packageJson.dependencies, "runtime dependencies are forbidden", errors);
 requireValue(!packageJson.devDependencies, "development dependencies are forbidden", errors);
 
-for (const [label, manifest, host] of [
-  ["Codex", codex, "codex"],
-  ["Claude Code", claude, "claude-code"],
+for (const [label, manifest] of [
+  ["Codex", codex],
+  ["Claude Code", claude],
 ]) {
   requireValue(manifest.name === packageJson.name, `${label} manifest name mismatch`, errors);
   requireValue(manifest.version === packageJson.version, `${label} manifest version mismatch`, errors);
   requireValue(manifest.skills === "./skills/", `${label} skills path mismatch`, errors);
-  const server = manifest.mcpServers?.["nova-checkpoint"];
-  requireValue(server?.command === "node", `${label} MCP command must use node`, errors);
-  requireValue(server?.args?.includes(host), `${label} MCP host binding mismatch`, errors);
   requireValue(!Object.hasOwn(manifest, "hooks"), `${label} manifest must use default hooks/hooks.json discovery`, errors);
 }
+
+requireValue(codex.mcpServers === "./.mcp.json", "Codex MCP config must use ./.mcp.json", errors);
+const codexServer = codexMcp.mcpServers?.["nova-checkpoint"];
+requireValue(codexServer?.command === "node", "Codex MCP command must use node", errors);
+requireValue(codexServer?.args?.includes("codex"), "Codex MCP host binding mismatch", errors);
+const claudeServer = claude.mcpServers?.["nova-checkpoint"];
+requireValue(claudeServer?.command === "node", "Claude Code MCP command must use node", errors);
+requireValue(
+  claudeServer?.args?.includes("claude-code"),
+  "Claude Code MCP host binding mismatch",
+  errors,
+);
 
 requireValue(
   codexMarketplace.plugins?.[0]?.source?.ref === `v${packageJson.version}`,

@@ -15,12 +15,12 @@
 新工作项使用本地无状态命令生成小写规范 UUIDv7：
 
 ```bash
-python3 nova-review/scripts/nova_review.py new-id --class designed
+python3 skills/nova-review/scripts/nova_review.py new-id --class designed
 ```
 
 `--class` 可取 `designed`、`adhoc`、`maintenance`，分别生成 `PEND-*`、`FIX-*`、`MAINT-*`。既有纯数字 ID 继续合法且不得改写，但不得因蓝图删除活动行而重新分配；Review、归档前原范围修复提交和后续证据必须逐字沿用原 ID。生成器不读取登记表，不依赖锁、计数器、工作树、分支或主机状态。
 
-长期需求身份使用独立命令 `python3 nova-review/scripts/nova_review.py new-requirement-id` 生成 `REQ-<UUIDv7>`；它不是工作项，不进入 commit trailers 或 Review 选择。
+长期需求身份使用独立命令 `python3 skills/nova-review/scripts/nova_review.py new-requirement-id` 生成 `REQ-<UUIDv7>`；它不是工作项，不进入 commit trailers 或 Review 选择。
 
 归档后发现既有契约缺陷时创建新 FIX；新增能力或改变公共契约时创建新 PEND 并以新设计的“演进来源”链接终态设计；纯维护创建新 MAINT。明确源于已归档 PEND 的新 FIX 必须增加单值 `Related-Work-Item: PEND-*`，且该值必须与新 FIX 不同并能通过可信审计索引验证；无关任务不得伪造关联。
 

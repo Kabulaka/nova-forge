@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
+import { main, readHookInput } from "../hooks/run.mjs";
 import { detectHost, handleHook, resolvePluginPaths } from "../runtime/adapters/hook.mjs";
+import { HOOK_INPUT_LIMIT } from "../runtime/core/constants.mjs";
 import { getCheckpoint, saveCheckpoint } from "../runtime/core/state-machine.mjs";
 import { cwdKey, scopeKey } from "../runtime/core/util.mjs";
 import { pluginRoot, saveInput, temporaryDirectory } from "./helpers.mjs";
@@ -30,6 +36,22 @@ function currentBinding(host = "codex") {
     sessionKey: scopeKey(host, "hook-session"),
     cwdHash: cwdKey(pluginRoot),
   };
+}
+
+function runHookProcessWithLimit(dataRoot, host, inputValue, inputLimit) {
+  const moduleUrl = pathToFileURL(path.join(pluginRoot, "hooks", "run.mjs")).href;
+  const script = `import { main } from ${JSON.stringify(moduleUrl)}; await main({ inputLimit: ${inputLimit} });`;
+  return spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+    cwd: pluginRoot,
+    input: inputValue,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NOVA_HOST: host,
+      NOVA_PLUGIN_ROOT: pluginRoot,
+      NOVA_PLUGIN_DATA: dataRoot,
+    },
+  });
 }
 
 test("host-native plugin variables resolve to the same shared runtime paths", () => {
@@ -80,15 +102,24 @@ test("prompt and tool hooks mark dirty while the checkpoint MCP tool is excluded
       input("PostToolUse", {
         turn_id: "turn-2",
         tool_use_id: "tool-2",
-        tool_name: "mcp__nova-forge__nova_checkpoint_save",
+        tool_name: "mcp__nova_checkpoint__nova_checkpoint_save",
+      }),
+      env,
+    );
+    handleHook(
+      input("PostToolUse", {
+        turn_id: "turn-2",
+        tool_use_id: "tool-3",
+        tool_name: "mcp__other__nova_checkpoint_save",
       }),
       env,
     );
     const state = getCheckpoint(temp.directory, currentBinding()).envelope;
-    assert.equal(state.eventWatermark, 2);
+    assert.equal(state.eventWatermark, 3);
     assert.equal(state.dirty, true);
     const stop = handleHook(input("Stop", { stop_hook_active: false }), env);
-    assert.equal(stop.decision, "block");
+    assert.equal(stop.continue, false);
+    assert.equal(Object.hasOwn(stop, "decision"), false);
   } finally {
     temp.cleanup();
   }
@@ -164,5 +195,102 @@ test("Claude Code records a PostCompact mismatch even though the event cannot bl
     assert.equal(state.compactionHandshake.status, "failed");
   } finally {
     temp.cleanup();
+  }
+});
+
+test("Claude Code UserPromptSubmit does not require Codex turn ids", () => {
+  const temp = temporaryDirectory();
+  try {
+    const env = environment(temp.directory, "claude-code");
+    handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+    const prompt = input("UserPromptSubmit", { prompt: "same prompt", turn_id: undefined });
+    assert.deepEqual(handleHook(prompt, env, { now: 2_000 }), {});
+    assert.deepEqual(handleHook(prompt, env, { now: 3_000 }), {});
+    handleHook(
+      input("PostToolUse", {
+        tool_use_id: "claude-own-tool",
+        tool_name: "mcp__plugin_nova-forge_nova-checkpoint__nova_checkpoint_save",
+      }),
+      env,
+      { now: 3_500 },
+    );
+    handleHook(
+      input("PostToolUse", {
+        tool_use_id: "claude-other-tool",
+        tool_name: "mcp__other__nova_checkpoint_save",
+      }),
+      env,
+      { now: 3_600 },
+    );
+    const state = getCheckpoint(temp.directory, currentBinding("claude-code"), { now: 4_000 }).envelope;
+    assert.equal(state.eventWatermark, 3);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("Claude Code PreCompact setup failures use its native block decision", () => {
+  const temp = temporaryDirectory();
+  try {
+    const output = handleHook(
+      input("PreCompact", { trigger: "auto", session_id: "" }),
+      environment(temp.directory, "claude-code"),
+    );
+    assert.equal(output.decision, "block");
+    assert.match(output.reason, /SESSION_ID_UNAVAILABLE/);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("malformed Claude hook input exits 2 so PreCompact cannot fail open", () => {
+  const temp = temporaryDirectory();
+  try {
+    const result = spawnSync(process.execPath, [path.join(pluginRoot, "hooks", "run.mjs")], {
+      cwd: pluginRoot,
+      input: "{not-json",
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NOVA_HOST: "claude-code",
+        NOVA_PLUGIN_ROOT: pluginRoot,
+        NOVA_PLUGIN_DATA: temp.directory,
+      },
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Nova hook failed/);
+    assert.equal(result.stdout, "");
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("hook input accepts the exact byte boundary and keeps 1M-context headroom", async () => {
+  assert.equal(HOOK_INPUT_LIMIT, 256 * 1024 * 1024);
+  const json = '{"padding":"0123456789"}';
+  assert.equal(Buffer.byteLength(json), 24);
+  assert.deepEqual(await readHookInput(Readable.from([json]), 24), { padding: "0123456789" });
+});
+
+test("oversized hook input fails closed for both hosts before state advances", () => {
+  for (const host of ["codex", "claude-code"]) {
+    const temp = temporaryDirectory();
+    try {
+      const result = runHookProcessWithLimit(temp.directory, host, 'x'.repeat(65), 64);
+      assert.deepEqual(fs.readdirSync(temp.directory), []);
+      if (host === "claude-code") {
+        assert.equal(result.status, 2);
+        assert.equal(result.stdout, "");
+        assert.match(result.stderr, /hook input exceeds the 64-byte safety limit/);
+      } else {
+        assert.equal(result.status, 0);
+        const output = JSON.parse(result.stdout);
+        assert.equal(output.continue, false);
+        assert.match(output.stopReason, /hook input exceeds the 64-byte safety limit/);
+        assert.equal(result.stderr, "");
+      }
+    } finally {
+      temp.cleanup();
+    }
   }
 });

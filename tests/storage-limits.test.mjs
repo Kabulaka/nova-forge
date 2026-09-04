@@ -6,8 +6,10 @@ import { SESSION_TTL_MS } from "../runtime/core/constants.mjs";
 import {
   cleanupExpiredScopes,
   initialEnvelope,
+  withScopeLock,
   writeEnvelope,
 } from "../runtime/core/storage.mjs";
+import { withOwnerLock } from "../runtime/core/util.mjs";
 import { binding, temporaryDirectory } from "./helpers.mjs";
 
 function stateDirectory(root, current) {
@@ -32,13 +34,17 @@ test("expired scopes are cleaned oldest-first only after a nonblocking lock and 
       now: 0,
     });
     const directory = stateDirectory(temp.directory, expired);
-    fs.mkdirSync(path.join(directory, ".lock"));
+    fs.writeFileSync(
+      path.join(directory, ".lock"),
+      JSON.stringify({ pid: process.pid, token: "held-by-test" }),
+      "utf8",
+    );
 
     const skipped = cleanupExpiredScopes(temp.directory, { now: SESSION_TTL_MS + 1 });
     assert.equal(skipped.removed, 0);
     assert.equal(fs.existsSync(path.join(directory, "current.json")), true);
 
-    fs.rmdirSync(path.join(directory, ".lock"));
+    fs.unlinkSync(path.join(directory, ".lock"));
     const cleaned = cleanupExpiredScopes(temp.directory, { now: SESSION_TTL_MS + 1 });
     assert.equal(cleaned.removed, 1);
     assert.equal(cleaned.reclaimedBytes > 0, true);
@@ -174,6 +180,139 @@ test("failed new scopes do not consume the exact host session quota", () => {
         }),
       { code: "SESSION_QUOTA" },
     );
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("atomic write faults restore current and backup without temporary files", () => {
+  const steps = [
+    "write-temp",
+    "fsync-temp",
+    "stage-backup",
+    "stage-current",
+    "install-current",
+    "fsync-directory",
+  ];
+  for (const step of steps) {
+    const temp = temporaryDirectory();
+    try {
+      const current = binding("codex", `atomic-${step}`);
+      const first = initialEnvelope(current, "0.1.0", 1_000);
+      writeEnvelope(temp.directory, current, first, { rotateCurrentToBackup: false, now: 1_000 });
+      const second = initialEnvelope(current, "0.1.0", 2_000);
+      second.leaseVersion = 2;
+      writeEnvelope(temp.directory, current, second, { rotateCurrentToBackup: true, now: 2_000 });
+      const directory = stateDirectory(temp.directory, current);
+      const beforeCurrent = fs.readFileSync(path.join(directory, "current.json"), "utf8");
+      const beforeBackup = fs.readFileSync(path.join(directory, "backup.json"), "utf8");
+      const replacement = initialEnvelope(current, "0.1.0", 3_000);
+      replacement.leaseVersion = 3;
+
+      assert.throws(() =>
+        writeEnvelope(temp.directory, current, replacement, {
+          rotateCurrentToBackup: true,
+          now: 3_000,
+          faultInjector(candidate) {
+            if (candidate === step) throw new Error(`fault:${step}`);
+          },
+        }),
+      );
+      assert.equal(fs.readFileSync(path.join(directory, "current.json"), "utf8"), beforeCurrent);
+      assert.equal(fs.readFileSync(path.join(directory, "backup.json"), "utf8"), beforeBackup);
+      assert.equal(fs.readdirSync(directory).some((name) => name.endsWith(".tmp")), false);
+    } finally {
+      temp.cleanup();
+    }
+  }
+});
+
+test("quota ledger avoids full-tree rebuilds on ordinary replacements", () => {
+  const temp = temporaryDirectory();
+  try {
+    const current = binding("codex", "ledger-session");
+    let rebuilds = 0;
+    const options = {
+      rotateCurrentToBackup: false,
+      quotaObserver(event) {
+        if (event === "rebuild") rebuilds += 1;
+      },
+    };
+    writeEnvelope(temp.directory, current, initialEnvelope(current, "0.1.0", 1_000), options);
+    const replacement = initialEnvelope(current, "0.1.0", 2_000);
+    replacement.leaseVersion = 2;
+    writeEnvelope(temp.directory, current, replacement, options);
+    assert.equal(rebuilds, 1);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("an old lock owned by a live process is never reclaimed by age", () => {
+  const temp = temporaryDirectory();
+  try {
+    const current = binding("codex", "live-lock");
+    const directory = stateDirectory(temp.directory, current);
+    fs.mkdirSync(directory, { recursive: true });
+    const lock = path.join(directory, ".lock");
+    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, token: "still-live" }), "utf8");
+    fs.utimesSync(lock, new Date(0), new Date(0));
+    assert.throws(() => withScopeLock(temp.directory, current, () => {}, 0), {
+      code: "LOCK_TIMEOUT",
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("a lock owner fails closed if its ownership file disappears", () => {
+  const temp = temporaryDirectory();
+  try {
+    const lock = path.join(temp.directory, "owner.lock");
+    assert.throws(
+      () =>
+        withOwnerLock(lock, () => fs.unlinkSync(lock), {
+          timeoutMs: 0,
+        }),
+      { code: "LOCK_OWNERSHIP_LOST" },
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("an invalid quota ledger is rebuilt without following forged paths", () => {
+  const temp = temporaryDirectory();
+  try {
+    const stateRoot = path.join(temp.directory, "state");
+    fs.mkdirSync(stateRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, ".quota-usage.json"),
+      JSON.stringify({
+        version: 1,
+        scopes: {
+          forged: {
+            host: "../../outside",
+            sessionKey: "forged",
+            bytes: 1,
+            pending: true,
+          },
+        },
+      }),
+      "utf8",
+    );
+    const current = binding("codex", "valid-ledger-rebuild");
+    let rebuilds = 0;
+    writeEnvelope(temp.directory, current, initialEnvelope(current, "0.1.0", 1_000), {
+      rotateCurrentToBackup: false,
+      quotaObserver(event) {
+        if (event === "rebuild") rebuilds += 1;
+      },
+    });
+    assert.equal(rebuilds, 1);
+    const ledger = JSON.parse(fs.readFileSync(path.join(stateRoot, ".quota-usage.json"), "utf8"));
+    assert.equal(Object.keys(ledger.scopes).length, 1);
+    assert.equal(Object.values(ledger.scopes)[0].host, "codex");
   } finally {
     temp.cleanup();
   }

@@ -17,6 +17,7 @@
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
     ".codex-plugin/plugin.json",
+    ".mcp.json",
     "codex/AGENTS.global.md",
     "hooks/",
     "runtime/",

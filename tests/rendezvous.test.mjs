@@ -13,22 +13,80 @@ test("one hook claim binds exactly one MCP instance without exposing session id"
   try {
     const sessionKey = scopeKey("codex", "raw-session-id");
     assert.equal(
-      claimSession(temp.directory, { host: "codex", cwd: pluginRoot, sessionKey }).status,
+      claimSession(temp.directory, { host: "codex", cwd: pluginRoot, sessionKey, now: 1_000 }).status,
       "pending",
     );
     const registration = registerMcpInstance(temp.directory, {
       host: "codex",
       cwd: pluginRoot,
+      now: 1_001,
     });
-    assert.equal(registration.outcome.status, "bound");
+    assert.equal(registration.outcome.status, "pending");
     assert.throws(
-      () => consumeBinding(temp.directory, { ...registration, capability: "replayed-capability" }),
+      () =>
+        consumeBinding(
+          temp.directory,
+          { ...registration, capability: "replayed-capability" },
+          { now: 1_200 },
+        ),
       { code: "BINDING_REPLAY" },
     );
-    const binding = consumeBinding(temp.directory, registration);
+    const binding = consumeBinding(temp.directory, registration, { now: 1_201 });
     assert.equal(binding.sessionKey, sessionKey);
     assert.equal(JSON.stringify(binding).includes("raw-session-id"), false);
     assert.equal(consumeBinding(temp.directory, registration), null);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("rendezvous rejects a second instance that arrives inside the settle window", () => {
+  const temp = temporaryDirectory();
+  try {
+    const sessionKey = scopeKey("codex", "two-instances");
+    claimSession(temp.directory, { host: "codex", cwd: pluginRoot, sessionKey, now: 1_000 });
+    const first = registerMcpInstance(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      now: 1_010,
+    });
+    const second = registerMcpInstance(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      now: 1_050,
+    });
+    assert.equal(first.outcome.status, "pending");
+    assert.equal(second.outcome.status, "ambiguous");
+    assert.equal(consumeBinding(temp.directory, first, { now: 1_200 }), null);
+    assert.equal(consumeBinding(temp.directory, second, { now: 1_200 }), null);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("rendezvous rejects a second claim that arrives inside the settle window", () => {
+  const temp = temporaryDirectory();
+  try {
+    const registration = registerMcpInstance(temp.directory, {
+      host: "claude-code",
+      cwd: pluginRoot,
+      now: 1_000,
+    });
+    const first = claimSession(temp.directory, {
+      host: "claude-code",
+      cwd: pluginRoot,
+      sessionKey: scopeKey("claude-code", "claim-a"),
+      now: 1_010,
+    });
+    const second = claimSession(temp.directory, {
+      host: "claude-code",
+      cwd: pluginRoot,
+      sessionKey: scopeKey("claude-code", "claim-b"),
+      now: 1_050,
+    });
+    assert.equal(first.status, "pending");
+    assert.equal(second.status, "ambiguous");
+    assert.equal(consumeBinding(temp.directory, registration, { now: 1_200 }), null);
   } finally {
     temp.cleanup();
   }

@@ -13,10 +13,11 @@ import {
   canonicalClone,
   ensurePrivateDirectory,
   parseIso,
+  randomId,
   sha256,
-  sleepSync,
   stableStringify,
   utcIso,
+  withOwnerLock,
 } from "./util.mjs";
 
 function stateDirectory(dataRoot, binding) {
@@ -153,50 +154,142 @@ function fileSize(file) {
   }
 }
 
-function sessionCount(dataRoot, host) {
-  const root = path.join(dataRoot, "state", host);
-  if (!fs.existsSync(root)) return 0;
-  return fs.readdirSync(root, { withFileTypes: true }).filter((entry) => {
-    if (!entry.isDirectory()) return false;
-    const directory = path.join(root, entry.name);
-    return (
-      fs.existsSync(path.join(directory, "current.json")) ||
-      fs.existsSync(path.join(directory, "backup.json"))
-    );
-  }).length;
+function quotaUsageFile(dataRoot) {
+  return path.join(dataRoot, "state", ".quota-usage.json");
+}
+
+function quotaScopeKey(binding) {
+  return `${binding.host}/${binding.sessionKey}`;
+}
+
+function isValidQuotaEntry(key, entry) {
+  return (
+    entry !== null &&
+    typeof entry === "object" &&
+    !Array.isArray(entry) &&
+    (entry.host === "codex" || entry.host === "claude-code") &&
+    typeof entry.sessionKey === "string" &&
+    /^[a-f0-9]{64}$/.test(entry.sessionKey) &&
+    key === quotaScopeKey(entry) &&
+    Number.isSafeInteger(entry.bytes) &&
+    entry.bytes >= 0 &&
+    typeof entry.pending === "boolean"
+  );
+}
+
+function scopeBytes(dataRoot, binding) {
+  const directory = stateDirectory(dataRoot, binding);
+  return (
+    fileSize(path.join(directory, "current.json")) +
+    fileSize(path.join(directory, "backup.json"))
+  );
+}
+
+function rebuildQuotaUsage(dataRoot, observer) {
+  observer?.("rebuild");
+  const stateRoot = path.join(dataRoot, "state");
+  const usage = { version: 1, scopes: {} };
+  if (!fs.existsSync(stateRoot)) return usage;
+  for (const hostEntry of fs.readdirSync(stateRoot, { withFileTypes: true })) {
+    if (
+      !hostEntry.isDirectory() ||
+      (hostEntry.name !== "codex" && hostEntry.name !== "claude-code")
+    ) {
+      continue;
+    }
+    const hostRoot = path.join(stateRoot, hostEntry.name);
+    for (const scopeEntry of fs.readdirSync(hostRoot, { withFileTypes: true })) {
+      if (!scopeEntry.isDirectory() || !/^[a-f0-9]{64}$/.test(scopeEntry.name)) continue;
+      const binding = { host: hostEntry.name, sessionKey: scopeEntry.name };
+      const bytes = scopeBytes(dataRoot, binding);
+      if (bytes > 0) {
+        usage.scopes[quotaScopeKey(binding)] = {
+          host: binding.host,
+          sessionKey: binding.sessionKey,
+          bytes,
+          pending: false,
+        };
+      }
+    }
+  }
+  return usage;
+}
+
+function loadQuotaUsage(dataRoot, observer) {
+  let usage;
+  try {
+    usage = JSON.parse(fs.readFileSync(quotaUsageFile(dataRoot), "utf8"));
+    if (
+      usage?.version !== 1 ||
+      usage.scopes === null ||
+      typeof usage.scopes !== "object" ||
+      Array.isArray(usage.scopes) ||
+      Object.entries(usage.scopes).some(([key, entry]) => !isValidQuotaEntry(key, entry))
+    ) {
+      throw new NovaError("INVALID_QUOTA_LEDGER", "quota usage ledger is invalid");
+    }
+  } catch (error) {
+    if (
+      error?.code !== "ENOENT" &&
+      !(error instanceof SyntaxError) &&
+      error?.code !== "INVALID_QUOTA_LEDGER"
+    ) {
+      throw error;
+    }
+    usage = rebuildQuotaUsage(dataRoot, observer);
+  }
+  for (const [key, entry] of Object.entries(usage.scopes)) {
+    if (!entry?.pending) continue;
+    const bytes = scopeBytes(dataRoot, entry);
+    if (bytes === 0) delete usage.scopes[key];
+    else usage.scopes[key] = { ...entry, bytes, pending: false };
+  }
+  return usage;
+}
+
+function writeQuotaUsage(dataRoot, usage) {
+  const stateRoot = path.join(dataRoot, "state");
+  ensurePrivateDirectory(stateRoot);
+  const file = quotaUsageFile(dataRoot);
+  const temporary = path.join(stateRoot, `.quota-usage.${process.pid}.${randomId(8)}.tmp`);
+  try {
+    const descriptor = fs.openSync(temporary, "wx", 0o600);
+    try {
+      fs.writeFileSync(descriptor, `${stableStringify(usage)}\n`, "utf8");
+      fs.fsyncSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    fs.renameSync(temporary, file);
+    syncDirectory(stateRoot);
+  } finally {
+    tryRemove(temporary);
+  }
+}
+
+function quotaTotals(usage) {
+  const totals = { globalBytes: 0, hosts: {} };
+  for (const entry of Object.values(usage.scopes)) {
+    if (!Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || typeof entry.host !== "string") {
+      throw new NovaError("INVALID_QUOTA_LEDGER", "quota usage ledger entry is invalid");
+    }
+    totals.globalBytes += entry.bytes;
+    const host = (totals.hosts[entry.host] ??= { bytes: 0, sessions: 0 });
+    host.bytes += entry.bytes;
+    if (entry.bytes > 0) host.sessions += 1;
+  }
+  return totals;
 }
 
 function withQuotaLock(dataRoot, callback) {
   const stateRoot = path.join(dataRoot, "state");
   ensurePrivateDirectory(stateRoot);
   const lock = path.join(stateRoot, ".quota.lock");
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  while (true) {
-    try {
-      fs.mkdirSync(lock, { mode: 0o700 });
-      break;
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - fs.statSync(lock).mtimeMs > LOCK_TIMEOUT_MS * 5) fs.rmdirSync(lock);
-      } catch (statError) {
-        if (statError?.code !== "ENOENT" && statError?.code !== "ENOTEMPTY") throw statError;
-      }
-      if (Date.now() >= deadline) {
-        throw new NovaError("QUOTA_LOCK_TIMEOUT", "checkpoint quota lock timed out");
-      }
-      sleepSync(10);
-    }
-  }
-  try {
-    return callback();
-  } finally {
-    try {
-      fs.rmdirSync(lock);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-  }
+  return withOwnerLock(lock, callback, {
+    timeoutMs: LOCK_TIMEOUT_MS,
+    timeoutCode: "QUOTA_LOCK_TIMEOUT",
+    timeoutMessage: "checkpoint quota lock timed out",
+  });
 }
 
 function cleanupSnapshot(directory, expectedBinding) {
@@ -327,26 +420,107 @@ export function cleanupExpiredScopes(
   return { removed, reclaimedBytes };
 }
 
-function enforceQuota(dataRoot, binding, newBytes, rotateCurrentToBackup, limits, now) {
-  cleanupExpiredScopes(dataRoot, { now, excludeBinding: binding });
-  const hostRoot = path.join(dataRoot, "state", binding.host);
-  const globalRoot = path.join(dataRoot, "state");
+function quotaProjection(dataRoot, usage, binding, newBytes, rotateCurrentToBackup) {
   const scopeDirectory = stateDirectory(dataRoot, binding);
   const currentFile = path.join(scopeDirectory, "current.json");
   const backupFile = path.join(scopeDirectory, "backup.json");
   const currentBytes = fileSize(currentFile);
   const backupBytes = fileSize(backupFile);
-  const scopeHasState = currentBytes > 0 || backupBytes > 0;
-  if (!scopeHasState && sessionCount(dataRoot, binding.host) >= limits.hostSessions) {
-    throw new NovaError("SESSION_QUOTA", `host session quota ${limits.hostSessions} reached`);
+  const key = quotaScopeKey(binding);
+  const actualBytes = currentBytes + backupBytes;
+  if (actualBytes === 0) delete usage.scopes[key];
+  else {
+    usage.scopes[key] = {
+      host: binding.host,
+      sessionKey: binding.sessionKey,
+      bytes: actualBytes,
+      pending: false,
+    };
   }
-  const replacedBytes = rotateCurrentToBackup ? backupBytes : currentBytes;
-  const projectedDelta = newBytes - replacedBytes;
-  if (directorySize(hostRoot) + projectedDelta > limits.hostBytes) {
-    throw new NovaError("HOST_QUOTA", `host checkpoint quota ${limits.hostBytes} bytes exceeded`);
+  const finalBytes = newBytes + (rotateCurrentToBackup ? currentBytes : backupBytes);
+  const totals = quotaTotals(usage);
+  const host = totals.hosts[binding.host] ?? { bytes: 0, sessions: 0 };
+  return {
+    key,
+    finalBytes,
+    projectedHostBytes: host.bytes - actualBytes + finalBytes,
+    projectedGlobalBytes: totals.globalBytes - actualBytes + finalBytes,
+    projectedHostSessions: host.sessions - (actualBytes > 0 ? 1 : 0) + (finalBytes > 0 ? 1 : 0),
+  };
+}
+
+function quotaError(projection, limits) {
+  if (projection.projectedHostSessions > limits.hostSessions) {
+    return new NovaError("SESSION_QUOTA", `host session quota ${limits.hostSessions} reached`);
   }
-  if (directorySize(globalRoot) + projectedDelta > limits.globalBytes) {
-    throw new NovaError("GLOBAL_QUOTA", `global checkpoint quota ${limits.globalBytes} bytes exceeded`);
+  if (projection.projectedHostBytes > limits.hostBytes) {
+    return new NovaError("HOST_QUOTA", `host checkpoint quota ${limits.hostBytes} bytes exceeded`);
+  }
+  if (projection.projectedGlobalBytes > limits.globalBytes) {
+    return new NovaError("GLOBAL_QUOTA", `global checkpoint quota ${limits.globalBytes} bytes exceeded`);
+  }
+  return null;
+}
+
+function reserveQuota(
+  dataRoot,
+  binding,
+  newBytes,
+  rotateCurrentToBackup,
+  limits,
+  now,
+  observer,
+) {
+  let usage = loadQuotaUsage(dataRoot, observer);
+  let projection = quotaProjection(dataRoot, usage, binding, newBytes, rotateCurrentToBackup);
+  if (quotaError(projection, limits)) {
+    cleanupExpiredScopes(dataRoot, { now, excludeBinding: binding });
+    usage = rebuildQuotaUsage(dataRoot, observer);
+    projection = quotaProjection(dataRoot, usage, binding, newBytes, rotateCurrentToBackup);
+  }
+  const error = quotaError(projection, limits);
+  if (error) throw error;
+  usage.scopes[projection.key] = {
+    host: binding.host,
+    sessionKey: binding.sessionKey,
+    bytes: projection.finalBytes,
+    pending: true,
+  };
+  writeQuotaUsage(dataRoot, usage);
+  return { usage, key: projection.key };
+}
+
+function settleQuota(dataRoot, reservation, binding) {
+  const bytes = scopeBytes(dataRoot, binding);
+  if (bytes === 0) delete reservation.usage.scopes[reservation.key];
+  else {
+    reservation.usage.scopes[reservation.key] = {
+      host: binding.host,
+      sessionKey: binding.sessionKey,
+      bytes,
+      pending: false,
+    };
+  }
+  try {
+    writeQuotaUsage(dataRoot, reservation.usage);
+  } catch {
+    // The durable pending reservation is reconciled against actual files by the next writer.
+  }
+}
+
+function rollbackStateWrite(
+  directory,
+  { currentFile, backupFile, temporary, stagedCurrent, stagedBackup, installed, promoted },
+) {
+  try {
+    if (installed) tryRemove(currentFile);
+    if (promoted && fs.existsSync(backupFile)) fs.renameSync(backupFile, currentFile);
+    else if (fs.existsSync(stagedCurrent)) fs.renameSync(stagedCurrent, currentFile);
+    if (fs.existsSync(stagedBackup)) fs.renameSync(stagedBackup, backupFile);
+    tryRemove(temporary);
+    syncDirectory(directory);
+  } catch (error) {
+    throw new NovaError("ATOMIC_ROLLBACK_FAILED", `checkpoint rollback failed: ${error.message}`);
   }
 }
 
@@ -362,83 +536,98 @@ export function writeEnvelope(
       hostSessions: HOST_SESSION_LIMIT,
     },
     now = Date.now(),
+    faultInjector,
+    quotaObserver,
   } = {},
 ) {
   const directory = stateDirectory(dataRoot, binding);
   ensurePrivateDirectory(directory);
   const currentFile = path.join(directory, "current.json");
   const backupFile = path.join(directory, "backup.json");
-  const temporary = path.join(directory, `.current.${process.pid}.${Date.now()}.tmp`);
+  const transactionId = `${process.pid}.${randomId(8)}`;
+  const temporary = path.join(directory, `.current.${transactionId}.tmp`);
+  const stagedCurrent = path.join(directory, `.current-old.${transactionId}.tmp`);
+  const stagedBackup = path.join(directory, `.backup-old.${transactionId}.tmp`);
   const sealed = sealEnvelope(envelope);
   const serialized = `${stableStringify(sealed)}\n`;
-  withQuotaLock(dataRoot, () => {
-    enforceQuota(
+  return withQuotaLock(dataRoot, () => {
+    const reservation = reserveQuota(
       dataRoot,
       binding,
       Buffer.byteLength(serialized, "utf8"),
       rotateCurrentToBackup,
       limits,
       now,
+      quotaObserver,
     );
-    fs.writeFileSync(temporary, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    const descriptor = fs.openSync(temporary, "r");
+    const state = {
+      currentFile,
+      backupFile,
+      temporary,
+      stagedCurrent,
+      stagedBackup,
+      installed: false,
+      promoted: false,
+    };
     try {
-      fs.fsyncSync(descriptor);
-    } finally {
-      fs.closeSync(descriptor);
-    }
-    try {
-      if (fs.existsSync(currentFile) && rotateCurrentToBackup) {
-        tryRemove(backupFile);
-        fs.renameSync(currentFile, backupFile);
-      } else if (fs.existsSync(currentFile)) {
-        tryRemove(currentFile);
+      faultInjector?.("write-temp");
+      fs.writeFileSync(temporary, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      const descriptor = fs.openSync(temporary, "r");
+      try {
+        faultInjector?.("fsync-temp");
+        fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
       }
+      if (rotateCurrentToBackup && fs.existsSync(backupFile)) {
+        faultInjector?.("stage-backup");
+        fs.renameSync(backupFile, stagedBackup);
+      }
+      if (fs.existsSync(currentFile)) {
+        faultInjector?.("stage-current");
+        if (rotateCurrentToBackup) {
+          fs.renameSync(currentFile, backupFile);
+          state.promoted = true;
+        } else {
+          fs.renameSync(currentFile, stagedCurrent);
+        }
+      }
+      faultInjector?.("install-current");
       fs.renameSync(temporary, currentFile);
+      state.installed = true;
+      faultInjector?.("fsync-directory");
       syncDirectory(directory);
     } catch (error) {
-      tryRemove(temporary);
-      if (!fs.existsSync(currentFile) && fs.existsSync(backupFile)) {
-        fs.copyFileSync(backupFile, currentFile, fs.constants.COPYFILE_EXCL);
+      let failure = error;
+      try {
+        rollbackStateWrite(directory, state);
+      } catch (rollbackError) {
+        failure = rollbackError;
       }
-      throw error;
+      settleQuota(dataRoot, reservation, binding);
+      throw failure;
     }
+    for (const file of [stagedCurrent, stagedBackup, temporary]) {
+      try {
+        tryRemove(file);
+      } catch {
+        // The authoritative current/backup pair is already committed and directory-synced.
+      }
+    }
+    settleQuota(dataRoot, reservation, binding);
+    return sealed;
   });
-  return sealed;
 }
 
 export function withScopeLock(dataRoot, binding, callback, timeoutMs = LOCK_TIMEOUT_MS) {
   const directory = stateDirectory(dataRoot, binding);
   ensurePrivateDirectory(directory);
   const lock = path.join(directory, ".lock");
-  const deadline = Date.now() + timeoutMs;
-  const staleAfterMs = Math.max(timeoutMs, LOCK_TIMEOUT_MS) * 5;
-  while (true) {
-    try {
-      fs.mkdirSync(lock, { mode: 0o700 });
-      break;
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - fs.statSync(lock).mtimeMs > staleAfterMs) fs.rmdirSync(lock);
-      } catch (statError) {
-        if (statError?.code !== "ENOENT" && statError?.code !== "ENOTEMPTY") throw statError;
-      }
-      if (Date.now() >= deadline) {
-        throw new NovaError("LOCK_TIMEOUT", "checkpoint scope lock timed out");
-      }
-      sleepSync(10);
-    }
-  }
-  try {
-    return callback();
-  } finally {
-    try {
-      fs.rmdirSync(lock);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-  }
+  return withOwnerLock(lock, callback, {
+    timeoutMs,
+    timeoutCode: "LOCK_TIMEOUT",
+    timeoutMessage: "checkpoint scope lock timed out",
+  });
 }
 
 function isCoveredAuthority(envelope) {

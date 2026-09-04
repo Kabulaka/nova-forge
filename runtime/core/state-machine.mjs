@@ -15,6 +15,12 @@ function remember(values, value) {
   return next.slice(-MAX_RECENT_IDS);
 }
 
+function assertCompactionTrigger(trigger) {
+  if (trigger !== "manual" && trigger !== "auto") {
+    throw new NovaError("INVALID_COMPACTION_TRIGGER", "compaction trigger must be manual or auto");
+  }
+}
+
 export function startSession(
   dataRoot,
   binding,
@@ -94,10 +100,17 @@ export function saveCheckpoint(
           `${relation} coveredEventWatermark ${normalized.coveredEventWatermark}; current is ${draft.eventWatermark}`,
         );
       }
-      const authorityChanged =
-        stableStringify(draft.taskCapsule) !== stableStringify(normalized.taskCapsule) ||
+      const capsuleChanged = stableStringify(draft.taskCapsule) !== stableStringify(normalized.taskCapsule);
+      const documentsChanged =
         stableStringify(draft.controlDocuments) !== stableStringify(normalized.controlDocuments);
-      if (authorityChanged) draft.authorityGeneration += 1;
+      if (capsuleChanged) draft.authorityGeneration += 1;
+      if ((capsuleChanged || documentsChanged) && draft.compactionHandshake.status === "frozen") {
+        draft.compactionHandshake = {
+          status: "failed",
+          failureCode: "CHECKPOINT_CHANGED_AFTER_FREEZE",
+          failedAt: utcIso(now),
+        };
+      }
       draft.pluginVersion = pluginVersion;
       draft.taskCapsule = canonicalClone(normalized.taskCapsule);
       draft.controlDocuments = canonicalClone(normalized.controlDocuments);
@@ -143,6 +156,7 @@ export function freezeCompaction(
   trigger,
   { now = Date.now() } = {},
 ) {
+  assertCompactionTrigger(trigger);
   return mutateEnvelope(
     dataRoot,
     binding,
@@ -180,6 +194,7 @@ export function completeCompaction(
   trigger,
   { now = Date.now() } = {},
 ) {
+  assertCompactionTrigger(trigger);
   const outcome = mutateEnvelope(
     dataRoot,
     binding,
