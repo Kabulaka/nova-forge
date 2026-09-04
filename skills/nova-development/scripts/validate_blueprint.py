@@ -28,9 +28,10 @@ BLUEPRINT_SECTIONS = (
     "代码结构",
     "模块架构",
     "跨模块契约",
-    "待开发功能",
+    "交付工作项",
     "系统架构",
 )
+LEGACY_BLUEPRINT_SECTIONS = BLUEPRINT_SECTIONS[:5] + ("待开发功能",) + BLUEPRINT_SECTIONS[6:]
 FORBIDDEN_BLUEPRINT_HEADINGS = {"非目标", "架构红线", "项目级待确认事项"}
 BOUNDARY_VALUES = (
     "本期必须实现",
@@ -40,8 +41,10 @@ BOUNDARY_VALUES = (
     "必须再次确认",
 )
 LEGACY_PENDING_HEADERS = ("编号", "优先级", "来源", "功能", "设计依据", "前置依赖", "完成定义")
-PENDING_HEADERS = LEGACY_PENDING_HEADERS + ("需求引用",)
+COMPATIBLE_PENDING_HEADERS = LEGACY_PENDING_HEADERS + ("需求引用",)
+PENDING_HEADERS = ("编号", "状态") + COMPATIBLE_PENDING_HEADERS[1:]
 PENDING_SOURCES = {"用户提出", "Review-Defer", "问题诊断", "历史迁移"}
+PENDING_STATES = {"待澄清", "待开发", "待Review"}
 CODE_PLACEMENT_HEADERS = ("代码区域", "职责", "代码落位规则")
 MODULE_HEADERS = ("模块", "职责", "对外边界")
 GLOBAL_CONTRACT_HEADERS = ("契约", "适用范围", "验证")
@@ -74,9 +77,15 @@ WORK_PACKAGE_ROLES = {"能力", "收口"}
 TERMINAL_WORK_PACKAGE_STATES = {"已完成", "已废弃"}
 REFERENCED_WORK_PACKAGE_STATES = {"已确认", "开发中", "待Review"}
 
-TASK_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
+TASK_ID_RE = re.compile(
+    r"^(?:FEAT-(?:[0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})|PEND-[A-Za-z0-9._-]+)$"
+)
+LEGACY_TASK_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 REQUIREMENT_REF_RE = re.compile(
     r"^REQ-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}@v[1-9][0-9]*$"
+)
+REQUIREMENT_LINK_RE = re.compile(
+    r"^\[(REQ-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}@v[1-9][0-9]*)\]\(([^)\s]+\.md)\)$"
 )
 WORK_PACKAGE_ID_RE = re.compile(r"^WP-[A-Za-z0-9._-]+$")
 SHARED_CONTRACT_ID_RE = re.compile(r"^S-[A-Za-z0-9._-]+$")
@@ -521,8 +530,16 @@ def split_ids(value: str) -> list[str]:
 def validate_dependency(
     owner_id: str, value: str, valid_ids: set[str], id_pattern: re.Pattern[str], context: str
 ) -> list[str]:
-    if value in {"无", "待澄清"}:
+    if value == "无":
         return []
+    if context == "pending work" and value == "待澄清":
+        return []
+    if value.startswith("待确认："):
+        return [] if value.removeprefix("待确认：").strip() else [
+            f"pending {context} dependency must state the concrete question for {owner_id}"
+        ]
+    if value == "待澄清":
+        return [f"ambiguous {context} dependency for {owner_id}: 待澄清"]
     dependencies = split_ids(value)
     if not dependencies:
         return [f"invalid {context} dependency for {owner_id}: {value}"]
@@ -552,6 +569,7 @@ def validate_work_package_dependency_graph(
             if dependency in valid_ids
         ]
         if dependency_by_id.get(package_id, "无") not in {"无", "待澄清"}
+        and not dependency_by_id.get(package_id, "无").startswith("待确认：")
         else []
         for package_id in package_ids
     }
@@ -643,11 +661,13 @@ def within_design_root(blueprint: Path, target: Path) -> bool:
 
 
 def validate_design_reference(blueprint: Path, value: str) -> list[str]:
-    if value == "待澄清":
+    if value.startswith("待澄清：") and value.removeprefix("待澄清：").strip():
         return []
+    if value == "待澄清":
+        return ["design basis 待澄清 must state the missing decision"]
     match = DESIGN_LINK_RE.fullmatch(value)
     if not match:
-        return [f"design basis must be 待澄清 or one markdown file anchor link: {value}"]
+        return [f"design basis must state a concrete 待澄清 reason or one markdown file anchor link: {value}"]
     relative_path, anchor = match.groups()
     target = (blueprint.parent / relative_path).resolve()
     if not within_design_root(blueprint, target):
@@ -708,6 +728,30 @@ def referenced_design_requirement(blueprint: Path, value: str) -> str | None:
     return values[0] if len(values) == 1 else "无"
 
 
+def validate_requirement_reference(blueprint: Path, value: str) -> tuple[str | None, list[str]]:
+    if value == "无":
+        return "无", []
+    match = REQUIREMENT_LINK_RE.fullmatch(value)
+    if match is None:
+        return None, [f"requirement reference must be 无 or a REQ@version markdown link: {value}"]
+    requirement_ref, relative_path = match.groups()
+    target = (blueprint.parent / relative_path).resolve()
+    requirements_root = (blueprint.parent / "requirements").resolve()
+    try:
+        target.relative_to(requirements_root)
+    except ValueError:
+        return None, [f"requirement reference must stay under .nova/requirements: {relative_path}"]
+    text, errors = read_document(target)
+    if text is None:
+        return None, errors
+    key, version = requirement_ref.split("@", 1)
+    keys = re.findall(r"^>\s*Requirement-Key[：:]\s*(.+?)\s*$", text, re.MULTILINE)
+    versions = re.findall(r"^>\s*需求版本[：:]\s*(.+?)\s*$", text, re.MULTILINE)
+    if keys != [key] or versions != [version]:
+        return None, [f"requirement link metadata does not match {requirement_ref}: {relative_path}"]
+    return requirement_ref, []
+
+
 def head_has_legacy_pending_layout(path: Path) -> bool:
     try:
         repo_result = subprocess.run(
@@ -734,6 +778,36 @@ def head_has_legacy_pending_layout(path: Path) -> bool:
         if result.returncode == 0 and legacy_header in result.stdout:
             return True
     return False
+
+
+def head_pending_ids(path: Path) -> set[str]:
+    """Return PEND identities already present in the committed blueprint."""
+    try:
+        repo_result = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    repo = Path(repo_result.stdout.strip()).resolve()
+    try:
+        relative = path.resolve().relative_to(repo).as_posix()
+    except ValueError:
+        return set()
+    for candidate in git_head_path_candidates(relative):
+        result = subprocess.run(
+            ["git", "-C", str(repo), "show", f"HEAD:{candidate}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return set(
+                re.findall(r"^\|\s*(PEND-[A-Za-z0-9._-]+)\s*\|", result.stdout, re.MULTILINE)
+            )
+    return set()
 
 
 def git_head_matches_document(path: Path, text: str) -> bool:
@@ -780,7 +854,7 @@ def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
         errors.append(f"blueprint format upgrade required: expected version {BLUEPRINT_VERSION}, found {found}")
 
     level_two = [entry.title for entry in entries if entry.level == 2]
-    if tuple(level_two) != BLUEPRINT_SECTIONS:
+    if tuple(level_two) not in {BLUEPRINT_SECTIONS, LEGACY_BLUEPRINT_SECTIONS}:
         errors.append("blueprint level-2 sections must be exactly: " + " | ".join(BLUEPRINT_SECTIONS))
     for entry in entries:
         if entry.title in FORBIDDEN_BLUEPRINT_HEADINGS:
@@ -803,21 +877,42 @@ def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
         if section != "待开发功能" and not rows:
             errors.append(f"{name} table must contain at least one row")
 
-    pending_rows, pending_errors = table_under_heading(
-        lines, entries, "待开发功能", PENDING_HEADERS, "pending work"
-    )
-    if pending_errors:
-        legacy_rows, legacy_errors = table_under_heading(
-            lines, entries, "待开发功能", LEGACY_PENDING_HEADERS, "pending work"
+    new_pending_layout = "交付工作项" in level_two
+    if new_pending_layout:
+        pending_rows, pending_errors = table_under_heading(
+            lines, entries, "交付工作项", PENDING_HEADERS, "delivery work"
         )
-        if legacy_errors:
-            errors.extend(pending_errors)
-        elif head_has_legacy_pending_layout(path):
-            pending_rows = [row + ["无"] for row in legacy_rows]
-            warnings.append("pending work table uses legacy layout without 需求引用")
+        errors.extend(pending_errors)
+    else:
+        compatible_rows, compatible_errors = table_under_heading(
+            lines, entries, "待开发功能", COMPATIBLE_PENDING_HEADERS, "pending work"
+        )
+        if not compatible_errors:
+            pending_rows = [row[:1] + ["待澄清" if row[4].startswith("待澄清") else "待开发"] + row[1:] for row in compatible_rows]
+            warnings.append("pending work table uses legacy heading and has no explicit status")
         else:
-            errors.append("pending work table requires 需求引用; legacy layout is allowed only from Git HEAD")
-    parsed_tables["待开发功能"] = pending_rows
+            legacy_rows, legacy_errors = table_under_heading(
+                lines, entries, "待开发功能", LEGACY_PENDING_HEADERS, "pending work"
+            )
+            if legacy_errors:
+                errors.extend(compatible_errors)
+                pending_rows = []
+            elif head_has_legacy_pending_layout(path):
+                pending_rows = [
+                    row[:1]
+                    + ["待澄清" if row[4].startswith("待澄清") else "待开发"]
+                    + row[1:]
+                    + ["无"]
+                    for row in legacy_rows
+                ]
+                warnings.append("pending work table uses legacy layout without 状态 and 需求引用")
+            else:
+                errors.append(
+                    "pending work table requires 状态 and 需求引用; "
+                    "legacy layout is allowed only from Git HEAD"
+                )
+                pending_rows = []
+    parsed_tables["交付工作项"] = pending_rows
 
     contract_ids = [row[0] for row in parsed_tables.get("全局契约", [])]
     for contract_id in contract_ids:
@@ -831,15 +926,22 @@ def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
     if tuple(boundary_names) != BOUNDARY_VALUES:
         errors.append("development boundary rows must be exactly: " + " | ".join(BOUNDARY_VALUES))
 
-    pending_rows = parsed_tables.get("待开发功能", [])
+    pending_rows = parsed_tables.get("交付工作项", [])
     pending_ids = [row[0] for row in pending_rows]
     valid_pending_ids = set(pending_ids)
+    historical_pending = head_pending_ids(path) if new_pending_layout else set()
+    pending_id_pattern = TASK_ID_RE if new_pending_layout else LEGACY_TASK_ID_RE
+    dependency_context = "delivery work" if new_pending_layout else "pending work"
     for duplicate in sorted(duplicate_values(pending_ids)):
         errors.append(f"duplicate pending work id: {duplicate}")
     for cells in pending_rows:
-        task_id, priority, source, feature, design_basis, dependency, completion, requirement_ref = cells
-        if not TASK_ID_RE.fullmatch(task_id):
+        task_id, state, priority, source, feature, design_basis, dependency, completion, requirement_ref = cells
+        if not pending_id_pattern.fullmatch(task_id):
             errors.append(f"invalid pending work id: {task_id}")
+        elif new_pending_layout and task_id.startswith("PEND-") and task_id not in historical_pending:
+            errors.append(f"new delivery work must use FEAT, not PEND: {task_id}")
+        if state not in PENDING_STATES:
+            errors.append(f"invalid delivery work state for {task_id}: {state}")
         if source not in PENDING_SOURCES:
             errors.append(f"invalid pending work source for {task_id}: {source}")
         for field_name, value in (
@@ -852,20 +954,45 @@ def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:
         ):
             if not value:
                 errors.append(f"empty {field_name} for pending work {task_id}")
-        design_errors = validate_design_reference(path, design_basis)
+        design_errors = (
+            []
+            if not new_pending_layout and design_basis == "待澄清"
+            else validate_design_reference(path, design_basis)
+        )
         errors.extend(design_errors)
-        if requirement_ref != "无" and REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
-            errors.append(f"invalid requirement reference for {task_id}: {requirement_ref}")
-        if not design_errors and design_basis != "待澄清":
+        if (
+            new_pending_layout
+            and state == "待澄清"
+            and not design_basis.startswith("待澄清：")
+        ):
+            errors.append(f"待澄清 work item must state the missing design decision: {task_id}")
+        if state != "待澄清" and design_basis.startswith("待澄清"):
+            errors.append(f"{state} work item requires a confirmed design reference: {task_id}")
+        if new_pending_layout:
+            normalized_requirement, requirement_errors = validate_requirement_reference(
+                path, requirement_ref
+            )
+            errors.extend(requirement_errors)
+        else:
+            normalized_requirement = requirement_ref
+            if requirement_ref != "无" and REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
+                errors.append(f"invalid requirement reference for {task_id}: {requirement_ref}")
+        if not design_errors and not design_basis.startswith("待澄清"):
             design_requirement = referenced_design_requirement(path, design_basis)
-            if design_requirement != requirement_ref:
+            if design_requirement != normalized_requirement:
                 errors.append(
                     f"requirement reference does not match design for {task_id}: "
-                    f"blueprint={requirement_ref}, design={design_requirement or 'missing'}"
+                    f"blueprint={normalized_requirement or 'invalid'}, design={design_requirement or 'missing'}"
                 )
     for cells in pending_rows:
         errors.extend(
-            validate_dependency(cells[0], cells[5], valid_pending_ids, TASK_ID_RE, "pending work")
+            validate_dependency(
+                cells[0],
+                cells[6],
+                valid_pending_ids,
+                pending_id_pattern,
+                dependency_context,
+            )
         )
     return errors, warnings
 
@@ -1069,7 +1196,13 @@ def validate_design(
             errors.append("multi-package design must contain exactly one 收口 work package")
         if len(closure_ids) == 1:
             closure_id = closure_ids[0]
-            if not (state == "澄清中" and dependency_by_id[closure_id] == "待澄清"):
+            if not (
+                state == "澄清中"
+                and (
+                    dependency_by_id[closure_id] == "待澄清"
+                    or dependency_by_id[closure_id].startswith("待确认：")
+                )
+            ):
                 actual_dependencies = set(split_ids(dependency_by_id[closure_id]))
                 expected_dependencies = valid_package_ids - {closure_id}
                 if actual_dependencies != expected_dependencies:

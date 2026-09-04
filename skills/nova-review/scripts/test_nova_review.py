@@ -31,9 +31,11 @@ def message(
     exemption: str = "none",
     validation: str = "python3 -m unittest (pass)",
     related_work_item: str | None = None,
+    schema: str = "1",
+    subject: str | None = None,
 ) -> str:
     trailers = [
-        "Nova-Schema: 1",
+        f"Nova-Schema: {schema}",
         f"Work-Item: {work_item}",
     ]
     if related_work_item is not None:
@@ -47,7 +49,9 @@ def message(
             f"Validation: {validation}",
         )
     )
-    return f"test: change {work_item}\n\n" + "\n".join(trailers) + "\n"
+    if subject is None:
+        subject = f"test: change {work_item}"
+    return subject + "\n\n" + "\n".join(trailers) + "\n"
 
 
 def requirement_message(
@@ -454,12 +458,89 @@ class NovaReviewTests(unittest.TestCase):
             self.assertNotEqual(duplicate.returncode, 0)
             self.assertIn("already has a requirement checkpoint", duplicate.stderr)
 
+    def test_architecture_checkpoint_activates_schema_2_and_is_not_a_work_item(self) -> None:
+        requirement = "REQ-019a1234-5678-7abc-8def-0123456789ab"
+        requirement_ref = f"{requirement}@v1"
+        requirement_path = f".nova/requirements/{requirement}_架构.md"
+        architecture_ref = "ARCH-019a1234-5679-7abc-8def-0123456789ab"
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            block = (
+                "# 架构需求\n\n"
+                f"> Requirement-Key：{requirement}\n"
+                "> 需求版本：v1\n"
+            )
+            product = (
+                "| Requirement Key | 版本 | 状态 | 业务模块 | 需求块 | 已实现版本 | 实现依据 |\n"
+                "|-----------------|------|------|----------|--------|------------|----------|\n"
+                f"| {requirement} | v1 | 待实现 | 治理 | [架构](requirements/{requirement}_架构.md) | 无 | 无 |\n"
+            )
+            block_path = repo / requirement_path
+            block_path.parent.mkdir(parents=True)
+            block_path.write_text(block, encoding="utf-8")
+            product_path = repo / ".nova/PRODUCT_REQUIREMENTS.md"
+            product_path.write_text(product, encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "add", requirement_path, ".nova/PRODUCT_REQUIREMENTS.md"],
+                check=True,
+            )
+            requirement_commit_message = requirement_message(
+                requirement_ref,
+                requirement_path,
+                NOVA_TOOL.hashlib.sha256(block.encode("utf-8")).hexdigest(),
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+                input=requirement_commit_message,
+                text=True,
+                check=True,
+            )
+
+            architecture_path = repo / ".nova/architecture/foundation/delivery.md"
+            architecture_path.parent.mkdir(parents=True)
+            architecture_path.write_text("# Delivery\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "add", ".nova/architecture/foundation/delivery.md"],
+                check=True,
+            )
+            diff = NOVA_TOOL.run_git(
+                repo, "diff", "--cached", "--binary", "--no-ext-diff"
+            )
+            architecture_message = (
+                "arch(architecture): 固化交付架构边界\n\n"
+                "Nova-Schema: 2\n"
+                "Commit-Kind: architecture\n"
+                f"Architecture-Ref: {architecture_ref}\n"
+                f"Requirement-Ref: {requirement_ref}\n"
+                "Validation: architecture contracts (pass)\n"
+            )
+            accepted = self.validate(repo, architecture_message, diff, repo)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+                input=architecture_message,
+                text=True,
+                check=True,
+            )
+            selected = self.run_tool("select", "--repo", str(repo), "--mode", "all")
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(json.loads(selected.stdout), [])
+
+            legacy = self.validate(
+                repo,
+                message("MAINT-001", "maintenance"),
+                repo=repo,
+            )
+            self.assertNotEqual(legacy.returncode, 0)
+            self.assertIn("Nova-Schema must be 2", legacy.stderr)
+
     def test_uuid7_work_items_generate_validate_and_remain_unique(self) -> None:
         generated: set[str] = set()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.assertEqual(list(root.rglob("*")), [])
-            for change_class, prefix in NOVA_TOOL.WORK_ITEM_PREFIXES.items():
+            for change_class, prefix in NOVA_TOOL.NEW_WORK_ITEM_PREFIXES.items():
                 result = self.run_tool("new-id", "--class", change_class, cwd=root)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 work_item = result.stdout.strip()
@@ -476,27 +557,49 @@ class NovaReviewTests(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0)
             self.assertEqual(list(root.rglob("*")), [])
 
-        generated.update(NOVA_TOOL.new_work_item("adhoc") for _ in range(2_000))
+        generated.update(NOVA_TOOL.new_work_item("fix") for _ in range(2_000))
         self.assertEqual(len(generated), 2_000)
 
     def test_uuid7_validation_is_strict_and_legacy_ids_remain_valid(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for change_class in NOVA_TOOL.WORK_ITEM_PREFIXES:
+            for change_class in NOVA_TOOL.NEW_WORK_ITEM_PREFIXES:
                 work_item = NOVA_TOOL.new_work_item(change_class)
                 design_ref = (
                     ".nova/design/2026-08-27_x.md#wp-01-x"
-                    if change_class == "designed"
+                    if change_class == "feature"
                     else "none"
                 )
+                commit_type = NOVA_TOOL.SUBJECT_TYPES_BY_CLASS[change_class]
+                result = self.validate(
+                    root,
+                    message(
+                        work_item,
+                        change_class,
+                        design_ref,
+                        schema="2",
+                        subject=f"{commit_type}(delivery): 验证任务分类",
+                    ),
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+            for work_item, change_class, design_ref in (
+                ("PEND-001", "designed", ".nova/design/2026-08-27_x.md#wp-01-x"),
+                ("FIX-001", "adhoc", "none"),
+                ("MAINT-001", "maintenance", "none"),
+            ):
                 result = self.validate(root, message(work_item, change_class, design_ref))
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+            for legacy_class in ("designed", "adhoc"):
+                with self.assertRaises(NOVA_TOOL.NovaError):
+                    NOVA_TOOL.new_work_item(legacy_class)
 
             invalid = (
                 ("PEND-550e8400-e29b-41d4-a716-446655440000", "designed"),
                 ("PEND-018F22E2-79B0-7ABC-8123-456789ABCDEF", "designed"),
                 ("PEND-018f22e2-79b0-7000-7123-456789abcdef", "designed"),
-                (NOVA_TOOL.new_work_item("adhoc"), "designed"),
+                (NOVA_TOOL.new_work_item("fix"), "designed"),
                 ("FIX-not-a-uuid", "adhoc"),
             )
             for work_item, change_class in invalid:
@@ -509,6 +612,44 @@ class NovaReviewTests(unittest.TestCase):
                     result = self.validate(root, message(work_item, change_class, design_ref))
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("Work-Item does not match", result.stderr)
+
+    def test_schema_2_subject_scope_language_and_type_are_enforced(self) -> None:
+        work_item = NOVA_TOOL.new_work_item("feature")
+        valid = message(
+            work_item,
+            "feature",
+            ".nova/design/2026-09-04_x.md#wp-01-x",
+            schema="2",
+            subject="feat(delivery): 固化交付分类协议",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertEqual(self.validate(root, valid).returncode, 0)
+            for subject, expected in (
+                ("feat(governance): 固化交付分类协议", "scope is not allowed"),
+                ("feat(delivery): unify delivery protocol", "must contain Chinese"),
+                ("fix(delivery): 固化交付分类协议", "type must be feat"),
+            ):
+                result = self.validate(
+                    root,
+                    message(
+                        work_item,
+                        "feature",
+                        ".nova/design/2026-09-04_x.md#wp-01-x",
+                        schema="2",
+                        subject=subject,
+                    ),
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+
+    def test_new_architecture_id_is_uuid7_and_never_a_work_item(self) -> None:
+        architecture_ref = NOVA_TOOL.new_architecture_id()
+        self.assertRegex(architecture_ref, NOVA_TOOL.ARCHITECTURE_REF_RE)
+        self.assertFalse(NOVA_TOOL.valid_work_item(architecture_ref))
+        generated = self.run_tool("new-architecture-id")
+        self.assertEqual(generated.returncode, 0, generated.stderr)
+        self.assertRegex(generated.stdout.strip(), NOVA_TOOL.ARCHITECTURE_REF_RE)
 
     def test_new_commit_rejects_legacy_design_ref(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -911,11 +1052,11 @@ class NovaReviewTests(unittest.TestCase):
                         ".nova/design/2026-08-29_x.md#wp-01-x",
                         related_work_item="PEND-001",
                     ),
-                    "Related-Work-Item is allowed only for adhoc FIX changes",
+                    "Related-Work-Item is allowed only for FIX changes",
                 ),
                 (
                     message("FIX-002", "adhoc", related_work_item="FIX-001"),
-                    "Related-Work-Item must reference a PEND work item",
+                    "Related-Work-Item must reference a FEAT or legacy PEND work item",
                 ),
                 (
                     message("FIX-002", "adhoc", related_work_item="PEND-001")

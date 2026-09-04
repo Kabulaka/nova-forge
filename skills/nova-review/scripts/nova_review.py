@@ -23,7 +23,10 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 
-SCHEMA = "1"
+LEGACY_SCHEMA = "1"
+SCHEMA = "2"
+LEGACY_AUDIT_SCHEMA = "1"
+AUDIT_SCHEMA = "2"
 TRAILERS = (
     "Nova-Schema",
     "Work-Item",
@@ -52,15 +55,34 @@ DELIVERY_PLAN_TRAILERS = (
     "Plan-Version",
     "Validation",
 )
+ARCHITECTURE_TRAILERS = (
+    "Nova-Schema",
+    "Commit-Kind",
+    "Architecture-Ref",
+    "Requirement-Ref",
+    "Validation",
+)
 AUDIT_TRAILERS = (
     "Nova-Audit-Schema",
     "Review-Batch",
     "Manifest-SHA256",
     "Validation",
 )
-WORK_ITEM_PREFIXES = {
+LEGACY_WORK_ITEM_PREFIXES = {
     "designed": "PEND",
     "adhoc": "FIX",
+    "maintenance": "MAINT",
+}
+WORK_ITEM_PREFIXES = {
+    **LEGACY_WORK_ITEM_PREFIXES,
+    "feature": "FEAT",
+    "patch": "PATCH",
+    "fix": "FIX",
+}
+NEW_WORK_ITEM_PREFIXES = {
+    "feature": "FEAT",
+    "patch": "PATCH",
+    "fix": "FIX",
     "maintenance": "MAINT",
 }
 UUID7_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
@@ -68,15 +90,43 @@ WORK_ITEM_PATTERNS = {
     change_class: re.compile(rf"^{prefix}-(?:[0-9]+|{UUID7_PATTERN})$")
     for change_class, prefix in WORK_ITEM_PREFIXES.items()
 }
+ARCHITECTURE_REF_RE = re.compile(rf"^ARCH-{UUID7_PATTERN}$")
 DESIGN_REF_RE = re.compile(r"^\.nova/design/[^#\s]+\.md#[A-Za-z0-9][A-Za-z0-9._-]*$")
 LEGACY_DESIGN_REF_RE = re.compile(r"^docs/design/[^#\s]+\.md#[A-Za-z0-9][A-Za-z0-9._-]*$")
 REQUIREMENT_REF_RE = re.compile(
     r"^REQ-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}@v[1-9][0-9]*$"
 )
+REQUIREMENT_LINK_RE = re.compile(
+    rf"^\[(?P<ref>REQ-{UUID7_PATTERN}@v[1-9][0-9]*)\]\((?P<path>[^)\s]+\.md)\)$"
+)
 REQUIREMENT_PATH_RE = re.compile(
     rf"^\.nova/requirements/(?P<key>REQ-{UUID7_PATTERN})_[^/\n]+\.md$"
 )
 LOWER_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+SUBJECT_RE = re.compile(
+    r"^(?P<type>[a-z][a-z0-9-]*)\((?P<scope>[a-z0-9]+(?:-[a-z0-9]+)*)\): (?P<summary>\S.*)$"
+)
+SUBJECT_SCOPES = {
+    "requirements",
+    "architecture",
+    "delivery",
+    "review",
+    "doctor",
+    "plugin",
+    "discovery",
+    "release",
+}
+SUBJECT_TYPES_BY_CLASS = {
+    "feature": "feat",
+    "patch": "patch",
+    "fix": "fix",
+    "maintenance": "maint",
+}
+SUBJECT_TYPES_BY_KIND = {
+    "requirement": "req",
+    "architecture": "arch",
+    "delivery-plan": "plan",
+}
 BOOTSTRAP_REQUIREMENT_REF = "REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v2"
 BOOTSTRAP_CHECKPOINT_WORK_ITEM = "PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0"
 BOOTSTRAP_WORK_ITEMS = {BOOTSTRAP_CHECKPOINT_WORK_ITEM}
@@ -130,12 +180,32 @@ def run_git_bytes(repo: Path, *args: str, allow_missing: bool = False) -> bytes 
     return result.stdout
 
 
+def repository_uses_schema_2(repo: Path) -> bool:
+    return bool(
+        run_git(
+            repo,
+            "log",
+            "-1",
+            "--format=%H",
+            "--fixed-strings",
+            "--grep=Nova-Schema: 2",
+        ).strip()
+    )
+
+
 def valid_work_item(value: str) -> bool:
     return any(pattern.fullmatch(value) is not None for pattern in WORK_ITEM_PATTERNS.values())
 
 
+def feature_work_item(value: str) -> bool:
+    return any(
+        WORK_ITEM_PATTERNS[change_class].fullmatch(value) is not None
+        for change_class in ("designed", "feature")
+    )
+
+
 def new_work_item(change_class: str) -> str:
-    prefix = WORK_ITEM_PREFIXES.get(change_class)
+    prefix = NEW_WORK_ITEM_PREFIXES.get(change_class)
     if prefix is None:
         raise NovaError(f"unsupported Change-Class: {change_class}")
     timestamp_ms = time.time_ns() // 1_000_000
@@ -160,6 +230,11 @@ def new_requirement_id() -> str:
         | secrets.randbits(62)
     )
     return f"REQ-{uuid.UUID(int=value)}"
+
+
+def new_architecture_id() -> str:
+    """Generate a stable architecture checkpoint identity."""
+    return new_work_item("feature").replace("FEAT-", "ARCH-", 1)
 
 
 def normalize_nova_path(value: str) -> str:
@@ -235,6 +310,29 @@ def trailing_fields(text: str) -> list[tuple[str, str]]:
     return fields
 
 
+def validate_subject(text: str, values: dict[str, str]) -> list[str]:
+    if values.get("Nova-Schema") != SCHEMA:
+        return []
+    first_line = text.splitlines()[0] if text.splitlines() else ""
+    match = SUBJECT_RE.fullmatch(first_line)
+    if match is None:
+        return ["subject must match type(scope): 中文结果摘要"]
+    scope = match.group("scope")
+    if scope not in SUBJECT_SCOPES:
+        return [f"subject scope is not allowed: {scope}"]
+    summary = match.group("summary")
+    if re.search(r"[\u3400-\u9fff]", summary) is None:
+        return ["subject summary must contain Chinese result text"]
+    if summary.endswith(("。", ".")):
+        return ["subject summary must not end with punctuation"]
+    expected_type = SUBJECT_TYPES_BY_KIND.get(values.get("Commit-Kind", ""))
+    if expected_type is None:
+        expected_type = SUBJECT_TYPES_BY_CLASS.get(values.get("Change-Class", ""))
+    if expected_type is not None and match.group("type") != expected_type:
+        return [f"subject type must be {expected_type} for this commit"]
+    return []
+
+
 def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
     fields = trailing_fields(text)
     if any(key == "Commit-Kind" for key, _ in fields):
@@ -242,6 +340,7 @@ def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
         known = (
             set(REQUIREMENT_TRAILERS)
             | set(DELIVERY_PLAN_TRAILERS)
+            | set(ARCHITECTURE_TRAILERS)
             | set(STANDARD_TRAILERS)
             | {"Review-State"}
         )
@@ -258,6 +357,8 @@ def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
             if kind == "requirement"
             else DELIVERY_PLAN_TRAILERS
             if kind == "delivery-plan"
+            else ARCHITECTURE_TRAILERS
+            if kind == "architecture"
             else ("Commit-Kind",)
         )
         for key in expected:
@@ -266,13 +367,14 @@ def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
                 errors.append(f"{key} must appear exactly once")
             if entries:
                 values[key] = entries[0]
-        if kind not in {"requirement", "delivery-plan"}:
-            errors.append("Commit-Kind must be requirement or delivery-plan")
-        unexpected_checkpoint = (
-            set(DELIVERY_PLAN_TRAILERS) - set(REQUIREMENT_TRAILERS)
-            if kind == "requirement"
-            else set(REQUIREMENT_TRAILERS) - set(DELIVERY_PLAN_TRAILERS)
+        if kind not in {"requirement", "architecture", "delivery-plan"}:
+            errors.append("Commit-Kind must be requirement, architecture, or delivery-plan")
+        checkpoint_fields = (
+            set(REQUIREMENT_TRAILERS)
+            | set(DELIVERY_PLAN_TRAILERS)
+            | set(ARCHITECTURE_TRAILERS)
         )
+        unexpected_checkpoint = checkpoint_fields - set(expected)
         if any(found.get(key) for key in unexpected_checkpoint):
             errors.append(f"{kind or 'checkpoint'} commit has incompatible checkpoint trailers")
         forbidden = (set(STANDARD_TRAILERS) - {"Nova-Schema", "Validation"}) | {
@@ -496,44 +598,55 @@ def whitespace_only_diff(diff: str) -> bool:
 
 
 def validate_metadata(
-    values: dict[str, str], diff: str | None = None, *, allow_legacy_design_ref: bool = False
+    values: dict[str, str],
+    diff: str | None = None,
+    *,
+    allow_legacy_design_ref: bool = False,
+    allow_legacy_schema: bool = False,
 ) -> list[str]:
     errors: list[str] = []
-    if values.get("Nova-Schema") != SCHEMA:
+    schema = values.get("Nova-Schema")
+    accepted_schemas = {SCHEMA, LEGACY_SCHEMA} if allow_legacy_schema else {SCHEMA}
+    if schema not in accepted_schemas:
         errors.append(f"Nova-Schema must be {SCHEMA}")
 
     change_class = values.get("Change-Class", "")
     work_item = values.get("Work-Item", "")
     pattern = WORK_ITEM_PATTERNS.get(change_class)
-    if pattern is None:
-        errors.append("Change-Class must be designed, adhoc, or maintenance")
+    allowed_classes = (
+        set(LEGACY_WORK_ITEM_PREFIXES)
+        if schema == LEGACY_SCHEMA
+        else set(NEW_WORK_ITEM_PREFIXES)
+    )
+    if pattern is None or change_class not in allowed_classes:
+        errors.append("Change-Class must be feature, patch, fix, or maintenance")
     elif not pattern.fullmatch(work_item):
         errors.append(f"Work-Item does not match Change-Class {change_class}")
 
     related_work_item = values.get("Related-Work-Item")
     if related_work_item is not None:
-        if change_class != "adhoc":
-            errors.append("Related-Work-Item is allowed only for adhoc FIX changes")
-        if WORK_ITEM_PATTERNS["designed"].fullmatch(related_work_item) is None:
-            errors.append("Related-Work-Item must reference a PEND work item")
+        if change_class not in {"adhoc", "fix"}:
+            errors.append("Related-Work-Item is allowed only for FIX changes")
+        if not feature_work_item(related_work_item):
+            errors.append("Related-Work-Item must reference a FEAT or legacy PEND work item")
         if related_work_item == work_item:
             errors.append("Related-Work-Item must differ from Work-Item")
 
     design_ref = values.get("Design-Ref", "")
-    if change_class == "designed":
+    if change_class in {"designed", "feature"}:
         valid_design_ref = DESIGN_REF_RE.fullmatch(design_ref) is not None
         if allow_legacy_design_ref and LEGACY_DESIGN_REF_RE.fullmatch(design_ref) is not None:
             valid_design_ref = True
         if not valid_design_ref:
-            errors.append("designed changes require .nova/design/*.md#anchor Design-Ref")
+            errors.append("feature changes require .nova/design/*.md#anchor Design-Ref")
     elif design_ref != "none":
-        errors.append("adhoc and maintenance changes require Design-Ref: none")
+        errors.append("patch, fix, and maintenance changes require Design-Ref: none")
 
     policy = values.get("Review-Policy", "")
     exemption = values.get("Exemption-Rule", "")
     if policy not in {"required", "exempt"}:
         errors.append("Review-Policy must be required or exempt")
-    if change_class in {"designed", "adhoc"} and policy != "required":
+    if change_class in {"designed", "adhoc", "feature", "patch", "fix"} and policy != "required":
         errors.append(f"{change_class} changes always require Review")
     if policy == "required" and exemption != "none":
         errors.append("required Review must use Exemption-Rule: none")
@@ -563,9 +676,12 @@ def validate_requirement_metadata(
     repo: Path | None,
     *,
     commit_hash: str | None = None,
+    allow_legacy_schema: bool = False,
 ) -> list[str]:
     errors: list[str] = []
-    if values.get("Nova-Schema") != SCHEMA:
+    if values.get("Nova-Schema") != SCHEMA and not (
+        allow_legacy_schema and values.get("Nova-Schema") == LEGACY_SCHEMA
+    ):
         errors.append(f"Nova-Schema must be {SCHEMA}")
     if values.get("Commit-Kind") != "requirement":
         errors.append("Commit-Kind must be requirement")
@@ -688,6 +804,66 @@ def validate_requirement_metadata(
     return errors
 
 
+def validate_architecture_metadata(
+    values: dict[str, str],
+    diff: str | None,
+    repo: Path | None,
+    *,
+    commit_hash: str | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    if values.get("Nova-Schema") != SCHEMA:
+        errors.append(f"Nova-Schema must be {SCHEMA}")
+    if values.get("Commit-Kind") != "architecture":
+        errors.append("Commit-Kind must be architecture")
+    architecture_ref = values.get("Architecture-Ref", "")
+    if ARCHITECTURE_REF_RE.fullmatch(architecture_ref) is None:
+        errors.append("Architecture-Ref must be ARCH-<UUIDv7>")
+    requirement_ref = values.get("Requirement-Ref", "")
+    if REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
+        errors.append("Requirement-Ref must be REQ-<UUIDv7>@vN")
+    if re.search(r"\(pass\)\s*$", values.get("Validation", ""), re.IGNORECASE) is None:
+        errors.append("Validation must end with (pass)")
+    if diff is None:
+        errors.append("architecture commits require the complete staged diff")
+    if repo is None:
+        errors.append("architecture commits require --repo")
+    if errors or diff is None or repo is None:
+        return errors
+    try:
+        if commit_hash is None:
+            staged = run_git(repo, "diff", "--cached", "--binary", "--no-ext-diff")
+            if diff != staged:
+                return ["architecture diff must exactly match the repository staged diff"]
+        paths = set(diff_paths(diff))
+        if not paths or not any(path.startswith(".nova/architecture/") for path in paths):
+            errors.append("architecture commit must contain an architecture contract path")
+        if any(old != new for old, new in diff_changes(diff)):
+            errors.append("architecture commit must not rename paths")
+        query_requirement(repo, requirement_ref)
+        if commit_hash is None:
+            history = run_git(
+                repo,
+                "log",
+                "--format=%H%x1f%B%x1e",
+                "--fixed-strings",
+                f"--grep=Architecture-Ref: {architecture_ref}",
+            )
+            for record in history.split("\x1e"):
+                if "\x1f" not in record:
+                    continue
+                _, message = record.strip("\n").split("\x1f", 1)
+                metadata, commit_errors = parse_message(message)
+                if not commit_errors and metadata.get("Commit-Kind") == "architecture":
+                    errors.append(
+                        f"Architecture-Ref already has an architecture checkpoint: {architecture_ref}"
+                    )
+                    break
+    except (NovaError, OSError, UnicodeError) as exc:
+        errors.append(str(exc))
+    return errors
+
+
 DELIVERY_WORK_ITEM_STATES = {
     "planned",
     "active",
@@ -783,7 +959,8 @@ def validate_delivery_ledger_data(
     }
     if verify_review_state is None:
         verify_review_state = verify_evidence
-    if set(ledger) != expected_root or ledger.get("schema") != 1:
+    ledger_schema = ledger.get("schema")
+    if set(ledger) != expected_root or ledger_schema not in {1, 2}:
         raise NovaError("delivery ledger has missing or unknown root fields")
     requirement_ref = ledger.get("requirement_ref")
     if not isinstance(requirement_ref, str) or REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
@@ -822,8 +999,10 @@ def validate_delivery_ledger_data(
         if not isinstance(item, dict) or set(item) != expected_item:
             raise NovaError("delivery work item has missing or unknown fields")
         work_item = item.get("work_item")
-        if not isinstance(work_item, str) or WORK_ITEM_PATTERNS["designed"].fullmatch(work_item) is None:
-            raise NovaError("delivery work item must be a PEND identifier")
+        expected_class = "designed" if ledger_schema == 1 else "feature"
+        if not isinstance(work_item, str) or WORK_ITEM_PATTERNS[expected_class].fullmatch(work_item) is None:
+            expected_prefix = "PEND" if ledger_schema == 1 else "FEAT"
+            raise NovaError(f"delivery work item must be a {expected_prefix} identifier")
         if work_item in by_id:
             raise NovaError(f"duplicate delivery work item: {work_item}")
         by_id[work_item] = item
@@ -997,10 +1176,17 @@ def validate_delivery_ledger_data(
 
 
 def validate_delivery_plan_metadata(
-    values: dict[str, str], diff: str | None, repo: Path | None, *, commit_hash: str | None = None
+    values: dict[str, str],
+    diff: str | None,
+    repo: Path | None,
+    *,
+    commit_hash: str | None = None,
+    allow_legacy_schema: bool = False,
 ) -> list[str]:
     errors: list[str] = []
-    if values.get("Nova-Schema") != SCHEMA:
+    if values.get("Nova-Schema") != SCHEMA and not (
+        allow_legacy_schema and values.get("Nova-Schema") == LEGACY_SCHEMA
+    ):
         errors.append(f"Nova-Schema must be {SCHEMA}")
     if values.get("Commit-Kind") != "delivery-plan":
         errors.append("Commit-Kind must be delivery-plan")
@@ -1028,9 +1214,6 @@ def validate_delivery_plan_metadata(
                 return ["delivery-plan diff must exactly match the repository staged diff"]
         ledger_path = delivery_relative_path(requirement_ref)
         paths = set(diff_paths(diff))
-        allowed = {ledger_path, ".nova/PROJECT_BLUEPRINT.md", ".nova/PRODUCT_REQUIREMENTS.md"}
-        if ledger_path not in paths or not paths.issubset(allowed):
-            return ["delivery-plan commit must contain its ledger and only allowed projections"]
         changes = diff_changes(diff)
         if any(old != new for old, new in changes):
             return ["delivery-plan commit must not rename paths"]
@@ -1045,6 +1228,36 @@ def validate_delivery_plan_metadata(
         ledger = strict_json_object(ledger_bytes or b"", "delivery ledger")
         if canonical_delivery_ledger(ledger) != ledger_bytes:
             raise NovaError("delivery ledger must use canonical UTF-8 JSON")
+        design_paths = {
+            item.get("design_ref", "").split("#", 1)[0]
+            for item in ledger.get("work_items", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("design_ref"), str)
+            and DESIGN_REF_RE.fullmatch(item["design_ref"]) is not None
+        }
+        allowed = {
+            ledger_path,
+            ".nova/PROJECT_BLUEPRINT.md",
+            ".nova/PRODUCT_REQUIREMENTS.md",
+            *design_paths,
+        }
+        if ledger_path not in paths or not paths.issubset(allowed):
+            return [
+                "delivery-plan commit must contain its ledger and only allowed projections or bound designs"
+            ]
+        for design_path in design_paths:
+            content = (
+                git_index_blob(repo, design_path)
+                if commit_hash is None
+                else run_git_bytes(repo, "show", f"{commit_hash}:{design_path}", allow_missing=True)
+            )
+            if content is None:
+                raise NovaError(f"delivery-plan bound design is missing: {design_path}")
+        expected_ledger_schema = 1 if values.get("Nova-Schema") == LEGACY_SCHEMA else 2
+        if ledger.get("schema") != expected_ledger_schema:
+            raise NovaError(
+                f"delivery ledger schema must be {expected_ledger_schema} for Nova-Schema {values.get('Nova-Schema')}"
+            )
         validate_delivery_ledger_data(
             repo,
             ledger,
@@ -1106,15 +1319,35 @@ def validate_message(
     message: str, diff: str | None = None, repo: Path | None = None
 ) -> tuple[dict[str, str], list[str]]:
     values, errors = parse_message(message)
+    allow_legacy_schema = repo is None or not repository_uses_schema_2(repo)
     if not errors:
         if values.get("Commit-Kind") == "requirement":
-            errors.extend(validate_requirement_metadata(values, diff, repo))
+            errors.extend(
+                validate_requirement_metadata(
+                    values, diff, repo, allow_legacy_schema=allow_legacy_schema
+                )
+            )
+        elif values.get("Commit-Kind") == "architecture":
+            errors.extend(validate_architecture_metadata(values, diff, repo))
         elif values.get("Commit-Kind") == "delivery-plan":
-            errors.extend(validate_delivery_plan_metadata(values, diff, repo))
+            errors.extend(
+                validate_delivery_plan_metadata(
+                    values, diff, repo, allow_legacy_schema=allow_legacy_schema
+                )
+            )
         else:
-            errors.extend(validate_metadata(values, diff))
-    if not errors and repo is not None and values.get("Commit-Kind") is None:
-        errors.extend(validate_repository_lifecycle(repo, values))
+            errors.extend(
+                validate_metadata(
+                    values, diff, allow_legacy_schema=allow_legacy_schema
+                )
+            )
+    if not errors:
+        errors.extend(validate_subject(message, values))
+    if not errors and repo is not None:
+        if values.get("Nova-Schema") != SCHEMA and repository_uses_schema_2(repo):
+            errors.append("Nova-Schema 1 is read-only after schema 2 activation")
+        elif values.get("Commit-Kind") is None:
+            errors.extend(validate_repository_lifecycle(repo, values))
     return values, errors
 
 
@@ -1135,13 +1368,27 @@ def validate_committed_message(
         if values.get("Commit-Kind") == "requirement":
             errors.extend(
                 validate_requirement_metadata(
+                    values,
+                    diff,
+                    repo,
+                    commit_hash=commit_hash,
+                    allow_legacy_schema=True,
+                )
+            )
+        elif values.get("Commit-Kind") == "architecture":
+            errors.extend(
+                validate_architecture_metadata(
                     values, diff, repo, commit_hash=commit_hash
                 )
             )
         elif values.get("Commit-Kind") == "delivery-plan":
             errors.extend(
                 validate_delivery_plan_metadata(
-                    values, diff, repo, commit_hash=commit_hash
+                    values,
+                    diff,
+                    repo,
+                    commit_hash=commit_hash,
+                    allow_legacy_schema=True,
                 )
             )
         else:
@@ -1152,8 +1399,11 @@ def validate_committed_message(
                     allow_legacy_design_ref=legacy_design_ref_allowed(
                         repo, commit_hash, values.get("Design-Ref", "")
                     ),
+                    allow_legacy_schema=True,
                 )
             )
+    if not errors:
+        errors.extend(validate_subject(message, values))
     return values, errors
 
 
@@ -1194,7 +1444,14 @@ def scan_commits(
                 diff = run_git(repo, "show", "--format=", "--no-ext-diff", commit_hash)
             design_ref = values.get("Design-Ref", "")
             legacy_allowed = legacy_design_ref_allowed(repo, commit_hash, design_ref)
-            errors.extend(validate_metadata(values, diff, allow_legacy_design_ref=legacy_allowed))
+            errors.extend(
+                validate_metadata(
+                    values,
+                    diff,
+                    allow_legacy_design_ref=legacy_allowed,
+                    allow_legacy_schema=True,
+                )
+            )
         commits.append({"commit": commit_hash, "metadata": values, "errors": errors})
     return commits
 
@@ -1320,7 +1577,7 @@ def validate_feature_record(record: Any, work_item: str) -> dict[str, Any]:
         or len(package_ids) != len(set(package_ids))
     ):
         raise NovaError(f"invalid feature record values for {work_item}")
-    if change_class == "designed":
+    if change_class in {"designed", "feature"}:
         design_ref = str(record.get("design_ref", ""))
         if (
             DESIGN_REF_RE.fullmatch(design_ref) is None
@@ -1543,6 +1800,7 @@ def validate_recorded_commits(
                         allow_legacy_design_ref=legacy_design_ref_allowed(
                             repo, commit_hash, metadata.get("Design-Ref", "")
                         ),
+                        allow_legacy_schema=True,
                     )
                 )
             if errors:
@@ -1922,7 +2180,11 @@ def load_completed_item(
     for candidate in dict.fromkeys(commits):
         message = run_git(repo, "show", "-s", "--format=%B", candidate)
         candidate_values, candidate_errors = parse_audit_message(message)
-        if not candidate_errors and candidate_values.get("Nova-Audit-Schema") == SCHEMA:
+        if (
+            not candidate_errors
+            and candidate_values.get("Nova-Audit-Schema")
+            in {LEGACY_AUDIT_SCHEMA, AUDIT_SCHEMA}
+        ):
             audit_commit = candidate
             values = candidate_values
             errors = []
@@ -1930,8 +2192,13 @@ def load_completed_item(
     if not audit_commit:
         return None
     if not errors:
-        if values.get("Nova-Audit-Schema") != SCHEMA:
-            errors.append(f"Nova-Audit-Schema must be {SCHEMA}")
+        if values.get("Nova-Audit-Schema") not in {
+            LEGACY_AUDIT_SCHEMA,
+            AUDIT_SCHEMA,
+        }:
+            errors.append(
+                f"Nova-Audit-Schema must be {LEGACY_AUDIT_SCHEMA} or {AUDIT_SCHEMA}"
+            )
         if BATCH_ID_RE.fullmatch(values.get("Review-Batch", "")) is None:
             errors.append("Review-Batch must match NR-YYYYMMDD-<suffix>")
         if re.fullmatch(r"[0-9a-f]{64}", values.get("Manifest-SHA256", "")) is None:
@@ -1963,8 +2230,13 @@ def validate_audit_message(
     values, errors = parse_audit_message(message)
     if errors:
         return values, errors
-    if values.get("Nova-Audit-Schema") != SCHEMA:
-        errors.append(f"Nova-Audit-Schema must be {SCHEMA}")
+    allowed_audit_schemas = (
+        {AUDIT_SCHEMA}
+        if repository_uses_schema_2(repo)
+        else {LEGACY_AUDIT_SCHEMA, AUDIT_SCHEMA}
+    )
+    if values.get("Nova-Audit-Schema") not in allowed_audit_schemas:
+        errors.append(f"Nova-Audit-Schema must be {AUDIT_SCHEMA}")
     batch_id = values.get("Review-Batch", "")
     if BATCH_ID_RE.fullmatch(batch_id) is None:
         errors.append("Review-Batch must match NR-YYYYMMDD-<suffix>")
@@ -2390,7 +2662,7 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
 
         normalized = dict(item)
         normalized["commits"] = commit_refs
-        if change_class == "designed":
+        if change_class in {"designed", "feature"}:
             expected_fields = {
                 "work_item",
                 "change_class",
@@ -2618,12 +2890,14 @@ def blueprint_requirement_ref(text: str, work_item: str) -> str:
     cells = [cell.strip() for cell in matches[0].strip().strip("|").split("|")]
     if len(cells) == 7:
         return "无"
-    if len(cells) != 8:
+    if len(cells) not in {8, 9}:
         raise NovaError(f"blueprint pending row has invalid columns for {work_item}")
-    value = cells[7]
-    if value != "无" and REQUIREMENT_REF_RE.fullmatch(value) is None:
+    value = cells[-1]
+    link = REQUIREMENT_LINK_RE.fullmatch(value)
+    normalized = link.group("ref") if link else value
+    if normalized != "无" and REQUIREMENT_REF_RE.fullmatch(normalized) is None:
         raise NovaError(f"invalid requirement reference for {work_item}: {value}")
-    return value
+    return normalized
 
 
 def blueprint_work_items_for_requirement(text: str, requirement_ref: str) -> set[str]:
@@ -2632,7 +2906,11 @@ def blueprint_work_items_for_requirement(text: str, requirement_ref: str) -> set
         if not line.lstrip().startswith("|"):
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) == 8 and cells[7] == requirement_ref and valid_work_item(cells[0]):
+        if (
+            len(cells) in {8, 9}
+            and feature_work_item(cells[0])
+            and blueprint_requirement_ref(line, cells[0]) == requirement_ref
+        ):
             items.add(cells[0])
     return items
 
@@ -2687,8 +2965,8 @@ def update_product_requirement_status(
     if referenced_version >= implemented_version:
         implemented_version = referenced_version
         evidence = implementation_evidence or [work_item]
-        if not evidence or any(WORK_ITEM_PATTERNS["designed"].fullmatch(value) is None for value in evidence):
-            raise NovaError("implementation evidence must contain PEND work items")
+        if not evidence or any(not feature_work_item(value) for value in evidence):
+            raise NovaError("implementation evidence must contain FEAT or legacy PEND work items")
         cells[6] = "、".join(sorted(set(evidence)))
     cells[5] = f"v{implemented_version}"
     cells[2] = "已实现" if implemented_version == current_version else "已更新"
@@ -2790,7 +3068,7 @@ def query_delivery(
         candidates.append((path, strict_json_object(path.read_bytes(), "delivery ledger")))
     else:
         if not isinstance(work_item, str) or not valid_work_item(work_item):
-            raise NovaError("Work-Item must be a valid PEND/FIX/MAINT identifier")
+            raise NovaError("Work-Item must be a valid FEAT/PATCH/FIX/MAINT or legacy identifier")
         for path in sorted(delivery_root.glob("REQ-*_v*.json")):
             value = strict_json_object(path.read_bytes(), "delivery ledger")
             if any(item.get("work_item") == work_item for item in value.get("work_items", [])):
@@ -2873,11 +3151,12 @@ def blueprint_items_for_design(text: str, design_file: str) -> set[str]:
         if not line.lstrip().startswith("|"):
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) not in {7, 8} or WORK_ITEM_PATTERNS["designed"].fullmatch(cells[0]) is None:
+        if len(cells) not in {7, 8, 9} or not feature_work_item(cells[0]):
             continue
+        design_cell = cells[5] if len(cells) == 9 else cells[4]
         links = re.findall(
             r"\[[^]\n]+\]\(((?:design|\.nova/design|docs/design)/[^#\s]+\.md)#[A-Za-z0-9][A-Za-z0-9._-]*\)",
-            cells[4],
+            design_cell,
         )
         normalized_file = normalize_nova_path(design_file)
         if any(normalize_nova_path(link if not link.startswith("design/") else ".nova/" + link) == normalized_file for link in links):
@@ -2911,7 +3190,7 @@ def parse_work_item_package_map(text: str) -> dict[str, list[str]]:
         if len(cells) != 2:
             raise NovaError("invalid work item closure map row")
         work_item, raw_packages = cells
-        if WORK_ITEM_PATTERNS["designed"].fullmatch(work_item) is None:
+        if not feature_work_item(work_item):
             raise NovaError(f"invalid closure map work item: {work_item}")
         if work_item in mapping:
             raise NovaError(f"duplicate closure map work item: {work_item}")
@@ -3614,9 +3893,10 @@ def parser() -> argparse.ArgumentParser:
 
     new_id = commands.add_parser("new-id")
     new_id.add_argument(
-        "--class", dest="change_class", choices=tuple(WORK_ITEM_PREFIXES), required=True
+        "--class", dest="change_class", choices=tuple(NEW_WORK_ITEM_PREFIXES), required=True
     )
     commands.add_parser("new-requirement-id")
+    commands.add_parser("new-architecture-id")
 
     validate = commands.add_parser("validate-message")
     validate.add_argument("--repo", type=Path)
@@ -3662,6 +3942,8 @@ def main() -> int:
             print(new_work_item(args.change_class))
         elif args.command == "new-requirement-id":
             print(new_requirement_id())
+        elif args.command == "new-architecture-id":
+            print(new_architecture_id())
         elif args.command == "validate-message":
             message = args.message_file.read_text(encoding="utf-8")
             diff = args.diff_file.read_text(encoding="utf-8") if args.diff_file else None

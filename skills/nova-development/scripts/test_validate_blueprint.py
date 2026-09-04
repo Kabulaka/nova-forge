@@ -340,6 +340,87 @@ class ValidatorTests(unittest.TestCase):
             design_path.write_text(design, encoding="utf-8")
         return blueprint_path, design_path
 
+    def current_blueprint(self, rows: str) -> str:
+        legacy = valid_blueprint(
+            "| LEGACY-01 | P1 | 用户提出 | 临时行 | 待澄清 | 无 | 临时结果 | 无 |"
+        )
+        return (
+            legacy.replace("## 6. 待开发功能", "## 6. 交付工作项")
+            .replace(
+                "| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 | 需求引用 |\n"
+                "|------|--------|------|------|----------|----------|----------|----------|\n"
+                "| LEGACY-01 | P1 | 用户提出 | 临时行 | 待澄清 | 无 | 临时结果 | 无 |",
+                "| 编号 | 状态 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 | 需求引用 |\n"
+                "|------|------|--------|------|------|----------|----------|----------|----------|\n"
+                + rows,
+            )
+        )
+
+    def test_current_delivery_table_enforces_three_states_and_concrete_clarification(self) -> None:
+        work_item = "FEAT-019a1234-0001-7abc-8def-000000000001"
+        valid = self.current_blueprint(
+            f"| {work_item} | 待澄清 | P1 | 用户提出 | 新能力 | "
+            "待澄清：尚未确认错误恢复语义 | 待确认：尚未确认外部契约版本 | "
+            "完成可执行结果 | 无 |"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "PROJECT_BLUEPRINT.md"
+            path.write_text(valid, encoding="utf-8")
+            accepted = self.run_validator(path)
+            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+
+            path.write_text(valid.replace("| 待澄清 | P1 |", "| 开发中 | P1 |"), encoding="utf-8")
+            invalid_state = self.run_validator(path)
+            self.assertNotEqual(invalid_state.returncode, 0)
+            self.assertIn("invalid delivery work state", invalid_state.stdout)
+
+            path.write_text(
+                valid.replace("待澄清：尚未确认错误恢复语义", "待澄清"),
+                encoding="utf-8",
+            )
+            ambiguous = self.run_validator(path)
+            self.assertNotEqual(ambiguous.returncode, 0)
+            self.assertIn("must state the missing design decision", ambiguous.stdout)
+
+    def test_current_delivery_table_allows_only_committed_historical_pend(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Nova Test"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.email", "nova@example.invalid"],
+                check=True,
+            )
+            path = repo / "PROJECT_BLUEPRINT.md"
+            path.write_text(
+                valid_blueprint(
+                    "| PEND-001 | P1 | 历史迁移 | 历史任务 | 待澄清 | 无 | 历史结果 | 无 |"
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "-C", str(repo), "add", "PROJECT_BLUEPRINT.md"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-m", "seed"],
+                check=True,
+            )
+            path.write_text(
+                self.current_blueprint(
+                    "| PEND-001 | 待澄清 | P1 | 历史迁移 | 历史任务 | "
+                    "待澄清：尚未确认历史任务设计 | 无 | 历史结果 | 无 |"
+                ),
+                encoding="utf-8",
+            )
+            accepted = self.run_validator(path)
+            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+
+            path.write_text(
+                path.read_text(encoding="utf-8").replace("PEND-001", "PEND-002"),
+                encoding="utf-8",
+            )
+            escaped = self.run_validator(path)
+            self.assertNotEqual(escaped.returncode, 0)
+            self.assertIn("new delivery work must use FEAT", escaped.stdout)
+
     def write_registered_legacy_design(self, root: Path) -> Path:
         design = legacy_terminal_design()
         design_path = root / ".nova" / "design" / "2026-08-26_design.md"
@@ -1055,7 +1136,7 @@ class ValidatorTests(unittest.TestCase):
             state="澄清中", package_states=("澄清中", "待澄清"), include_staging=True
         ).replace(
             "| WP-02 | 收口 | 待澄清 | 交付第二个独立结果 | WP-01 |",
-            "| WP-02 | 收口 | 待澄清 | 交付第二个独立结果 | 待澄清 |",
+            "| WP-02 | 收口 | 待澄清 | 交付第二个独立结果 | 待确认：尚未确定收口依赖 |",
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "2026-08-26_design.md"
@@ -1290,7 +1371,7 @@ class ValidatorTests(unittest.TestCase):
         blueprint = (SKILL_ROOT / "assets" / "PROJECT_BLUEPRINT.template.md").read_text(encoding="utf-8")
         design = (SKILL_ROOT / "assets" / "DESIGN.template.md").read_text(encoding="utf-8")
         self.assertIn("> 蓝图规范版本：3", blueprint)
-        self.assertIn("| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 |", blueprint)
+        self.assertIn("| 编号 | 状态 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 | 需求引用 |", blueprint)
         self.assertIn("> 设计规范版本：5", design)
         self.assertIn("> 收敛确认：待确认", design)
         self.assertIn("> 演进来源：", design)

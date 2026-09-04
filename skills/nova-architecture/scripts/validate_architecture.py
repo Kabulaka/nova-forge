@@ -15,11 +15,12 @@ from types import ModuleType
 
 
 SECTIONS = ("并行开发门禁", "契约索引", "硬依赖")
-GATE_HEADERS = ("门禁", "是否需要", "状态", "Review 依据")
+GATE_HEADERS = ("门禁", "是否需要", "状态", "确认依据")
+LEGACY_GATE_HEADERS = ("门禁", "是否需要", "状态", "Review 依据")
 INDEX_HEADERS = ("契约类型", "业务范围", "路径", "状态", "所有者")
 DEPENDENCY_HEADERS = ("需求块", "依赖需求块", "无法解除的业务原因", "开发顺序")
 REQUIRED_GATES = ("共享工程骨架", "数据所有权与契约", "公共 API 契约", "事件契约", "Mock 与测试夹具")
-STATUS = {"待确认", "待Review", "已通过", "不适用"}
+STATUS = {"待确认", "已确认", "不适用", "待Review", "已通过"}
 CONTRACT_TYPES = {"工程骨架", "数据", "API", "事件", "Mock"}
 GATE_TYPES = {
     "共享工程骨架": "工程骨架",
@@ -29,6 +30,7 @@ GATE_TYPES = {
     "Mock 与测试夹具": "Mock",
 }
 PEND_RE = re.compile(r"^PEND-(?:[0-9]+|[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$")
+ARCH_RE = re.compile(r"^ARCH-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 PLACEHOLDER_RE = re.compile(r"<(?!/?a\b)[^>\n]+>|\b(?:TODO|TBD)\b|\{\{[^}\n]+\}\}", re.IGNORECASE)
 OPENAPI_VERSION_RE = re.compile(r"^3\.(?:0|1)\.\d+$")
 ASYNCAPI_VERSION_RE = re.compile(r"^(?:2|3)\.\d+\.\d+$")
@@ -100,8 +102,9 @@ def validate_data_contract(path: Path) -> list[str]:
     expected = ("所有权", "数据约束", "一致性与并发", "失败与恢复")
     if sections(text) != expected:
         errors.append("data contract sections must be exactly: " + " | ".join(expected))
-    if re.findall(r"^>\s*数据契约版本[：:]\s*(.+?)\s*$", text, re.MULTILINE) != ["1"]:
-        errors.append("data contract version must be 1")
+    versions = re.findall(r"^>\s*数据契约版本[：:]\s*(.+?)\s*$", text, re.MULTILINE)
+    if len(versions) != 1 or versions[0] not in {"1", "2"}:
+        errors.append("data contract version must be 1 or 2")
     for label in ("Contract-Key", "所有者"):
         if len(re.findall(rf"^>\s*{label}[：:]\s*(.+?)\s*$", text, re.MULTILINE)) != 1:
             errors.append(f"data contract requires exactly one {label}")
@@ -122,8 +125,9 @@ def validate_foundation_contract(path: Path) -> list[str]:
         return errors
     if sections(text) != ("技术与运行", "目录与依赖"):
         errors.append("foundation contract sections must be exactly: 技术与运行 | 目录与依赖")
-    if re.findall(r"^>\s*工程骨架契约版本[：:]\s*(.+?)\s*$", text, re.MULTILINE) != ["1"]:
-        errors.append("foundation contract version must be 1")
+    versions = re.findall(r"^>\s*工程骨架契约版本[：:]\s*(.+?)\s*$", text, re.MULTILINE)
+    if len(versions) != 1 or versions[0] not in {"1", "2"}:
+        errors.append("foundation contract version must be 1 or 2")
     for section, headers in (
         ("技术与运行", ("语言", "框架", "运行形态", "持久化", "缓存", "消息", "鉴权", "部署")),
         ("目录与依赖", ("代码区域", "职责", "允许依赖", "禁止依赖")),
@@ -291,6 +295,24 @@ def trusted_commit_owner(
         metadata, message_errors = module.parse_message(message)
     except (module.NovaError, OSError, UnicodeError):
         return None
+    architecture_ref = metadata.get("Architecture-Ref", "")
+    if not message_errors and metadata.get("Commit-Kind") == "architecture":
+        try:
+            diff = module.run_git(
+                repo, "show", "--format=", "--binary", "--no-ext-diff", commit_hash
+            )
+            _, committed_errors = module.validate_committed_message(
+                repo, commit_hash, message, diff
+            )
+        except (module.NovaError, OSError, UnicodeError):
+            return None
+        if (
+            not committed_errors
+            and ARCH_RE.fullmatch(architecture_ref) is not None
+            and relative in module.diff_paths(diff)
+        ):
+            return architecture_ref
+        return None
     work_item = metadata.get("Work-Item", "")
     if message_errors or PEND_RE.fullmatch(work_item) is None:
         return None
@@ -383,6 +405,37 @@ def trusted_file_owner(
     return trusted_commit_owner(module, repo, commit_hash, relative, cache, audit_cache)
 
 
+def trusted_contract_binding(
+    module: ModuleType,
+    repo: Path,
+    index_path: Path,
+    line_number: int,
+    target: Path,
+    cache: dict[str, tuple[dict[str, object], dict[str, object]] | None],
+    audit_cache: dict[str, dict[str, tuple[dict[str, object], dict[str, object]]]],
+) -> bool:
+    """Trust an ARCH-owned index row as confirmation of the target bytes it saw."""
+    try:
+        index_relative = index_path.resolve().relative_to(repo).as_posix()
+        target_relative = target.resolve().relative_to(repo).as_posix()
+        current = target.read_bytes()
+    except (ValueError, OSError):
+        return False
+    if module.git_blob(repo, "HEAD", target_relative) != current:
+        return False
+    commit_hash = blamed_commit(repo, index_relative, line_number)
+    if commit_hash is None:
+        return False
+    owner = trusted_commit_owner(
+        module, repo, commit_hash, index_relative, cache, audit_cache
+    )
+    if owner is None:
+        return False
+    if ARCH_RE.fullmatch(owner) is not None:
+        return module.git_blob(repo, commit_hash, target_relative) == current
+    return trusted_file_owner(module, repo, target, cache, audit_cache) is not None
+
+
 def trusted_index_history(
     module: ModuleType,
     repo: Path,
@@ -406,6 +459,18 @@ def trusted_index_history(
     )
     if result.returncode:
         return False
+    # A schema 2 ARCH checkpoint is an explicit current-byte rebaseline. Changes
+    # after that checkpoint must still be owned by another trusted checkpoint.
+    untrusted_after_arch = False
+    for commit_hash in result.stdout.splitlines():
+        owner = trusted_commit_owner(
+            module, repo, commit_hash.strip(), relative, cache, audit_cache
+        )
+        if owner is not None and ARCH_RE.fullmatch(owner) is not None:
+            return not untrusted_after_arch
+        if owner is None:
+            untrusted_after_arch = True
+
     trusted_baseline = False
     for commit_hash in reversed(result.stdout.splitlines()):
         owner = trusted_commit_owner(
@@ -428,8 +493,9 @@ def validate(path: Path, ready: bool) -> list[str]:
         errors.append("level-2 sections must be exactly: " + " | ".join(SECTIONS))
     if PLACEHOLDER_RE.search(text):
         errors.append("unfinished placeholder found")
-    if re.findall(r"^>\s*架构契约版本[：:]\s*(.+?)\s*$", text, re.MULTILINE) != ["1"]:
-        errors.append("architecture contract version must be 1")
+    versions = re.findall(r"^>\s*架构契约版本[：:]\s*(.+?)\s*$", text, re.MULTILINE)
+    if len(versions) != 1 or versions[0] not in {"1", "2"}:
+        errors.append("architecture contract version must be 1 or 2")
     blueprint_refs = re.findall(r"^>\s*蓝图引用[：:]\s*(.+?)\s*$", text, re.MULTILINE)
     if blueprint_refs != ["../PROJECT_BLUEPRINT.md"]:
         errors.append("blueprint reference must be ../PROJECT_BLUEPRINT.md")
@@ -437,6 +503,12 @@ def validate(path: Path, ready: bool) -> list[str]:
         errors.append("referenced .nova/PROJECT_BLUEPRINT.md does not exist")
 
     gate_entries, gate_errors = table_with_lines(text, "并行开发门禁", GATE_HEADERS)
+    if gate_errors:
+        legacy_gate_entries, legacy_gate_errors = table_with_lines(
+            text, "并行开发门禁", LEGACY_GATE_HEADERS
+        )
+        if not legacy_gate_errors:
+            gate_entries, gate_errors = legacy_gate_entries, []
     contract_entries, contract_errors = table_with_lines(text, "契约索引", INDEX_HEADERS)
     dependency_entries, dependency_errors = table_with_lines(text, "硬依赖", DEPENDENCY_HEADERS)
     errors.extend(gate_errors + contract_errors + dependency_errors)
@@ -471,14 +543,25 @@ def validate(path: Path, ready: bool) -> list[str]:
             errors.append(f"unneeded gate must not have indexed contracts: {name}")
         if contract_rows:
             states = [row[3] for row, _ in contract_rows]
-            derived = "待确认" if "待确认" in states else "待Review" if "待Review" in states else "已通过"
+            derived = (
+                "待确认"
+                if "待确认" in states
+                else "待Review"
+                if "待Review" in states
+                else "已确认"
+                if "已确认" in states
+                else "已通过"
+            )
             if state != derived:
                 errors.append(f"gate state conflicts with indexed contracts: {name}")
         if state in {"待Review", "已通过"}:
             if PEND_RE.fullmatch(evidence) is None:
-                errors.append(f"reviewable gate requires PEND Review evidence: {name}")
+                errors.append(f"legacy reviewable gate requires PEND Review evidence: {name}")
+        elif state == "已确认":
+            if ARCH_RE.fullmatch(evidence) is None:
+                errors.append(f"confirmed gate requires ARCH evidence: {name}")
         elif evidence != "无":
-            errors.append(f"unconfirmed gate must use 无 Review evidence: {name}")
+            errors.append(f"unconfirmed gate must use 无 confirmation evidence: {name}")
 
     root = path.parent.resolve()
     referenced: set[Path] = set()
@@ -530,7 +613,7 @@ def validate(path: Path, ready: bool) -> list[str]:
     repo = git_repo_for_nova(nova_root)
     review_cache: dict[str, tuple[dict[str, object], dict[str, object]] | None] = {}
     audit_cache: dict[str, dict[str, tuple[dict[str, object], dict[str, object]]]] = {}
-    history_required = ready or any(state == "已通过" for _, _, state, _ in gates)
+    history_required = ready
     if history_required and (
         module is None
         or repo is None
@@ -540,7 +623,8 @@ def validate(path: Path, ready: bool) -> list[str]:
     ):
         errors.append("architecture index history contains changes outside trusted PASS work items")
     for (name, needed, state, evidence), gate_line in gate_entries:
-        if state not in {"待Review", "已通过"} or PEND_RE.fullmatch(evidence) is None:
+        evidence_pattern = ARCH_RE if state == "已确认" else PEND_RE
+        if state not in {"待Review", "已通过", "已确认"} or evidence_pattern.fullmatch(evidence) is None:
             if ready and needed == "是":
                 errors.append(f"parallel development gate is not ready: {name}")
             continue
@@ -560,18 +644,19 @@ def validate(path: Path, ready: bool) -> list[str]:
             )
         if trusted:
             trusted = all(
-                trusted_line_owner(
-                    module, repo, path, line_number, review_cache, audit_cache
+                trusted_contract_binding(
+                    module,
+                    repo,
+                    path,
+                    line_number,
+                    target,
+                    review_cache,
+                    audit_cache,
                 )
-                is not None
-                and trusted_file_owner(
-                    module, repo, target, review_cache, audit_cache
-                )
-                is not None
                 for target, line_number in relevant_targets
             )
-        if state == "已通过" and not trusted:
-            errors.append(f"gate Review evidence is not a trusted PASS covering current contracts: {name}")
+        if ready and state in {"已通过", "已确认"} and not trusted:
+            errors.append(f"gate confirmation evidence does not cover current contracts: {name}")
         if ready and needed == "是" and not trusted:
             errors.append(f"parallel development gate is not ready: {name}")
     for (requirement, dependency, reason, order), line_number in dependency_entries:

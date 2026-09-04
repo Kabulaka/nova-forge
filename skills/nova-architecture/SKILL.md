@@ -12,7 +12,7 @@ description: 在总体需求确认后，以单问题访谈确定足以指导开�
 1. 首轮只读取 `.nova/PRODUCT_REQUIREMENTS.md` 的总体流程、业务模块和需求索引，`.nova/PROJECT_BLUEPRINT.md` 的技术栈、模块、系统分层、跨模块契约、活动工作索引，以及存在时的 `.nova/SHARED_CAPABILITIES.md`；不得扫描全部需求块或功能设计。
 2. 绿地项目在总体需求确认后必须进入本技能。已有项目只有在技术栈/系统边界未定，或目标需求引入新的共享数据、公共 API、事件、基础设施、跨需求依赖时才进入；现有蓝图和架构契约足以约束目标功能时直接交给 `nova-development`。
 3. 是否需要架构确认依据开发者是否会对语言/框架/存储/通信方式、数据所有权、公共接口或共享失败语义作出不同且不兼容的选择；只是模块内部实现选择时不扩大到架构阶段。
-4. 只读取受影响的需求块。无法判断时只问一个会改变公共开发边界的问题。架构阶段是流程门禁，不天然构成独立工作项：只有架构结果可被多个下游任务独立复用、验收、排期或取消时才建立架构 PEND；只服务一个规模可控任务的架构调整归入该任务并由其整体 Review，禁止为阶段本身拆项。
+4. 只读取受影响的需求块。无法判断时只问一个会改变公共开发边界的问题。进入架构不等于必须产出：逐项核对共享工程骨架、数据所有权、公共 API、事件和 Mock，均无真实差量时报告依据后零产物交给开发，不创建编号、文件、提交或 Review；存在真实差量时创建一个 `ARCH-*` checkpoint。ARCH 是架构身份，不是开发工作项，不进入蓝图交付工作项表；只服务单个功能的内部实现选择仍归该 FEAT。
 
 ## 访谈与决策
 
@@ -40,7 +40,7 @@ AI 结合已确认上下文发现候选做法时，只有准备把它作为已�
 
 创建或更新前完整读取 [架构契约规范](references/architecture-standard.md)。首次建立架构体系时可读取 [并行项目示例](references/examples/order-platform/.nova/architecture/ARCHITECTURE_CONTRACTS.md) 及其实际引用；已有体系时只读目标契约。
 
-写入后运行：
+存在真实差量并写入后运行：
 
 ```bash
 python3 ../nova-development/scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
@@ -49,4 +49,6 @@ python3 scripts/validate_architecture.py --ready /absolute/path/to/.nova/archite
 python3 scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md
 ```
 
-架构交付在提交前把需要项及对应契约标记为`待Review`，并把 Review 依据写为负责该完整交付的 `PEND-*`。独立架构 PEND 的 `--ready` 只有共享工程骨架、数据所有权、所需 API/事件/Mock 契约均存在且状态一致，并能从 Git 归属重建可信审计时通过：架构索引工作树必须等于 HEAD，且从首个可信架构 PASS 起每次索引变更都属于已归档 PASS PEND；门禁行必须属于其所写 PEND，每条契约索引行、每个契约文件和每条硬依赖行分别属于某个已归档 PASS PEND，契约文件当前字节还必须等于被审 commit。只服务一个活动 PEND 的架构调整保持待 Review，不向其他工作项宣称 ready，并与该 PEND 的实现提交统一 Review；最终 PASS 后同样从不可变审计派生就绪。不得用无关 PASS、伪造审计、内部里程碑、未提交或未审 commit、PASS 后修改、文档状态或手填批次名解锁。
+架构交付在提交前把需要项及对应契约标记为 `已确认`，确认依据写本次 `ARCH-*`。按提交契约生成 `arch(scope): 中文结果摘要` 和 architecture trailers，以完整 staged diff 运行仓库感知 `validate-message`；成功提交后再运行 `--ready`。`--ready` 从 Git 归属验证 ARCH、需求 checkpoint、索引行及其确认时看到的契约字节；工作树变化、未提交 ARCH、ARCH 后漂移、无关工作项或手填批次名均不能解锁。schema 1 的既有 PEND Review 架构证据仅作历史兼容。
+
+阶段结束必须使用实施 SOP 的“架构完成报告”：先写实际结论（零差量或已形成 ARCH）和明确未改范围，再列差量依据、契约与验证、提交状态、就绪边界和下一步。零差量不得伪造空 ARCH、空文件或 Review 状态。
