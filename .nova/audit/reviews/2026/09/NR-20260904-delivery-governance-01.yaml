@@ -1,0 +1,48 @@
+{
+  "batch_id": "NR-20260904-delivery-governance-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "9629d4e9deeb3f6068b897f5dd07298cf75e308f",
+          "repository": "main"
+        },
+        {
+          "commit": "54ab4da4e5e75c2efe0688941b40be70e4a39add",
+          "repository": "main"
+        },
+        {
+          "commit": "3ed15741bae3b968a812e9c9e5005e5624578646",
+          "repository": "main"
+        },
+        {
+          "commit": "0f4a84f7b92d83d784f3b11b3177cfb6353aba8e",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-04_需求基线与完整交付台账架构.md#wp-01-delivery-governance-architecture",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "requirements index/block; blueprint/design; architecture contract; npm run check; Python unittest requirements 7, architecture 32, development 116; post-close blueprint projection; Review-fix validators (pass)",
+      "work_item": "PEND-01a06a50-2783-78bb-9fd4-c79347c4b6e6"
+    }
+  ],
+  "manifest_sha256": "8230d1a50d0f6ad1e9e1a5abdceb6aa9ccd6d5cc41fd9ccb6651a9067e5619f6",
+  "review_content_sha256": "def9cffa0aea2d462f2e76df38e0a7e7432e4d297164b3e86ad3789a64516444",
+  "review_round": 3,
+  "review_scope": [
+    "main:.nova/PRODUCT_REQUIREMENTS.md",
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/architecture/ARCHITECTURE_CONTRACTS.md",
+    "main:.nova/architecture/data/requirement-delivery-ledger.md",
+    "main:.nova/architecture/foundation/delivery-governance.md",
+    "main:.nova/design/2026-09-04_需求基线与完整交付台账架构.md",
+    "main:.nova/requirements/REQ-01a06a50-2732-704d-97d0-7a98b205a4ea_需求基线与完整切片跟踪.md"
+  ],
+  "reviewed_at": "2026-09-04T11:43:22+08:00",
+  "reviewer": "review_delivery_governance",
+  "schema": 1
+}
