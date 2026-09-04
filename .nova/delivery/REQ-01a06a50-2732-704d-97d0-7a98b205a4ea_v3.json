@@ -7,9 +7,17 @@
       "work_items": [
         "FEAT-01a06ba4-274d-7725-8788-d99d322f42d2"
       ]
+    },
+    {
+      "kind": "review-submitted",
+      "plan_version": 2,
+      "reason": "implementation-result-committed",
+      "work_items": [
+        "FEAT-01a06ba4-274d-7725-8788-d99d322f42d2"
+      ]
     }
   ],
-  "plan_version": 1,
+  "plan_version": 2,
   "requirement_checkpoint": {
     "commit": "96b80043335184fc38cde819ee1017b7ccf3e87d",
     "path": ".nova/requirements/REQ-01a06a50-2732-704d-97d0-7a98b205a4ea_需求基线与完整切片跟踪.md",
@@ -21,7 +29,7 @@
   "work_items": [
     {
       "blocked_reason": null,
-      "change_reason": "initial-plan-and-activation",
+      "change_reason": "implementation-result-committed",
       "dependencies": [],
       "design_ref": ".nova/design/2026-09-04_交付治理分类与报告闭环.md#wp-01-delivery-governance-closure",
       "done_definition": "新编号、最小状态、专用报告、提交与 Review 单闭环均由技能和脚本一致执行，Doctor 可只读发现偏移",
@@ -29,13 +37,15 @@
         {
           "blocked_reason": null,
           "done_definition": "完整治理协议、技能实现、Doctor 诊断与正反用例作为一个可 Review 结果交付",
-          "evidence": [],
+          "evidence": [
+            "ecf02f5d8950d9b61951e3f624e8030ea8e346c0"
+          ],
           "id": "M-01",
-          "state": "active",
+          "state": "completed",
           "title": "交付治理分类与报告闭环"
         }
       ],
-      "state": "active",
+      "state": "review_pending",
       "supersedes": [],
       "title": "交付任务分类、阶段报告与代码化门禁",
       "work_item": "FEAT-01a06ba4-274d-7725-8788-d99d322f42d2"
