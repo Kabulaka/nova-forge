@@ -202,7 +202,6 @@ flowchart LR
 | PEND-003 | P2 | 历史迁移 | 技能目录索引 | 待澄清 | 待澄清 | 自动生成技能名称、用途、入口和验证状态，不复制技能正文 | 无 |
 | PEND-004 | P3 | 历史迁移 | 持续集成 | 待澄清 | 待澄清 | 在受控环境执行无网络的结构、语法和正反用例检查 | 无 |
 | PEND-01a06626-fe17-7569-b31b-303218cc9c3b | P1 | Review-Defer | 版本化插件入口迁移与真实宿主闭环 | 待澄清 | 无 | 插件实现后可原子迁移兼容链接，并在双宿主完成启用、禁用、卸载、故障回退和新会话 E2E | REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff@v1 |
-| PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0 | P0 | 用户提出 | 需求基线与可控任务交付 | [.nova/design/2026-09-04_需求检查点与bootstrap状态门禁.md#wp-01-requirement-checkpoint-bootstrap-gate](design/2026-09-04_需求检查点与bootstrap状态门禁.md#wp-01-requirement-checkpoint-bootstrap-gate) | 无 | 需求立即形成检查点；完整台账按独立、内聚、可控边界登记 PEND 与内部里程碑；进度可恢复；当前小修改只保留一个工作项并在整体完成后统一 Review | REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v2 |
 
 ## 7. 系统架构
 

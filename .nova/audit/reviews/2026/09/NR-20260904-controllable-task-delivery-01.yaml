@@ -1,0 +1,55 @@
+{
+  "batch_id": "NR-20260904-controllable-task-delivery-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "designed",
+      "commits": [
+        {
+          "commit": "aad9165f529d186f3472b01b38a3df656003ea3f",
+          "repository": "main"
+        },
+        {
+          "commit": "7977021e1a8539ee58c23b05938d7e17d97f3575",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-04_需求检查点与bootstrap状态门禁.md#wp-01-requirement-checkpoint-bootstrap-gate",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "Python unittest 254 with affected 13 rerun; npm run check; blueprint/design/architecture/requirements/delivery validations (pass)",
+      "work_item": "PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0"
+    }
+  ],
+  "manifest_sha256": "07b1fb9b81fa274fd812189cc51335e0d4061173b336b151d7f01ebe7fea02ff",
+  "review_content_sha256": "b05440789eb7fe03b9449e4b9fee3fa0e70d9155e4e8ba89e96eeafe854dff98",
+  "review_round": 2,
+  "review_scope": [
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/architecture/ARCHITECTURE_CONTRACTS.md",
+    "main:.nova/architecture/data/requirement-delivery-ledger.md",
+    "main:.nova/architecture/foundation/delivery-governance.md",
+    "main:.nova/design/2026-09-04_需求检查点与bootstrap状态门禁.md",
+    "main:codex/AGENTS.global.md",
+    "main:skills/nova-architecture/SKILL.md",
+    "main:skills/nova-architecture/references/architecture-standard.md",
+    "main:skills/nova-development/SKILL.md",
+    "main:skills/nova-development/references/implementation-sop.md",
+    "main:skills/nova-development/scripts/nova_delivery.py",
+    "main:skills/nova-development/scripts/test_nova_delivery.py",
+    "main:skills/nova-requirements/SKILL.md",
+    "main:skills/nova-requirements/references/requirements-standard.md",
+    "main:skills/nova-requirements/scripts/test_validate_requirements.py",
+    "main:skills/nova-requirements/scripts/validate_requirements.py",
+    "main:skills/nova-review/SKILL.md",
+    "main:skills/nova-review/references/commit-contract.md",
+    "main:skills/nova-review/scripts/nova_review.py",
+    "main:skills/nova-review/scripts/test_nova_review.py",
+    "main:skills/nova-review/scripts/test_requirement_status.py",
+    "main:skills/nova-review/scripts/test_skill_contract.py"
+  ],
+  "reviewed_at": "2026-09-04T14:00:38+08:00",
+  "reviewer": "Linnaeus",
+  "schema": 1
+}

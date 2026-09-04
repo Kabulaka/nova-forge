@@ -7,9 +7,17 @@
       "work_items": [
         "PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0"
       ]
+    },
+    {
+      "kind": "completed",
+      "plan_version": 2,
+      "reason": "trusted Review PASS",
+      "review_batch": "NR-20260904-controllable-task-delivery-01",
+      "reviewed_at": "2026-09-04T14:00:38+08:00",
+      "work_item": "PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0"
     }
   ],
-  "plan_version": 1,
+  "plan_version": 2,
   "requirement_checkpoint": {
     "commit": "b6e22e8c5cd481558d023894b505dcb49fa4301c",
     "path": ".nova/requirements/REQ-01a06a50-2732-704d-97d0-7a98b205a4ea_需求基线与完整切片跟踪.md",
@@ -17,7 +25,7 @@
   },
   "requirement_ref": "REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v2",
   "schema": 1,
-  "status": "development",
+  "status": "implemented",
   "work_items": [
     {
       "blocked_reason": null,
@@ -59,7 +67,7 @@
           "title": "技能流程、进度报告与端到端验证"
         }
       ],
-      "state": "review_pending",
+      "state": "completed",
       "supersedes": [],
       "title": "需求基线与可控任务交付",
       "work_item": "PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0"
