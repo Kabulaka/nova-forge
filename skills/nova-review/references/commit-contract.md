@@ -2,11 +2,11 @@
 
 ## 1. 身份与分类
 
-工作项 ID 是一次交付生命周期的跨会话稳定身份，commit 只是该身份的证据。可信审计归档是不可逆终态：活动工作项的原范围开发、测试和 Review 修复沿用原 ID；归档后任何变化重新分类建项，旧 ID 永久封存：
+工作项 ID 是一个独立、内聚、可控交付单元的跨会话稳定身份，commit 只是该身份的证据。一个新工作项必须有完整结果与验收，并能独立排期、暂停、恢复、Review 或取消；需求、架构、编码、测试等流程阶段，以及文件、模块、技能、代理或提交批次不能作为拆项依据。多个步骤只有共同完成才有价值或共同修改同一规模可控能力时，必须沿用一个 ID，并在交付台账中作为内部里程碑跟踪。可信审计归档是不可逆终态：活动工作项的原范围开发、测试、里程碑推进和 Review 修复沿用原 ID；归档后任何变化重新分类建项，旧 ID 永久封存：
 
 | 类别 | ID | 客观边界 | 默认 Review |
 |------|----|----------|-------------|
-| `designed` | `PEND-<UUIDv7>` | 新增或改变能力、接口、状态、权限、持久化、依赖、跨模块契约；必须有蓝图和设计工作包 | required |
+| `designed` | `PEND-<UUIDv7>` | 新增或改变一项完整能力、接口、状态、权限、持久化、依赖或跨模块契约；必须有蓝图和设计工作包，不能按内部步骤过度拆分 | required |
 | `adhoc` | `FIX-<UUIDv7>` | 修复既有契约内的局部问题，不新增能力或改变公共契约；不进入蓝图 | required |
 | `maintenance` | `MAINT-<UUIDv7>` | 不改变运行时或测试语义的维护变更 | required，命中客观白名单才可 exempt |
 
@@ -53,7 +53,28 @@ Validation: requirements index/block (pass)
 - 提交前使用 `validate-message --repo <根目录> --message-file <消息> --diff-file <完整 staged diff>`；下游使用 `query-requirement --repo <根目录> --requirement-ref <REQ@vN>` 恢复并验证基线三元组；
 - requirement commit 不进入 Review 候选，也不生成工作项完成审计。
 
-## 4. Work-Item commit trailers
+## 4. Delivery-plan 检查点 trailers
+
+首个开发任务前以独立本地提交固化完整交付台账；同一需求后续计划版本也使用相同分型：
+
+```text
+Nova-Schema: 1
+Commit-Kind: delivery-plan
+Requirement-Ref: REQ-018f22e2-79b0-7abc-8123-456789abcdef@v1
+Requirement-Commit: <合法 requirement 检查点 commit>
+Requirement-SHA256: <需求块字节的 64 位小写 SHA-256>
+Plan-Version: 1
+Validation: nova-delivery validate (pass)
+```
+
+- 精确 staged diff 必须包含 `.nova/delivery/<Requirement-Key>_vN.json`，并且只能额外包含 `.nova/PROJECT_BLUEPRINT.md` 与 `.nova/PRODUCT_REQUIREMENTS.md`；所有路径均为普通 `100644` 文件且不得重命名；
+- 台账必须逐字绑定同一 `Requirement-Ref` 的唯一可信 requirement commit、路径和 SHA-256，`Plan-Version` 等于台账 `plan_version`；
+- 初始版本必须完整列出所有独立 PEND 及内部里程碑；PEND 必须满足独立、内聚、可控边界，里程碑没有 Work-Item 或 Review 身份；
+- 当前版本的非终态任务必须与蓝图投影逐字一致；计划提交后需求状态为开发中，已实现版本与依据不得伪造当前未完成版本；
+- 不得携带 Work-Item、Change-Class、Design-Ref、Review-Policy、Exemption-Rule、Related-Work-Item 或 Review-State；Review 发现必须排除 delivery-plan；
+- 同一 `Requirement-Ref + Plan-Version` 只能有一个可信 delivery-plan commit；提交前使用仓库感知 `validate-message` 校验完整 staged diff。
+
+## 5. Work-Item commit trailers
 
 每个 PEND/FIX/MAINT commit 必须恰有一组：
 
@@ -78,7 +99,7 @@ Validation: pytest tests/example.py (pass)
 - `Related-Work-Item` 可省略且最多出现一次，只允许 `adhoc` FIX 指向可信审计已归档的 PEND；普通校验检查格式，仓库感知校验、待审选择和关闭校验检查归档真实性；
 - 未归档工作项的原范围后续修改继续使用相同 ID 并产生新 commit；归档后不得新增同 ID commit，也不得为新工作项复用旧号或修改旧审计掩盖冲突。
 
-## 5. Review 关闭审计提交
+## 6. Review 关闭审计提交
 
 `record-pass` 在既有 PASS 后生成的关闭与审计文件不构成新工作项，不得伪造 `MAINT-*` 或递归进入 Review。该次本地提交使用独立且恰好一组的 trailers：
 
@@ -91,6 +112,6 @@ Validation: nova-review validate-audit-message (pass)
 
 提交前必须先精确暂存本批关闭文件，再用 `validate-audit-message` 对 staged diff 校验。传入 diff 必须与仓库真实 staged diff 逐字节一致；记录内容从 Git index 读取，不信任可能已继续变化的工作树。Git 输出的 C-quoted 路径须严格还原成真实 UTF-8 路径后再比较。校验器从 `HEAD`（已提交审计时为父提交）重新解析关闭映射、推导权威 `package_ids` 并执行确定性关闭函数，不能以 Review 记录自报集合为权威；随后逐字节推导年度 JSONL 只追加本批记录、索引与 Review 原先不存在且内容规范、蓝图只删除目标行、设计只完成目标工作包的唯一输出，并保持既有文件模式、新文件固定为普通 `100644`；staged/commit 的路径、blob 与模式必须全部相等。批次、manifest 摘要、严格 Review 记录、年度功能记录、每项索引、蓝图/设计关闭内容和路径必须完全一致，`Validation` 必须以 `(pass)` 结尾，且不得包含标准 `Work-Item` trailers 或额外路径。审计提交只保存已取得的 Review 事实，不产生新的 Review 授权或结论。
 
-## 6. 提交权限
+## 7. 提交权限
 
 全局治理代表用户对每个任务在最低验收通过且无阻断后创建精确范围本地 Git commit 的持续授权，无需逐次询问；用户明确要求不提交时只撤回当次授权。不得提交未通过最低验收的代码。Git push、远程配置和 SVN commit 不由本契约授权，必须取得用户对具体操作的独立授权。

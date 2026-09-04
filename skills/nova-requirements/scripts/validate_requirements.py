@@ -233,6 +233,17 @@ def trusted_review_pass(
     return refs == [f"{requirement_key}@{implemented_version}"]
 
 
+def implementation_evidence(value: str) -> list[str] | None:
+    items = [item for item in re.split(r"[、,，\s]+", value) if item]
+    if (
+        not items
+        or len(items) != len(set(items))
+        or any(PEND_RE.fullmatch(item) is None for item in items)
+    ):
+        return None
+    return items
+
+
 def validate_index(path: Path) -> list[str]:
     text, errors = read_text(path)
     if text is None:
@@ -299,29 +310,41 @@ def validate_index(path: Path) -> list[str]:
             else:
                 current = int(version_match.group(1)) if version_match else 0
                 implemented_match = VERSION_RE.fullmatch(implemented)
+                evidence_items = implementation_evidence(evidence)
                 if (
                     implemented_match is None
                     or int(implemented_match.group(1)) >= current
-                    or PEND_RE.fullmatch(evidence) is None
+                    or evidence_items is None
                 ):
                     errors.append(
                         f"{key}: 开发中 requires 无/无 or an older implemented version and PEND evidence"
                     )
-                elif not trusted_review_pass(path.parent, evidence, key, implemented):
+                elif not all(
+                    trusted_review_pass(path.parent, item, key, implemented)
+                    for item in evidence_items
+                ):
                     errors.append(
                         f"{key}: implementation evidence is not a trusted Review PASS: {evidence}"
                     )
         elif status == "已实现":
-            if implemented != version or PEND_RE.fullmatch(evidence) is None:
+            evidence_items = implementation_evidence(evidence)
+            if implemented != version or evidence_items is None:
                 errors.append(f"{key}: 已实现 requires current implemented version and PEND evidence")
-            elif not trusted_review_pass(path.parent, evidence, key, implemented):
+            elif not all(
+                trusted_review_pass(path.parent, item, key, implemented)
+                for item in evidence_items
+            ):
                 errors.append(f"{key}: implementation evidence is not a trusted Review PASS: {evidence}")
         elif status == "已更新":
             current = int(version_match.group(1)) if version_match else 0
             implemented_match = VERSION_RE.fullmatch(implemented)
-            if implemented_match is None or int(implemented_match.group(1)) >= current or PEND_RE.fullmatch(evidence) is None:
+            evidence_items = implementation_evidence(evidence)
+            if implemented_match is None or int(implemented_match.group(1)) >= current or evidence_items is None:
                 errors.append(f"{key}: 已更新 requires an older implemented version and PEND evidence")
-            elif not trusted_review_pass(path.parent, evidence, key, implemented):
+            elif not all(
+                trusted_review_pass(path.parent, item, key, implemented)
+                for item in evidence_items
+            ):
                 errors.append(f"{key}: implementation evidence is not a trusted Review PASS: {evidence}")
     return errors
 

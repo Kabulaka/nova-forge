@@ -1322,7 +1322,7 @@ class NovaReviewTests(unittest.TestCase):
 
     def test_bootstrap_first_slice_pass_keeps_requirement_in_development(self) -> None:
         requirement_ref = NOVA_TOOL.BOOTSTRAP_REQUIREMENT_REF
-        requirement = requirement_ref.split("@", 1)[0]
+        requirement, version = requirement_ref.split("@", 1)
         work_item = NOVA_TOOL.BOOTSTRAP_CHECKPOINT_WORK_ITEM
         remaining = sorted(NOVA_TOOL.BOOTSTRAP_WORK_ITEMS - {work_item})
         with tempfile.TemporaryDirectory() as directory:
@@ -1344,7 +1344,7 @@ class NovaReviewTests(unittest.TestCase):
             product = (
                 "| Requirement Key | 版本 | 状态 | 业务模块 | 需求块 | 已实现版本 | 实现依据 |\n"
                 "|-----------------|------|------|----------|--------|------------|----------|\n"
-                f"| {requirement} | v1 | 待实现 | 交付治理 | [需求](requirements/{requirement}_需求.md) | 无 | 无 |\n"
+                f"| {requirement} | {version} | 待实现 | 交付治理 | [需求](requirements/{requirement}_需求.md) | 无 | 无 |\n"
             )
             (repo / ".nova/PRODUCT_REQUIREMENTS.md").write_text(product, encoding="utf-8")
             subprocess.run(["git", "-C", str(repo), "add", ".nova"], check=True)
@@ -1384,7 +1384,7 @@ class NovaReviewTests(unittest.TestCase):
             updated_product = (repo / ".nova/PRODUCT_REQUIREMENTS.md").read_text(
                 encoding="utf-8"
             )
-            self.assertIn(f"| {requirement} | v1 | 开发中 |", updated_product)
+            self.assertIn(f"| {requirement} | {version} | 开发中 |", updated_product)
             self.assertIn("| 无 | 无 |", updated_product)
             updated_blueprint = blueprint_path.read_text(encoding="utf-8")
             self.assertNotIn(work_item, updated_blueprint)

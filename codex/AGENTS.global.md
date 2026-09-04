@@ -59,12 +59,14 @@
 
 提交分类、豁免和 trailers 以 `skills/nova-review/references/commit-contract.md` 为唯一详细定义：
 
+工作项是独立、内聚、可控的交付单元，必须具有完整结果与验收，并能独立排期、暂停、恢复、Review 或取消。大需求可沿稳定能力边界拆成多个开发任务；需求、架构、编码、测试等流程阶段，以及文件、模块、技能、代理或提交批次不得作为拆项依据。多个步骤只有共同完成才有价值或共同修改同一规模可控能力时，必须沿用一个工作项，并以内部里程碑和多次提交跟踪。
+
 - `designed` 使用 `PEND-*`，`Design-Ref` 必须指向设计锚点，且需要 Review；
 - `adhoc` 使用 `FIX-*`，`Design-Ref: none`，仅限不新增能力或公共契约的小修复，仍需要 Review；
 - `maintenance` 使用 `MAINT-*`，`Design-Ref: none`，默认需要 Review，只有客观白名单可豁免；
 - 缺失、矛盾或无法证明的分类一律按需要 Review 处理。
 
-Nova commit 必须包含 `Nova-Schema`、`Work-Item`、`Change-Class`、`Design-Ref`、`Review-Policy`、`Exemption-Rule`、`Validation`，明确源于已归档 PEND 的新 FIX 还必须包含 `Related-Work-Item`。不得在不可变 commit 中写 `Review-State`。工作项未归档且修正仍属原范围或当前 Review 时沿用相同编号并追加 commit；可信审计归档后编号永久封存，后续变化必须重新分类建项。
+普通 Nova Work-Item commit 必须包含 `Nova-Schema`、`Work-Item`、`Change-Class`、`Design-Ref`、`Review-Policy`、`Exemption-Rule`、`Validation`，明确源于已归档 PEND 的新 FIX 还必须包含 `Related-Work-Item`。requirement 与 delivery-plan 检查点使用各自 `Commit-Kind` 契约，不携带 Work-Item 或进入 Review。不得在不可变 commit 中写 `Review-State`。工作项未归档且修正仍属原范围、内部里程碑或当前 Review 时沿用相同编号并追加 commit；可信审计归档后编号永久封存，后续变化必须重新分类建项。
 
 ## 人工 Review
 

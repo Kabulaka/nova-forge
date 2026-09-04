@@ -43,6 +43,15 @@ REQUIREMENT_TRAILERS = (
     "Requirement-SHA256",
     "Validation",
 )
+DELIVERY_PLAN_TRAILERS = (
+    "Nova-Schema",
+    "Commit-Kind",
+    "Requirement-Ref",
+    "Requirement-Commit",
+    "Requirement-SHA256",
+    "Plan-Version",
+    "Validation",
+)
 AUDIT_TRAILERS = (
     "Nova-Audit-Schema",
     "Review-Batch",
@@ -68,13 +77,9 @@ REQUIREMENT_PATH_RE = re.compile(
     rf"^\.nova/requirements/(?P<key>REQ-{UUID7_PATTERN})_[^/\n]+\.md$"
 )
 LOWER_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-BOOTSTRAP_REQUIREMENT_REF = "REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v1"
+BOOTSTRAP_REQUIREMENT_REF = "REQ-01a06a50-2732-704d-97d0-7a98b205a4ea@v2"
 BOOTSTRAP_CHECKPOINT_WORK_ITEM = "PEND-01a06a50-27d0-7fe5-8d30-ab9de658eaa0"
-BOOTSTRAP_WORK_ITEMS = {
-    BOOTSTRAP_CHECKPOINT_WORK_ITEM,
-    "PEND-01a06a50-281a-74ce-97a5-74e0385625e7",
-    "PEND-01a06a50-2864-7a54-a080-9c0c2e4385e6",
-}
+BOOTSTRAP_WORK_ITEMS = {BOOTSTRAP_CHECKPOINT_WORK_ITEM}
 BATCH_ID_RE = re.compile(r"^NR-[0-9]{8}-[A-Za-z0-9._-]+$")
 REPOSITORY_ALIAS_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 DOC_SUFFIXES = {".md", ".txt", ".rst"}
@@ -234,25 +239,48 @@ def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
     fields = trailing_fields(text)
     if any(key == "Commit-Kind" for key, _ in fields):
         found: dict[str, list[str]] = defaultdict(list)
-        known = set(REQUIREMENT_TRAILERS) | set(STANDARD_TRAILERS) | {"Review-State"}
+        known = (
+            set(REQUIREMENT_TRAILERS)
+            | set(DELIVERY_PLAN_TRAILERS)
+            | set(STANDARD_TRAILERS)
+            | {"Review-State"}
+        )
         for key, value in fields:
             if key in known:
                 found[key].append(value)
 
         errors: list[str] = []
         values: dict[str, str] = {}
-        for key in REQUIREMENT_TRAILERS:
+        kind_values = found.get("Commit-Kind", [])
+        kind = kind_values[0] if len(kind_values) == 1 else ""
+        expected = (
+            REQUIREMENT_TRAILERS
+            if kind == "requirement"
+            else DELIVERY_PLAN_TRAILERS
+            if kind == "delivery-plan"
+            else ("Commit-Kind",)
+        )
+        for key in expected:
             entries = found.get(key, [])
             if len(entries) != 1:
                 errors.append(f"{key} must appear exactly once")
             if entries:
                 values[key] = entries[0]
+        if kind not in {"requirement", "delivery-plan"}:
+            errors.append("Commit-Kind must be requirement or delivery-plan")
+        unexpected_checkpoint = (
+            set(DELIVERY_PLAN_TRAILERS) - set(REQUIREMENT_TRAILERS)
+            if kind == "requirement"
+            else set(REQUIREMENT_TRAILERS) - set(DELIVERY_PLAN_TRAILERS)
+        )
+        if any(found.get(key) for key in unexpected_checkpoint):
+            errors.append(f"{kind or 'checkpoint'} commit has incompatible checkpoint trailers")
         forbidden = (set(STANDARD_TRAILERS) - {"Nova-Schema", "Validation"}) | {
             "Review-State"
         }
         if any(found.get(key) for key in forbidden):
             errors.append(
-                "requirement commits must not contain work-item or Review-State trailers"
+                "checkpoint commits must not contain work-item or Review-State trailers"
             )
         return values, errors
 
@@ -660,6 +688,403 @@ def validate_requirement_metadata(
     return errors
 
 
+DELIVERY_WORK_ITEM_STATES = {
+    "planned",
+    "active",
+    "review_pending",
+    "blocked",
+    "completed",
+    "superseded",
+    "cancelled",
+}
+DELIVERY_MILESTONE_STATES = {"planned", "active", "blocked", "completed"}
+DELIVERY_CHANGE_KINDS = {
+    "created",
+    "added",
+    "split",
+    "merged",
+    "replaced",
+    "reordered",
+    "dependencies-updated",
+    "done-definition-updated",
+    "design-bound",
+    "activated",
+    "milestone-updated",
+    "review-submitted",
+    "blocked",
+    "unblocked",
+    "completed",
+    "cancelled",
+}
+
+
+def delivery_relative_path(requirement_ref: str) -> str:
+    if REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
+        raise NovaError("Requirement-Ref must be REQ-<UUIDv7>@vN")
+    key, version = requirement_ref.split("@", 1)
+    return f".nova/delivery/{key}_{version}.json"
+
+
+def strict_json_object(content: bytes, label: str) -> dict[str, Any]:
+    def pairs(values: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in values:
+            if key in result:
+                raise NovaError(f"{label} contains duplicate key: {key}")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(content.decode("utf-8"), object_pairs_hook=pairs)
+    except json.JSONDecodeError as exc:
+        raise NovaError(f"invalid {label}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise NovaError(f"{label} must be a JSON object")
+    return value
+
+
+def canonical_delivery_ledger(value: dict[str, Any]) -> bytes:
+    return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(
+        "utf-8"
+    )
+
+
+def product_requirement_row(text: str, requirement_ref: str) -> list[str]:
+    key, version = requirement_ref.split("@", 1)
+    rows: list[list[str]] = []
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 7 and cells[0] == key:
+            rows.append(cells)
+    if len(rows) != 1 or rows[0][1] != version:
+        raise NovaError("product requirements row does not match delivery Requirement-Ref")
+    return rows[0]
+
+
+def validate_delivery_ledger_data(
+    repo: Path,
+    ledger: dict[str, Any],
+    *,
+    blueprint: str,
+    product: str,
+    verify_evidence: bool = True,
+    verify_review_state: bool | None = None,
+) -> dict[str, Any]:
+    expected_root = {
+        "schema",
+        "requirement_ref",
+        "requirement_checkpoint",
+        "plan_version",
+        "status",
+        "work_items",
+        "changes",
+    }
+    if verify_review_state is None:
+        verify_review_state = verify_evidence
+    if set(ledger) != expected_root or ledger.get("schema") != 1:
+        raise NovaError("delivery ledger has missing or unknown root fields")
+    requirement_ref = ledger.get("requirement_ref")
+    if not isinstance(requirement_ref, str) or REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
+        raise NovaError("delivery ledger has invalid requirement_ref")
+    checkpoint = ledger.get("requirement_checkpoint")
+    if not isinstance(checkpoint, dict) or set(checkpoint) != {"commit", "path", "sha256"}:
+        raise NovaError("delivery ledger has invalid requirement_checkpoint")
+    trusted = query_requirement(repo, requirement_ref)
+    if checkpoint != {key: trusted[key] for key in ("commit", "path", "sha256")}:
+        raise NovaError("delivery ledger requirement checkpoint does not match trusted Git history")
+    plan_version = ledger.get("plan_version")
+    if not isinstance(plan_version, int) or isinstance(plan_version, bool) or plan_version < 1:
+        raise NovaError("delivery ledger plan_version must be a positive integer")
+    if ledger.get("status") not in {"development", "implemented"}:
+        raise NovaError("delivery ledger status must be development or implemented")
+
+    work_items = ledger.get("work_items")
+    if not isinstance(work_items, list) or not work_items:
+        raise NovaError("delivery ledger work_items must be non-empty")
+    by_id: dict[str, dict[str, Any]] = {}
+    current: list[dict[str, Any]] = []
+    effective: list[dict[str, Any]] = []
+    for item in work_items:
+        expected_item = {
+            "work_item",
+            "title",
+            "dependencies",
+            "done_definition",
+            "design_ref",
+            "state",
+            "blocked_reason",
+            "supersedes",
+            "change_reason",
+            "milestones",
+        }
+        if not isinstance(item, dict) or set(item) != expected_item:
+            raise NovaError("delivery work item has missing or unknown fields")
+        work_item = item.get("work_item")
+        if not isinstance(work_item, str) or WORK_ITEM_PATTERNS["designed"].fullmatch(work_item) is None:
+            raise NovaError("delivery work item must be a PEND identifier")
+        if work_item in by_id:
+            raise NovaError(f"duplicate delivery work item: {work_item}")
+        by_id[work_item] = item
+        for field in ("title", "done_definition", "change_reason"):
+            if not isinstance(item.get(field), str) or not item[field].strip():
+                raise NovaError(f"delivery work item {field} must not be empty: {work_item}")
+        dependencies = item.get("dependencies")
+        supersedes = item.get("supersedes")
+        if (
+            not isinstance(dependencies, list)
+            or any(not isinstance(value, str) or not valid_work_item(value) for value in dependencies)
+            or len(dependencies) != len(set(dependencies))
+        ):
+            raise NovaError(f"invalid dependencies for {work_item}")
+        if (
+            not isinstance(supersedes, list)
+            or any(not isinstance(value, str) or not valid_work_item(value) for value in supersedes)
+            or len(supersedes) != len(set(supersedes))
+        ):
+            raise NovaError(f"invalid supersedes for {work_item}")
+        design_ref = item.get("design_ref")
+        state = item.get("state")
+        if state not in DELIVERY_WORK_ITEM_STATES:
+            raise NovaError(f"invalid state for {work_item}")
+        if state != "planned" and (
+            not isinstance(design_ref, str) or DESIGN_REF_RE.fullmatch(design_ref) is None
+        ):
+            raise NovaError(f"non-planned work item requires a design_ref: {work_item}")
+        if design_ref is not None and (
+            not isinstance(design_ref, str) or DESIGN_REF_RE.fullmatch(design_ref) is None
+        ):
+            raise NovaError(f"invalid design_ref for {work_item}")
+        blocked_reason = item.get("blocked_reason")
+        if (state == "blocked") != (isinstance(blocked_reason, str) and bool(blocked_reason.strip())):
+            raise NovaError(f"blocked_reason does not match state for {work_item}")
+        if state in {"active", "review_pending", "blocked"}:
+            current.append(item)
+        if state not in {"superseded", "cancelled"}:
+            effective.append(item)
+
+        milestones = item.get("milestones")
+        if not isinstance(milestones, list) or not milestones:
+            raise NovaError(f"work item requires internal milestones: {work_item}")
+        seen_milestones: set[str] = set()
+        milestone_current = 0
+        for milestone in milestones:
+            expected_milestone = {
+                "id",
+                "title",
+                "done_definition",
+                "state",
+                "blocked_reason",
+                "evidence",
+            }
+            if not isinstance(milestone, dict) or set(milestone) != expected_milestone:
+                raise NovaError(f"milestone has missing or unknown fields: {work_item}")
+            milestone_id = milestone.get("id")
+            if not isinstance(milestone_id, str) or re.fullmatch(r"M-0*[1-9][0-9]*", milestone_id) is None:
+                raise NovaError(f"invalid milestone id: {work_item}")
+            if milestone_id in seen_milestones:
+                raise NovaError(f"duplicate milestone id: {work_item}/{milestone_id}")
+            seen_milestones.add(milestone_id)
+            for field in ("title", "done_definition"):
+                if not isinstance(milestone.get(field), str) or not milestone[field].strip():
+                    raise NovaError(f"milestone {field} must not be empty: {work_item}/{milestone_id}")
+            milestone_state = milestone.get("state")
+            if milestone_state not in DELIVERY_MILESTONE_STATES:
+                raise NovaError(f"invalid milestone state: {work_item}/{milestone_id}")
+            milestone_blocked = milestone.get("blocked_reason")
+            if (milestone_state == "blocked") != (
+                isinstance(milestone_blocked, str) and bool(milestone_blocked.strip())
+            ):
+                raise NovaError(f"milestone blocked_reason does not match state: {work_item}/{milestone_id}")
+            if milestone_state in {"active", "blocked"}:
+                milestone_current += 1
+            evidence = milestone.get("evidence")
+            if (
+                not isinstance(evidence, list)
+                or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{40,64}", value) is None for value in evidence)
+                or len(evidence) != len(set(evidence))
+            ):
+                raise NovaError(f"invalid milestone evidence: {work_item}/{milestone_id}")
+            if milestone_state == "completed" and not evidence:
+                raise NovaError(f"completed milestone requires commit evidence: {work_item}/{milestone_id}")
+            if milestone_state != "completed" and evidence:
+                raise NovaError(f"only completed milestones may carry evidence: {work_item}/{milestone_id}")
+            if verify_evidence:
+                for commit_hash in evidence:
+                    try:
+                        resolved = run_git(repo, "rev-parse", "--verify", f"{commit_hash}^{{commit}}")
+                        run_git(repo, "merge-base", "--is-ancestor", resolved.strip(), "HEAD")
+                        message = run_git(repo, "show", "-s", "--format=%B", resolved.strip())
+                        values, errors = parse_message(message)
+                    except NovaError as exc:
+                        raise NovaError(f"invalid milestone evidence {commit_hash}: {exc}") from exc
+                    if errors or values.get("Work-Item") != work_item:
+                        raise NovaError(f"milestone evidence does not belong to {work_item}: {commit_hash}")
+        if milestone_current > 1:
+            raise NovaError(f"work item has multiple current milestones: {work_item}")
+        if state == "review_pending" and any(
+            milestone["state"] != "completed" for milestone in milestones
+        ):
+            raise NovaError(f"review_pending work item has incomplete milestones: {work_item}")
+        completed_record = load_completed_item(repo, work_item) if verify_review_state else None
+        if state == "completed" and verify_review_state and completed_record is None:
+            raise NovaError(f"completed work item lacks trusted Review PASS: {work_item}")
+        if state != "completed" and verify_review_state and completed_record is not None:
+            raise NovaError(f"uncompleted work item already has trusted Review PASS: {work_item}")
+
+    if len(current) > 1:
+        raise NovaError("delivery ledger may have at most one current work item")
+    for work_item, item in by_id.items():
+        for dependency in item["dependencies"]:
+            if dependency == work_item:
+                raise NovaError(f"work item may not depend on itself: {work_item}")
+            if dependency in by_id and by_id[dependency]["state"] != "completed":
+                if item["state"] != "planned":
+                    raise NovaError(f"active work item has incomplete dependency: {work_item}")
+            elif dependency not in by_id and verify_evidence and load_completed_item(repo, dependency) is None:
+                raise NovaError(f"external dependency lacks trusted PASS: {dependency}")
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(value: str) -> None:
+        if value in visiting:
+            raise NovaError("delivery work item dependencies contain a cycle")
+        if value in visited or value not in by_id:
+            return
+        visiting.add(value)
+        for dependency in by_id[value]["dependencies"]:
+            visit(dependency)
+        visiting.remove(value)
+        visited.add(value)
+
+    for work_item in by_id:
+        visit(work_item)
+
+    changes = ledger.get("changes")
+    if not isinstance(changes, list) or len(changes) != plan_version:
+        raise NovaError("delivery ledger changes must match plan_version")
+    for index, change in enumerate(changes, 1):
+        if not isinstance(change, dict) or change.get("plan_version") != index:
+            raise NovaError("delivery ledger changes must be sequential")
+        if change.get("kind") not in DELIVERY_CHANGE_KINDS:
+            raise NovaError("delivery ledger change has invalid kind")
+        if not isinstance(change.get("reason"), str) or not change["reason"].strip():
+            raise NovaError("delivery ledger change reason must not be empty")
+
+    completed = [item for item in effective if item["state"] == "completed"]
+    if ledger["status"] == "implemented":
+        if not effective or len(completed) != len(effective) or current:
+            raise NovaError("implemented delivery ledger must have all effective work complete")
+    elif not effective or len(completed) == len(effective):
+        raise NovaError("development delivery ledger must have unfinished effective work")
+
+    expected_blueprint = {
+        item["work_item"] for item in effective if item["state"] != "completed"
+    }
+    actual_blueprint = blueprint_work_items_for_requirement(blueprint, requirement_ref)
+    if actual_blueprint != expected_blueprint:
+        raise NovaError(
+            "delivery ledger and blueprint work items differ; "
+            f"expected={sorted(expected_blueprint)}; actual={sorted(actual_blueprint)}"
+        )
+    row = product_requirement_row(product, requirement_ref)
+    if ledger["status"] == "development" and row[2] != "开发中":
+        raise NovaError("development delivery ledger requires product state 开发中")
+    if ledger["status"] == "implemented" and row[2] not in {"已实现", "已更新"}:
+        raise NovaError("implemented delivery ledger requires implemented product state")
+    return ledger
+
+
+def validate_delivery_plan_metadata(
+    values: dict[str, str], diff: str | None, repo: Path | None, *, commit_hash: str | None = None
+) -> list[str]:
+    errors: list[str] = []
+    if values.get("Nova-Schema") != SCHEMA:
+        errors.append(f"Nova-Schema must be {SCHEMA}")
+    if values.get("Commit-Kind") != "delivery-plan":
+        errors.append("Commit-Kind must be delivery-plan")
+    requirement_ref = values.get("Requirement-Ref", "")
+    if REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
+        errors.append("Requirement-Ref must be REQ-<UUIDv7>@vN")
+    if re.fullmatch(r"[0-9a-f]{40,64}", values.get("Requirement-Commit", "")) is None:
+        errors.append("Requirement-Commit must be a Git commit hash")
+    if LOWER_SHA256_RE.fullmatch(values.get("Requirement-SHA256", "")) is None:
+        errors.append("Requirement-SHA256 must be 64 lowercase hexadecimal characters")
+    if re.fullmatch(r"[1-9][0-9]*", values.get("Plan-Version", "")) is None:
+        errors.append("Plan-Version must be a positive integer")
+    if re.search(r"\(pass\)\s*$", values.get("Validation", ""), re.IGNORECASE) is None:
+        errors.append("Validation must end with (pass)")
+    if diff is None:
+        errors.append("delivery-plan commits require the complete staged diff")
+    if repo is None:
+        errors.append("delivery-plan commits require --repo")
+    if errors or diff is None or repo is None:
+        return errors
+    try:
+        if commit_hash is None:
+            staged = run_git(repo, "diff", "--cached", "--binary", "--no-ext-diff")
+            if diff != staged:
+                return ["delivery-plan diff must exactly match the repository staged diff"]
+        ledger_path = delivery_relative_path(requirement_ref)
+        paths = set(diff_paths(diff))
+        allowed = {ledger_path, ".nova/PROJECT_BLUEPRINT.md", ".nova/PRODUCT_REQUIREMENTS.md"}
+        if ledger_path not in paths or not paths.issubset(allowed):
+            return ["delivery-plan commit must contain its ledger and only allowed projections"]
+        changes = diff_changes(diff)
+        if any(old != new for old, new in changes):
+            return ["delivery-plan commit must not rename paths"]
+        if commit_hash is None:
+            ledger_bytes = git_index_blob(repo, ledger_path)
+            blueprint_bytes = git_index_blob(repo, ".nova/PROJECT_BLUEPRINT.md")
+            product_bytes = git_index_blob(repo, ".nova/PRODUCT_REQUIREMENTS.md")
+        else:
+            ledger_bytes = run_git_bytes(repo, "show", f"{commit_hash}:{ledger_path}")
+            blueprint_bytes = run_git_bytes(repo, "show", f"{commit_hash}:.nova/PROJECT_BLUEPRINT.md")
+            product_bytes = run_git_bytes(repo, "show", f"{commit_hash}:.nova/PRODUCT_REQUIREMENTS.md")
+        ledger = strict_json_object(ledger_bytes or b"", "delivery ledger")
+        if canonical_delivery_ledger(ledger) != ledger_bytes:
+            raise NovaError("delivery ledger must use canonical UTF-8 JSON")
+        validate_delivery_ledger_data(
+            repo,
+            ledger,
+            blueprint=(blueprint_bytes or b"").decode("utf-8"),
+            product=(product_bytes or b"").decode("utf-8"),
+            verify_evidence=True,
+            verify_review_state=commit_hash is None,
+        )
+        checkpoint = ledger["requirement_checkpoint"]
+        if values["Requirement-Commit"] != checkpoint["commit"]:
+            errors.append("Requirement-Commit does not match delivery ledger")
+        if values["Requirement-SHA256"] != checkpoint["sha256"]:
+            errors.append("Requirement-SHA256 does not match delivery ledger")
+        if values["Plan-Version"] != str(ledger["plan_version"]):
+            errors.append("Plan-Version does not match delivery ledger")
+        if commit_hash is None:
+            history = run_git(
+                repo,
+                "log",
+                "--format=%H%x1f%B%x1e",
+                "--fixed-strings",
+                f"--grep=Requirement-Ref: {requirement_ref}",
+            )
+            for record in history.split("\x1e"):
+                if "\x1f" not in record:
+                    continue
+                _, message = record.strip("\n").split("\x1f", 1)
+                metadata, commit_errors = parse_message(message)
+                if (
+                    not commit_errors
+                    and metadata.get("Commit-Kind") == "delivery-plan"
+                    and metadata.get("Plan-Version") == values["Plan-Version"]
+                ):
+                    errors.append("Requirement-Ref and Plan-Version already have a delivery-plan commit")
+                    break
+    except (NovaError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+        errors.append(str(exc))
+    return errors
+
+
 def validate_repository_lifecycle(repo: Path, values: dict[str, str]) -> list[str]:
     errors: list[str] = []
     work_item = values.get("Work-Item", "")
@@ -684,6 +1109,8 @@ def validate_message(
     if not errors:
         if values.get("Commit-Kind") == "requirement":
             errors.extend(validate_requirement_metadata(values, diff, repo))
+        elif values.get("Commit-Kind") == "delivery-plan":
+            errors.extend(validate_delivery_plan_metadata(values, diff, repo))
         else:
             errors.extend(validate_metadata(values, diff))
     if not errors and repo is not None and values.get("Commit-Kind") is None:
@@ -708,6 +1135,12 @@ def validate_committed_message(
         if values.get("Commit-Kind") == "requirement":
             errors.extend(
                 validate_requirement_metadata(
+                    values, diff, repo, commit_hash=commit_hash
+                )
+            )
+        elif values.get("Commit-Kind") == "delivery-plan":
+            errors.extend(
+                validate_delivery_plan_metadata(
                     values, diff, repo, commit_hash=commit_hash
                 )
             )
@@ -1237,9 +1670,34 @@ def expected_audit_snapshot(
                         f"audit parent lacks product requirements for {item['work_item']}"
                     )
                 product = product_bytes.decode("utf-8")
-            text_updates[product_relative] = update_product_requirement_status(
-                product, requirement_ref, item["work_item"], blueprint
-            )
+            delivery_relative = delivery_relative_path(requirement_ref)
+            delivery_bytes = parent_reader(delivery_relative)
+            if delivery_bytes is not None:
+                updated_ledger, requirement_complete, implementation_evidence = (
+                    update_delivery_ledger_for_pass(
+                        delivery_bytes,
+                        requirement_ref,
+                        item["work_item"],
+                        review["batch_id"],
+                        review["reviewed_at"],
+                    )
+                )
+                text_updates[delivery_relative] = updated_ledger.decode("utf-8")
+                text_updates[product_relative] = (
+                    update_product_requirement_status(
+                        product,
+                        requirement_ref,
+                        item["work_item"],
+                        blueprint,
+                        implementation_evidence,
+                    )
+                    if requirement_complete
+                    else product
+                )
+            else:
+                text_updates[product_relative] = update_product_requirement_status(
+                    product, requirement_ref, item["work_item"], blueprint
+                )
         text_updates[blueprint_relative] = remove_blueprint_row(
             blueprint, item["work_item"], item["design_ref"], legacy_layout=legacy_layout
         )
@@ -2011,6 +2469,24 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                         raise NovaError(
                             f"product requirements must exist for {work_item} requirement reference"
                         )
+                    delivery_path = safe_repo_path(
+                        repo, delivery_relative_path(requirement_ref), "delivery ledger"
+                    )
+                    delivery_bytes = capture_snapshot(snapshots, delivery_path)
+                    normalized["delivery_path"] = (
+                        delivery_path if delivery_bytes is not None else None
+                    )
+                    if delivery_bytes is not None:
+                        ledger = strict_json_object(delivery_bytes, "delivery ledger")
+                        if canonical_delivery_ledger(ledger) != delivery_bytes:
+                            raise NovaError("delivery ledger must use canonical UTF-8 JSON")
+                        validate_delivery_ledger_data(
+                            repo,
+                            ledger,
+                            blueprint=blueprint,
+                            product=product_bytes.decode("utf-8"),
+                            verify_evidence=True,
+                        )
         else:
             expected_fields = {
                 "work_item",
@@ -2162,7 +2638,11 @@ def blueprint_work_items_for_requirement(text: str, requirement_ref: str) -> set
 
 
 def update_product_requirement_status(
-    text: str, requirement_ref: str, work_item: str, blueprint: str
+    text: str,
+    requirement_ref: str,
+    work_item: str,
+    blueprint: str,
+    implementation_evidence: list[str] | None = None,
 ) -> str:
     key, referenced_version_text = requirement_ref.split("@v", 1)
     referenced_version = int(referenced_version_text)
@@ -2183,7 +2663,7 @@ def update_product_requirement_status(
     current_version = int(current_match.group(1))
     if referenced_version > current_version:
         raise NovaError(f"reviewed requirement version is newer than current index for {key}")
-    if work_item == BOOTSTRAP_CHECKPOINT_WORK_ITEM:
+    if work_item == BOOTSTRAP_CHECKPOINT_WORK_ITEM and implementation_evidence is None:
         if requirement_ref != BOOTSTRAP_REQUIREMENT_REF:
             raise NovaError("bootstrap checkpoint work item has an unexpected Requirement-Ref")
         actual_items = blueprint_work_items_for_requirement(blueprint, requirement_ref)
@@ -2206,12 +2686,176 @@ def update_product_requirement_status(
     implemented_version = int(implemented_match.group(1)) if implemented_match else 0
     if referenced_version >= implemented_version:
         implemented_version = referenced_version
-        cells[6] = work_item
+        evidence = implementation_evidence or [work_item]
+        if not evidence or any(WORK_ITEM_PATTERNS["designed"].fullmatch(value) is None for value in evidence):
+            raise NovaError("implementation evidence must contain PEND work items")
+        cells[6] = "、".join(sorted(set(evidence)))
     cells[5] = f"v{implemented_version}"
     cells[2] = "已实现" if implemented_version == current_version else "已更新"
     ending = "\n" if lines[index].endswith("\n") else ""
     lines[index] = "| " + " | ".join(cells) + " |" + ending
     return "".join(lines)
+
+
+def update_product_requirement_development(text: str, requirement_ref: str) -> str:
+    key, version = requirement_ref.split("@", 1)
+    lines = text.splitlines(keepends=True)
+    matches: list[tuple[int, list[str]]] = []
+    for index, line in enumerate(lines):
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 7 and cells[0] == key:
+            matches.append((index, cells))
+    if len(matches) != 1:
+        raise NovaError(f"product requirements index must contain exactly one row for {key}")
+    index, cells = matches[0]
+    if cells[1] != version:
+        raise NovaError("product requirements version does not match delivery plan")
+    if cells[2] not in {"待实现", "已更新", "开发中"}:
+        raise NovaError("delivery plan cannot reopen an implemented current requirement")
+    if cells[2] == "待实现" and cells[5:] != ["无", "无"]:
+        raise NovaError("待实现 requirement must not contain implementation evidence")
+    cells[2] = "开发中"
+    ending = "\n" if lines[index].endswith("\n") else ""
+    lines[index] = "| " + " | ".join(cells) + " |" + ending
+    return "".join(lines)
+
+
+def update_delivery_ledger_for_pass(
+    content: bytes,
+    requirement_ref: str,
+    work_item: str,
+    batch_id: str,
+    reviewed_at: str,
+) -> tuple[bytes, bool, list[str]]:
+    ledger = strict_json_object(content, "delivery ledger")
+    if ledger.get("requirement_ref") != requirement_ref:
+        raise NovaError("delivery ledger Requirement-Ref mismatch during Review close")
+    matches = [item for item in ledger.get("work_items", []) if item.get("work_item") == work_item]
+    if len(matches) != 1:
+        raise NovaError(f"delivery ledger must contain exactly one work item: {work_item}")
+    item = matches[0]
+    if item.get("state") != "review_pending":
+        raise NovaError(f"delivery work item must be review_pending before PASS: {work_item}")
+    if any(milestone.get("state") != "completed" for milestone in item.get("milestones", [])):
+        raise NovaError(f"delivery work item has incomplete milestones: {work_item}")
+    item["state"] = "completed"
+    item["blocked_reason"] = None
+    ledger["plan_version"] += 1
+    ledger["changes"].append(
+        {
+            "kind": "completed",
+            "plan_version": ledger["plan_version"],
+            "reason": "trusted Review PASS",
+            "review_batch": batch_id,
+            "reviewed_at": reviewed_at,
+            "work_item": work_item,
+        }
+    )
+    effective = [
+        value
+        for value in ledger["work_items"]
+        if value["state"] not in {"superseded", "cancelled"}
+    ]
+    complete = bool(effective) and all(value["state"] == "completed" for value in effective)
+    ledger["status"] = "implemented" if complete else "development"
+    evidence = [value["work_item"] for value in effective if value["state"] == "completed"]
+    return canonical_delivery_ledger(ledger), complete, evidence
+
+
+def milestone_progress(item: dict[str, Any]) -> dict[str, Any]:
+    milestones = item["milestones"]
+    current = [value for value in milestones if value["state"] in {"active", "blocked"}]
+    return {
+        "total": len(milestones),
+        "completed": len([value for value in milestones if value["state"] == "completed"]),
+        "current": current[0] if current else None,
+        "remaining": [value for value in milestones if value["state"] == "planned"],
+        "blocked": [value for value in milestones if value["state"] == "blocked"],
+    }
+
+
+def query_delivery(
+    repo: Path, requirement_ref: str | None = None, work_item: str | None = None
+) -> dict[str, Any]:
+    if bool(requirement_ref) == bool(work_item):
+        raise NovaError("query-delivery requires exactly one of Requirement-Ref or Work-Item")
+    delivery_root = safe_repo_path(repo, ".nova/delivery", "delivery directory")
+    candidates: list[tuple[Path, dict[str, Any]]] = []
+    if requirement_ref:
+        path = safe_repo_path(repo, delivery_relative_path(requirement_ref), "delivery ledger")
+        if not path.is_file():
+            raise NovaError(f"delivery ledger not found: {requirement_ref}")
+        candidates.append((path, strict_json_object(path.read_bytes(), "delivery ledger")))
+    else:
+        if not isinstance(work_item, str) or not valid_work_item(work_item):
+            raise NovaError("Work-Item must be a valid PEND/FIX/MAINT identifier")
+        for path in sorted(delivery_root.glob("REQ-*_v*.json")):
+            value = strict_json_object(path.read_bytes(), "delivery ledger")
+            if any(item.get("work_item") == work_item for item in value.get("work_items", [])):
+                candidates.append((path, value))
+        if len(candidates) != 1:
+            raise NovaError(f"Work-Item must resolve to exactly one delivery ledger: {work_item}")
+    path, ledger = candidates[0]
+    if canonical_delivery_ledger(ledger) != path.read_bytes():
+        raise NovaError("delivery ledger must use canonical UTF-8 JSON")
+    blueprint = safe_repo_path(repo, ".nova/PROJECT_BLUEPRINT.md", "blueprint").read_text(
+        encoding="utf-8"
+    )
+    product = safe_repo_path(
+        repo, ".nova/PRODUCT_REQUIREMENTS.md", "product requirements"
+    ).read_text(encoding="utf-8")
+    validate_delivery_ledger_data(
+        repo, ledger, blueprint=blueprint, product=product, verify_evidence=True
+    )
+    effective = [
+        item
+        for item in ledger["work_items"]
+        if item["state"] not in {"superseded", "cancelled"}
+    ]
+    current = [
+        item for item in effective if item["state"] in {"active", "review_pending", "blocked"}
+    ]
+    current_value = None
+    if current:
+        current_value = {
+            "work_item": current[0]["work_item"],
+            "title": current[0]["title"],
+            "state": current[0]["state"],
+            "milestones": milestone_progress(current[0]),
+        }
+    return {
+        "requirement_ref": ledger["requirement_ref"],
+        "requirement_commit": ledger["requirement_checkpoint"]["commit"],
+        "plan_version": ledger["plan_version"],
+        "status": ledger["status"],
+        "total": len(effective),
+        "completed": len([item for item in effective if item["state"] == "completed"]),
+        "current": current_value,
+        "remaining": [
+            {"work_item": item["work_item"], "title": item["title"]}
+            for item in effective
+            if item["state"] == "planned"
+        ],
+        "blocked": [
+            {
+                "work_item": item["work_item"],
+                "reason": item["blocked_reason"],
+            }
+            for item in effective
+            if item["state"] == "blocked"
+        ],
+        "evidence": {
+            "ledger": str(path.relative_to(repo)),
+            "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+            "audits": [
+                item["work_item"]
+                for item in effective
+                if item["state"] == "completed"
+            ],
+        },
+    }
 
 
 def design_package_state(text: str, package_id: str) -> str | None:
@@ -2453,9 +3097,37 @@ def build_updates(
                         f"product requirements disappeared before closure: {product_path}"
                     )
                 product = expected[product_path].decode("utf-8")
-            text_updates[product_path] = update_product_requirement_status(
-                product, requirement_ref, item["work_item"], blueprint
-            )
+            delivery_path = item.get("delivery_path")
+            if delivery_path is not None:
+                expected[delivery_path] = validated["snapshots"].get(delivery_path)
+                delivery_bytes = expected[delivery_path]
+                if delivery_bytes is None:
+                    raise NovaError(f"delivery ledger disappeared before closure: {delivery_path}")
+                updated_ledger, requirement_complete, implementation_evidence = (
+                    update_delivery_ledger_for_pass(
+                        delivery_bytes,
+                        requirement_ref,
+                        item["work_item"],
+                        validated["manifest"]["batch_id"],
+                        validated["manifest"]["reviewed_at"],
+                    )
+                )
+                text_updates[delivery_path] = updated_ledger.decode("utf-8")
+                text_updates[product_path] = (
+                    update_product_requirement_status(
+                        product,
+                        requirement_ref,
+                        item["work_item"],
+                        blueprint,
+                        implementation_evidence,
+                    )
+                    if requirement_complete
+                    else product
+                )
+            else:
+                text_updates[product_path] = update_product_requirement_status(
+                    product, requirement_ref, item["work_item"], blueprint
+                )
         text_updates[blueprint_path] = remove_blueprint_row(
             blueprint, item["work_item"], item["design_ref"]
         )
@@ -2975,6 +3647,11 @@ def parser() -> argparse.ArgumentParser:
     requirement = commands.add_parser("query-requirement")
     requirement.add_argument("--repo", type=Path, required=True)
     requirement.add_argument("--requirement-ref", required=True)
+    delivery = commands.add_parser("query-delivery")
+    delivery.add_argument("--repo", type=Path, required=True)
+    delivery_group = delivery.add_mutually_exclusive_group(required=True)
+    delivery_group.add_argument("--requirement-ref")
+    delivery_group.add_argument("--work-item")
     return root
 
 
@@ -3007,6 +3684,11 @@ def main() -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         elif args.command == "query-requirement":
             result = query_requirement(args.repo.resolve(), args.requirement_ref)
+            print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        elif args.command == "query-delivery":
+            result = query_delivery(
+                args.repo.resolve(), args.requirement_ref, args.work_item
+            )
             print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         elif args.command in {"check-manifest", "record-pass"}:
             repo = args.repo.resolve()

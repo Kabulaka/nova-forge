@@ -56,12 +56,12 @@ class RequirementStatusTests(unittest.TestCase):
                 product_row("v1", "待实现", "无", "无"), f"{REQ}@v2", PEND, ""
             )
 
-    def test_bootstrap_first_slice_enters_development_without_implementation_evidence(self) -> None:
-        key = NOVA.BOOTSTRAP_REQUIREMENT_REF.split("@", 1)[0]
+    def test_bootstrap_legacy_close_enters_development_without_implementation_evidence(self) -> None:
+        key, version = NOVA.BOOTSTRAP_REQUIREMENT_REF.split("@", 1)
         product = (
             "| Requirement Key | 版本 | 状态 | 业务模块 | 需求块 | 已实现版本 | 实现依据 |\n"
             "|-----------------|------|------|----------|--------|------------|----------|\n"
-            f"| {key} | v1 | 待实现 | 交付治理 | [需求](requirements/{key}_需求.md) | 无 | 无 |\n"
+            f"| {key} | {version} | 待实现 | 交付治理 | [需求](requirements/{key}_需求.md) | 无 | 无 |\n"
         )
         header = (
             "| 编号 | 优先级 | 来源 | 功能 | 设计依据 | 前置依赖 | 完成定义 | 需求引用 |\n"
@@ -77,12 +77,13 @@ class RequirementStatusTests(unittest.TestCase):
             NOVA.BOOTSTRAP_CHECKPOINT_WORK_ITEM,
             header + rows,
         )
-        self.assertIn(f"| {key} | v1 | 开发中 |", updated)
+        self.assertIn(f"| {key} | {version} | 开发中 |", updated)
         self.assertIn("| 无 | 无 |", updated)
 
     def test_bootstrap_first_slice_rejects_incomplete_temporary_ledger(self) -> None:
         key = NOVA.BOOTSTRAP_REQUIREMENT_REF.split("@", 1)[0]
-        product = product_row("v1", "待实现", "无", "无").replace(REQ, key)
+        _, version = NOVA.BOOTSTRAP_REQUIREMENT_REF.split("@", 1)
+        product = product_row(version, "待实现", "无", "无").replace(REQ, key)
         with self.assertRaisesRegex(NOVA.NovaError, "temporary ledger"):
             NOVA.update_product_requirement_status(
                 product,

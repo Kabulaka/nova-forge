@@ -42,7 +42,9 @@ class NovaReviewSkillContractTests(unittest.TestCase):
             "Validation",
         ):
             self.assertIn(trailer, COMMIT)
-        self.assertIn("工作项 ID 是一次交付生命周期的跨会话稳定身份", COMMIT)
+        self.assertIn("工作项 ID 是一个独立、内聚、可控交付单元的跨会话稳定身份", COMMIT)
+        self.assertIn("流程阶段", COMMIT)
+        self.assertIn("内部里程碑", COMMIT)
         self.assertIn("可信审计归档是不可逆终态", COMMIT)
         self.assertIn("Related-Work-Item", COMMIT)
         self.assertIn("蓝图删除活动行不释放编号", AUDIT)

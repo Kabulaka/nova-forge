@@ -27,7 +27,7 @@ description: 通过单问题访谈把绿地项目或新的业务需求收敛为�
 
 显式引用成熟平台、标准、最佳实践、产品或仓库，委托安全、身份、公共契约等高风险事项，或 AI 准备把某项做法作为已验证的成熟/最佳实践提出时，完整读取 [外部参考研究 SOP](../nova-development/references/reference-research-sop.md)。产品名仅作为研究例子时不得形成产品专属需求；普通低风险内部取舍只标为 AI 候选，不得声称为已验证实践，也不在需求阶段展开实现。
 
-先收敛产品定位、角色、端到端流程、业务模块职责、关键对象生命周期、本期范围与明确不做；再按业务能力形成需求块。业务模块只用于归类，需求块才是交付单位。
+先收敛产品定位、角色、端到端流程、业务模块职责、关键对象生命周期、本期范围与明确不做；再按业务能力形成需求块。业务模块只用于归类，需求块是长期需求单位，不预先按需求、架构、编码、测试或提交步骤拆成开发工作项。
 
 需求块必须满足：一名全栈工程师能独立完成前端、后端、数据与测试；业务输入、结果和验收完整；不依赖另一个工程师同步修改才能成立。能通过稳定业务边界消除的依赖必须消除；确有共享技术契约或硬依赖时记录为架构前置，不把技术层拆成多个需求块。
 
@@ -38,7 +38,7 @@ description: 通过单问题访谈把绿地项目或新的业务需求收敛为�
 - 总体契约固定为 `.nova/PRODUCT_REQUIREMENTS.md`，新建时严格使用 [总体需求模板](assets/PRODUCT_REQUIREMENTS.template.md)。
 - 每个需求块固定为 `.nova/requirements/REQ-<uuidv7>_具体名称.md`，新建时严格使用 [需求块模板](assets/REQUIREMENT_BLOCK.template.md)。
 - 新 Key 用 `python3 ../nova-review/scripts/nova_review.py new-requirement-id` 生成；Key 永久不变，需求块原地更新完整定义并递增版本，不创建日期副本或差量文档。
-- 状态只允许 `待实现 / 开发中 / 已实现 / 已更新`。新需求为待实现；完整 delivery-plan 检查点成功后进入开发中；全部有效切片可信 PASS 后才为已实现；已实现需求的业务定义改变后为已更新。开发中时“已实现版本”和“实现依据”保留上一完整实现或同时为“无”，不得把当前未完成版本写成已实现。
+- 状态只允许 `待实现 / 开发中 / 已实现 / 已更新`。新需求为待实现；完整 delivery-plan 检查点成功后进入开发中；全部有效开发任务可信 PASS 后才为已实现；已实现需求的业务定义改变后为已更新。开发中时“已实现版本”和“实现依据”保留上一完整实现或同时为“无”，不得把当前未完成版本写成已实现。
 - 普通规则调整只更新目标需求块和索引；只有总体流程、业务模块或项目范围改变时才更新总体章节。
 
 首次创建需求体系时可读取 [完整示例](references/examples/equipment-rental/.nova/PRODUCT_REQUIREMENTS.md) 及其目标需求块；已有体系时不加载示例或无关需求块。
@@ -52,4 +52,4 @@ python3 scripts/validate_requirements.py --block /absolute/path/to/.nova/require
 
 需求确认同时授权在上述校验通过后立即创建精确范围本地 requirement 检查点，不等待架构或开发。提交前按 `../nova-review/references/commit-contract.md` 的 requirement 契约生成 trailers，并用 `../nova-review/scripts/nova_review.py validate-message --repo ... --message-file ... --diff-file ...` 校验完整 staged diff；任一步失败不得提交或进入下游阶段。检查点不进入人工 Review，Git push、远程配置和 SVN commit 仍须独立授权。
 
-检查点成功后判断共享边界：需要从零初始化或改变共享工程骨架、数据所有权、公共 API、事件或 Mock 时转入 `nova-architecture`；否则转入 `nova-development` 澄清具体实现。不得再次询问是否提交已确认需求，也不得把需求文件夹带进后续 Work-Item。
+检查点成功后判断共享边界：需要从零初始化或改变共享工程骨架、数据所有权、公共 API、事件或 Mock 时转入 `nova-architecture`；否则转入 `nova-development` 澄清具体实现。开发任务可在大需求内拆分，但每个 PEND 必须具备独立完整结果与验收，并能独立排期、暂停、恢复、Review 或取消；只按流程阶段、文件、模块、技能、代理或提交批次拆分的候选必须合并为同一 PEND 的内部里程碑。不得再次询问是否提交已确认需求，也不得把需求文件夹带进后续 Work-Item。

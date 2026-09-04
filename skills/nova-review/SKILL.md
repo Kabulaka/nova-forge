@@ -15,7 +15,7 @@ description: 在用户明确要求 Review 时，按稳定工作项编号选择�
 - 用户列出编号：`explicit`，只取所列 `PEND-*`、`FIX-*` 或 `MAINT-*`，允许多个；
 - 用户明确“全部未审查项”：`all`，才扫描全部带 Nova trailers 且尚无 Review 记录的提交。
 
-固定每项的编号、commit 列表、设计引用、有效测试证据、未验证事项和工作副本差异。SVN/Git 历史中不属于这些编号的旧改动不得纳入。选择为空时报告原因，不把空范围当 PASS。
+固定每项的编号、全部未审 required commit、设计引用、整体完成定义、内部里程碑状态、有效测试证据、未验证事项和工作副本差异。内部里程碑没有独立 Review 身份，不得单独选择或关闭；同一 PEND 只有整体完成定义满足后才启动一次 Review。SVN/Git 历史中不属于这些编号的旧改动不得纳入。选择为空时报告原因，不把空范围当 PASS。
 
 候选编号只能来自用户输入、当前会话 ready 记录或既有 commit trailers。Review 不得调用 `new-id`、补造编号或替换编号；审查发现的当轮修复提交也必须沿用被审工作项。选择阶段若可信审计已归档该编号但又出现未覆盖的新 commit，必须在启动 Reviewer 前失败并要求重新分类建项；不得把归档关系当作重新打开原工作项。
 
@@ -33,8 +33,8 @@ REJECT 时主代理统一修复全部 Blocker 与 Observation-Fix；只重跑被
 
 PASS 或按 SOP 合法的 PASS WITH NOTES 后，读取 [审计与关闭契约](references/audit-contract.md)。用 `scripts/nova_review.py record-pass` 对同批一个或多个工作项执行确定性关闭：
 
-- `PEND-*`：从蓝图删除，工作包改为已完成，按需把设计置为已实现；
-- 活动蓝图行含 `需求引用` 时：只解析 `.nova/PRODUCT_REQUIREMENTS.md` 的需求索引行并更新已实现版本、状态和 PEND 实现依据，不读取需求块正文；Review 版本落后于当前需求版本时保持“已更新”；
+- `PEND-*`：确认全部有效内部里程碑已完成，从蓝图删除，工作包改为已完成，按需把设计置为已实现；
+- 活动蓝图行含 `需求引用` 时：先原子更新对应交付台账的任务状态和计划版本；仍有有效任务时需求保持开发中，只有全部任务可信 PASS 后才更新已实现版本、状态和全部 PEND 实现依据，不读取需求块正文；Review 版本落后于当前需求版本时保持“已更新”；
 - `FIX-*` / `MAINT-*`：不要求蓝图条目，只记录提交与 Review 批次；
 - 所有项：年度功能 JSONL 追加完成记录，月度目录新增一份严格 JSON-in-YAML Review 记录，并写入工作项哈希索引。
 
@@ -51,11 +51,12 @@ python3 scripts/nova_review.py select --repo /path/to/repo --mode current --sess
 python3 scripts/nova_review.py check-manifest --repo /path/to/repo --manifest /path/to/review.json
 python3 scripts/nova_review.py record-pass --repo /path/to/repo --manifest /path/to/review.json
 python3 scripts/nova_review.py query --repo /path/to/repo --work-item PEND-001
+python3 ../nova-development/scripts/nova_delivery.py query --repo /path/to/repo --requirement-ref REQ-...@v1
 python3 scripts/validate_discovery.py --workspace /path/to/skills --codex-home /path/to/.codex
 python3 scripts/probe_default_flow.py
 ```
 
-工具只使用 Python 标准库。`validate-message`、`validate-audit-message`、`select`、`check-manifest`、`query` 和 `query-requirement` 只读；Work-Item 的 `validate-message --repo` 额外校验当前编号未归档及 `Related-Work-Item` 的可信归档来源，requirement 检查点则强制同时提供 `--repo` 与完整 staged diff，并校验精确范围、路径、内容指纹和唯一性。`select` 只发现 PEND/FIX/MAINT，排除 requirement 与 audit commit。`record-pass` 是唯一写审计/关闭入口。`probe_default_flow.py` 只在隔离临时 Git 仓库调用本机 Codex，验证普通开发自动 commit 且不 Review、显式 Review 才进入选择。关闭生成的文件使用提交契约中的 `Nova-Audit-Schema` trailers 单独提交，不形成新工作项或递归 Review。
+工具只使用 Python 标准库。`validate-message`、`validate-audit-message`、`select`、`check-manifest`、`query`、`query-requirement` 和交付进度查询只读；Work-Item 的 `validate-message --repo` 额外校验当前编号未归档及 `Related-Work-Item` 的可信归档来源，requirement/delivery-plan 检查点强制同时提供 `--repo` 与完整 staged diff并校验精确范围、基线和唯一性。`select` 只发现 PEND/FIX/MAINT，排除 requirement、delivery-plan、内部里程碑与 audit commit。`record-pass` 是唯一写审计/关闭入口，并把交付台账纳入同一原子更新。关闭生成的文件使用提交契约中的 `Nova-Audit-Schema` trailers 单独提交，不形成新工作项或递归 Review。
 
 ## 资源路由
 
