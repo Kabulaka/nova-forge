@@ -116,9 +116,9 @@
 | W2 | turn_aborted 后同 diff 重启，最多两次 | 同上 | 保留 |
 | W3 | 空响应/中间态不是 PASS | 同上 | 保留；“不可提交”改为“不可关闭/宣称 PASS” |
 | F1 | 完成报告固定模板且章节不得省略 | `implementation-sop.md#7-阶段完成报告` | 保留并适配七类阶段 |
-| F2 | 概要、文件、关键决策、测试、Review、蓝图、遗留 | 同上 | 保留，并新增提交/基线章节；required 未启动写“未 Review”，合法豁免写 `exempt` 和客观证据，均无 Review 轮次且不得冒充 PASS |
-| F3 | L0 可省略 Review 章节 | 同上 | 显式替换为任何情况都保留；未审或 exempt 的轮次均写“不适用” |
-| F4 | 相对路径与非空泛关键决策 | 同上 | 保留 |
+| F2 | 旧统一“概要、文件、关键决策、测试、Review、蓝图、遗留”结构 | 同上 | 替换为七类阶段专属章节；共同不变量仅保留具体实际结果、未改范围、阶段身份或依据、验证/提交事实及遗留与下一步，文件、Review、投影只在适用阶段出现 |
+| F3 | L0 可省略 Review 章节 | 同上 | 替换为只有 FEAT/PATCH/FIX/MAINT 固定保留 `Review 状态`；required 未启动写“未 Review / 待Review”，合法豁免写 `exempt` 与客观证据，两者轮次均为“不适用”；需求、架构和 Review 使用各自阶段章节 |
+| F4 | 相对路径与非空泛关键决策 | 同上 | 保留“路径相对项目根、结果和决定必须具体”的信息质量约束，但写入对应阶段专属章节，不再制造统一“关键决策”章节 |
 | M1 | Plan 完整 Research→Plan→Approval→Execute→Review→Verify | `implementation-sop.md#6-plan-mode-追加约束` | Review 改人工触发，其余保留 |
 | M2 | Research 读取代码/测试/配置/蓝图/工作包 | 同上 | 保留 |
 | M3 | Open Questions 至少确认一次 | 同上 | 保留为确认会改变实现的决策点 |

@@ -300,6 +300,10 @@ def check_delivery_ledgers(root: Path, suite_root: Path) -> Result:
     script = suite_root / "nova-review" / "scripts" / "nova_review.py"
     if not script.is_file():
         return Result("FAIL", "delivery", f"missing delivery validator: {script}")
+    try:
+        module = load_review_module(script)
+    except (OSError, RuntimeError) as exc:
+        return Result("FAIL", "delivery", f"cannot load delivery validator: {exc}")
     failures: list[str] = []
     for ledger in ledgers:
         if not is_inside_project(root, ledger):
@@ -308,6 +312,13 @@ def check_delivery_ledgers(root: Path, suite_root: Path) -> Result:
         try:
             value = json.loads(ledger.read_text(encoding="utf-8"))
             requirement_ref = value.get("requirement_ref") if isinstance(value, dict) else None
+            canonical = module.delivery_relative_path(str(requirement_ref or ""))
+            if str(ledger.relative_to(root)) != canonical:
+                failures.append(
+                    f"{ledger.relative_to(root)}: non-canonical delivery ledger path; "
+                    f"expected {canonical}"
+                )
+                continue
             arguments = [
                 sys.executable,
                 str(script),
@@ -318,7 +329,7 @@ def check_delivery_ledgers(root: Path, suite_root: Path) -> Result:
                 str(requirement_ref or ""),
             ]
             completed = run(arguments, root)
-        except (OSError, subprocess.TimeoutExpired, UnicodeError, json.JSONDecodeError) as exc:
+        except Exception as exc:  # The Review validator exposes its own NovaError type.
             failures.append(f"{ledger.relative_to(root)}: {exc}")
             continue
         if completed.returncode != 0:
@@ -365,7 +376,7 @@ def load_review_module(script: Path) -> ModuleType:
 
 def git_message_records(root: Path) -> list[tuple[str, str]]:
     completed = run(
-        ["git", "log", "--reverse", "--format=%H%x1f%B%x1e"], root
+        ["git", "log", "--format=%H%x1f%B%x1e"], root
     )
     if completed.returncode != 0:
         raise ValueError(completed.stderr.strip() or "cannot read Git history")
@@ -385,7 +396,8 @@ def check_governance_history(root: Path, suite_root: Path) -> Result:
         return Result("FAIL", "governance-history", f"missing validator: {review_script}")
     failures: list[str] = []
     work_item_commits: dict[str, list[tuple[str, dict[str, str]]]] = {}
-    schema_2_active = False
+    schema_2_commits: set[str] = set()
+    schema_1_commits: list[str] = []
     checked = 0
     try:
         module = load_review_module(review_script)
@@ -441,62 +453,41 @@ def check_governance_history(root: Path, suite_root: Path) -> Result:
             values, errors = module.validate_committed_message(
                 root, commit_hash, message, diff
             )
-            if schema_2_active and values.get("Nova-Schema") == module.LEGACY_SCHEMA:
-                errors.append("Nova-Schema 1 commit appears after schema 2 activation")
             if errors:
                 failures.append(f"{commit_hash[:12]} commit: {'; '.join(errors)}")
                 continue
             if values.get("Nova-Schema") == module.SCHEMA:
-                schema_2_active = True
+                schema_2_commits.add(commit_hash)
+            elif values.get("Nova-Schema") == module.LEGACY_SCHEMA:
+                schema_1_commits.append(commit_hash)
             work_item = values.get("Work-Item")
             if work_item:
                 work_item_commits.setdefault(work_item, []).append((commit_hash, values))
 
+        for commit_hash in schema_1_commits:
+            ancestors = run(["git", "rev-list", commit_hash], root)
+            if ancestors.returncode != 0:
+                raise ValueError(
+                    ancestors.stderr.strip()
+                    or f"cannot inspect ancestors of {commit_hash}"
+                )
+            if schema_2_commits.intersection(ancestors.stdout.splitlines()):
+                failures.append(
+                    f"{commit_hash[:12]} commit: Nova-Schema 1 commit appears "
+                    "after schema 2 activation"
+                )
+
         for work_item, commits in work_item_commits.items():
-            if len(commits) <= 1:
-                continue
-            schema_2_commits = [
-                (commit_hash, values)
-                for commit_hash, values in commits
-                if values.get("Nova-Schema") == module.SCHEMA
-            ]
-            if not schema_2_commits:
-                continue
-            if len(schema_2_commits) != len(commits):
-                failures.append(
-                    f"{work_item}: schema 2 must not reuse a schema 1 work-item identity"
-                )
-                continue
-            classes = {values.get("Change-Class") for _, values in commits}
-            if classes != {"feature"}:
-                failures.append(
-                    f"{work_item}: PATCH/FIX/MAINT allow one implementation result commit; "
-                    f"found={len(commits)}"
-                )
-                continue
-            try:
-                item = module.delivery_item_for_commit_boundary(root, work_item)
-                milestones = item["milestones"]
-                completed = [
-                    milestone for milestone in milestones if milestone["state"] == "completed"
-                ]
-                evidence = [
-                    milestone["evidence"][0]
-                    for milestone in completed
-                    if len(milestone["evidence"]) == 1
-                ]
-                hashes = [commit_hash for commit_hash, _ in commits]
-                if (
-                    len(milestones) < 2
-                    or len(evidence) != len(completed)
-                    or set(evidence) != set(hashes)
-                    or len(evidence) != len(hashes)
-                ):
-                    raise ValueError(
-                        "commits do not exactly match distinct completed milestone evidence"
-                    )
-            except Exception as exc:
-                failures.append(f"{work_item}: invalid multi-commit FEAT: {exc}")
+            boundary_errors = module.validate_committed_work_item_boundary(
+                root,
+                work_item,
+                [
+                    {"commit": commit_hash, "metadata": values, "errors": []}
+                    for commit_hash, values in commits
+                ],
+            )
+            if boundary_errors:
+                failures.append(f"{work_item}: {'; '.join(boundary_errors)}")
     except (OSError, UnicodeError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         failures.append(str(exc))
     except Exception as exc:  # The Review validator exposes its own NovaError type.
@@ -512,7 +503,7 @@ def check_governance_history(root: Path, suite_root: Path) -> Result:
             f"{len(failures)} commit governance violations found",
             tuple(details),
         )
-    schema = "schema 2 active" if schema_2_active else "legacy schema only"
+    schema = "schema 2 active" if schema_2_commits else "legacy schema only"
     return Result(
         "PASS",
         "governance-history",
@@ -543,6 +534,7 @@ def check_audit(root: Path, suite_root: Path) -> Result:
 
         index_files = sorted((audit_root / "index").rglob("*.json")) if (audit_root / "index").is_dir() else []
         index_items: set[str] = set()
+        audit_cache: dict[str, object] = {}
         for index_file in index_files:
             work_item = index_file.stem
             if work_item in index_items:
@@ -551,7 +543,9 @@ def check_audit(root: Path, suite_root: Path) -> Result:
             worktree_completed = module.load_completed_from_reader(root, work_item, reader)
             if worktree_completed is None:
                 raise ValueError(f"audit index is incomplete for {work_item}")
-            committed_completed = module.load_completed_item(root, work_item)
+            committed_completed = module.load_completed_item(
+                root, work_item, audit_cache=audit_cache
+            )
             if committed_completed is None or committed_completed != worktree_completed:
                 raise ValueError(
                     f"audit records are not backed by one trusted closure commit for {work_item}"

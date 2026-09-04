@@ -198,6 +198,29 @@ other body
         self.assertIn("不能仅凭章节标题判断", MIGRATION_SOP)
         self.assertIn("七章不得合并成", MIGRATION_SOP)
 
+    def test_blueprint_and_migration_docs_use_one_nine_column_delivery_protocol(self) -> None:
+        self.assertIn("6. 交付工作项：", BLUEPRINT_STANDARD)
+        self.assertIn("只读兼容的历史 PEND 索引", BLUEPRINT_STANDARD)
+        self.assertIn("FEAT/历史 PEND 目标和工作包行为", BLUEPRINT_STANDARD)
+        self.assertIn("## 4. 交付工作项表", BLUEPRINT_STANDARD)
+        self.assertNotIn("6. 待开发功能：", BLUEPRINT_STANDARD)
+        self.assertNotIn("## 4. 待开发功能表", BLUEPRINT_STANDARD)
+        self.assertIn("新版九字段交付工作项表", MIGRATION_SOP)
+        self.assertIn("“状态”是新版合法字段", MIGRATION_SOP)
+        self.assertNotIn("新版七字段待办表", MIGRATION_SOP)
+        self.assertIn("跨模块契约、交付工作项、系统架构", MIGRATION_SOP)
+        self.assertIn("`待澄清：<具体缺失决定>`", MIGRATION_SOP)
+        self.assertIn("`待确认：<具体依赖问题>`", MIGRATION_SOP)
+        self.assertIn("九列交付工作项表", MIGRATION_SOP)
+        clarified = markdown_section(MIGRATION_SOP, "## 5. 用户选择澄清")
+        immediate = markdown_section(MIGRATION_SOP, "## 6. 用户明确选择立即升级")
+        for branch in (clarified, immediate):
+            self.assertIn("状态写“待澄清”", branch)
+            self.assertIn("待澄清：", branch)
+            self.assertIn("待确认：", branch)
+        self.assertNotIn("仍写“待澄清”", clarified)
+        self.assertNotIn("继续写“待澄清”", MIGRATION_SOP)
+
     def test_validation_runs_only_at_document_write_boundaries(self) -> None:
         self.assertIn("创建、修改或迁移蓝图/设计", SKILL)
         self.assertIn("改变待办引用、工作包状态或文档生命周期", SKILL)
@@ -223,7 +246,8 @@ other body
         self.assertIn("上下文压缩、自检、显式 Review 或继续修改不使交接失效", SKILL)
         self.assertIn("除已保存实施交接且其列明的失效条件均未发生外", SKILL)
         self.assertIn("条目仍为“待澄清”", SKILL)
-        self.assertIn("版本 `5` 收敛确认无效或契约相互冲突时，不得实施", SKILL)
+        self.assertIn("FEAT/历史 PEND 条目仍为“待澄清”", SKILL)
+        self.assertIn("任一类别验收不可执行或契约相互冲突时，不得实施", SKILL)
         self.assertIn("版本 `5` 收敛确认缺失或失配", SKILL)
         self.assertIn("既有版本 `4` 设计保持交接兼容", SKILL)
         self.assertIn("默认实施流程是编码、最低验收", SKILL)
@@ -240,6 +264,22 @@ other body
         )
         self.assertIn("REJECT 修正不提交", IMPLEMENTATION_SOP)
         self.assertIn("合法 `Review-Defer` 不复用当前编号", IMPLEMENTATION_SOP)
+
+    def test_explicit_nonfeature_ids_resume_without_fictitious_work_packages(self) -> None:
+        pre_route = markdown_section(SKILL, "### 实施请求前置路由")
+        handoff = markdown_section(SKILL, "### 已确认工作包的实施交接")
+        for identity in ("`PATCH-*`", "`FIX-*`", "`MAINT-*`"):
+            self.assertIn(identity, pre_route)
+            self.assertIn(identity, handoff)
+        self.assertIn("尚未归档的可信 commit trailers", pre_route)
+        self.assertIn("trailers 只能恢复编号、分类和验证摘要", pre_route)
+        self.assertIn("commit 父节点与完整 diff 用于恢复任务差异基线", pre_route)
+        self.assertIn("不得从 trailers 推断", pre_route)
+        self.assertIn("验收仍须由可信会话状态、用户当前目标或既存记录提供", handoff)
+        self.assertIn("不得要求或虚构蓝图条目、设计依据和工作包", pre_route)
+        self.assertIn("不读取不存在的蓝图条目或工作包", handoff)
+        for document in (SKILL, IMPLEMENTATION_SOP):
+            self.assertIn("已归档 FEAT 或历史 PEND", document)
 
     def test_active_delivery_slice_blocks_future_milestone_questions(self) -> None:
         scope_gate = markdown_section(CONVERSATION_SOP, "### 实施阶段范围闸门")

@@ -75,6 +75,12 @@ AUDIT_TRAILERS = (
     "Review-Fix-SHA256",
     "Validation",
 )
+CHECKPOINT_TRAILERS = frozenset(
+    REQUIREMENT_TRAILERS + DELIVERY_PLAN_TRAILERS + ARCHITECTURE_TRAILERS
+)
+WORK_ITEM_TRAILERS = frozenset(STANDARD_TRAILERS) | {"Review-State"}
+AUDIT_MESSAGE_TRAILERS = frozenset(LEGACY_AUDIT_TRAILERS + AUDIT_TRAILERS)
+MANAGED_TRAILERS = CHECKPOINT_TRAILERS | WORK_ITEM_TRAILERS | AUDIT_MESSAGE_TRAILERS
 LEGACY_WORK_ITEM_PREFIXES = {
     "designed": "PEND",
     "adhoc": "FIX",
@@ -497,9 +503,12 @@ def validate_completion_report(stage: str, text: str) -> list[str]:
             errors.append("需求报告 must state the requirement commit result")
     elif stage == "architecture":
         combined = actual_result + "\n" + content_by_section.get("差量依据", "")
-        has_zero_delta = "零差量" in combined
-        has_arch = re.search(rf"ARCH-{UUID7_PATTERN}", combined) is not None
-        if has_zero_delta == has_arch:
+        zero_delta_markers = re.findall(
+            r"(?:架构(?:差量|结果)?|结论)(?:为|：|:)\s*零差量", combined
+        )
+        architecture_ids = set(re.findall(rf"ARCH-{UUID7_PATTERN}", combined))
+        has_zero_delta = bool(zero_delta_markers)
+        if has_zero_delta == (len(architecture_ids) == 1) or len(architecture_ids) > 1:
             errors.append("架构报告 must state exactly one of 零差量 or one ARCH identity")
         if has_zero_delta and not re.search(
             r"(?:未提交|无提交)", content_by_section.get("提交与就绪", "")
@@ -547,15 +556,8 @@ def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
     fields = trailing_fields(text)
     if any(key == "Commit-Kind" for key, _ in fields):
         found: dict[str, list[str]] = defaultdict(list)
-        known = (
-            set(REQUIREMENT_TRAILERS)
-            | set(DELIVERY_PLAN_TRAILERS)
-            | set(ARCHITECTURE_TRAILERS)
-            | set(STANDARD_TRAILERS)
-            | {"Review-State"}
-        )
         for key, value in fields:
-            if key in known:
+            if key in MANAGED_TRAILERS:
                 found[key].append(value)
 
         errors: list[str] = []
@@ -579,26 +581,22 @@ def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
                 values[key] = entries[0]
         if kind not in {"requirement", "architecture", "delivery-plan"}:
             errors.append("Commit-Kind must be requirement, architecture, or delivery-plan")
-        checkpoint_fields = (
-            set(REQUIREMENT_TRAILERS)
-            | set(DELIVERY_PLAN_TRAILERS)
-            | set(ARCHITECTURE_TRAILERS)
-        )
-        unexpected_checkpoint = checkpoint_fields - set(expected)
+        unexpected_checkpoint = CHECKPOINT_TRAILERS - set(expected)
         if any(found.get(key) for key in unexpected_checkpoint):
             errors.append(f"{kind or 'checkpoint'} commit has incompatible checkpoint trailers")
-        forbidden = (set(STANDARD_TRAILERS) - {"Nova-Schema", "Validation"}) | {
-            "Review-State"
-        }
+        forbidden = (
+            (WORK_ITEM_TRAILERS - {"Nova-Schema", "Validation"})
+            | (AUDIT_MESSAGE_TRAILERS - {"Validation"})
+        )
         if any(found.get(key) for key in forbidden):
             errors.append(
-                "checkpoint commits must not contain work-item or Review-State trailers"
+                "checkpoint commits must not contain work-item, Review-State, or audit trailers"
             )
         return values, errors
 
     found: dict[str, list[str]] = defaultdict(list)
     for key, value in fields:
-        if key in STANDARD_TRAILERS or key == "Review-State":
+        if key in MANAGED_TRAILERS:
             found[key].append(value)
 
     errors: list[str] = []
@@ -617,16 +615,22 @@ def parse_message(text: str) -> tuple[dict[str, str], list[str]]:
             values[key] = entries[0]
     if found.get("Review-State"):
         errors.append("Review-State is mutable and must not appear in a commit")
+    incompatible = (
+        (CHECKPOINT_TRAILERS - {"Nova-Schema", "Validation"})
+        | (AUDIT_MESSAGE_TRAILERS - {"Validation"})
+    )
+    if any(found.get(key) for key in incompatible):
+        errors.append("work-item commits must not contain checkpoint or audit trailers")
     return values, errors
 
 
 def parse_audit_message(text: str) -> tuple[dict[str, str], list[str]]:
     found: dict[str, list[str]] = defaultdict(list)
-    standard_found = False
+    incompatible_found = False
     for key, value in trailing_fields(text):
-        if key in set(STANDARD_TRAILERS) - {"Validation"} or key == "Review-State":
-            standard_found = True
-        if key in set(LEGACY_AUDIT_TRAILERS) | set(AUDIT_TRAILERS):
+        if key in MANAGED_TRAILERS - AUDIT_MESSAGE_TRAILERS - {"Validation"}:
+            incompatible_found = True
+        if key in AUDIT_MESSAGE_TRAILERS:
             found[key].append(value)
 
     errors: list[str] = []
@@ -642,8 +646,10 @@ def parse_audit_message(text: str) -> tuple[dict[str, str], list[str]]:
             values[key] = entries[0]
     if schema == LEGACY_AUDIT_SCHEMA and found.get("Review-Fix-SHA256"):
         errors.append("schema 1 audit commit must not contain Review-Fix-SHA256")
-    if standard_found:
-        errors.append("audit commits must not contain work-item or Review-State trailers")
+    if incompatible_found:
+        errors.append(
+            "audit commits must not contain checkpoint, work-item, or Review-State trailers"
+        )
     return values, errors
 
 
@@ -1179,6 +1185,7 @@ def validate_delivery_ledger_data(
     product: str,
     verify_evidence: bool = True,
     verify_review_state: bool | None = None,
+    evidence_revision: str | None = None,
 ) -> dict[str, Any]:
     expected_root = {
         "schema",
@@ -1200,7 +1207,7 @@ def validate_delivery_ledger_data(
     checkpoint = ledger.get("requirement_checkpoint")
     if not isinstance(checkpoint, dict) or set(checkpoint) != {"commit", "path", "sha256"}:
         raise NovaError("delivery ledger has invalid requirement_checkpoint")
-    trusted = query_requirement(repo, requirement_ref)
+    trusted = query_requirement(repo, requirement_ref, revision=evidence_revision)
     if checkpoint != {key: trusted[key] for key in ("commit", "path", "sha256")}:
         raise NovaError("delivery ledger requirement checkpoint does not match trusted Git history")
     plan_version = ledger.get("plan_version")
@@ -1330,7 +1337,13 @@ def validate_delivery_ledger_data(
                 for commit_hash in evidence:
                     try:
                         resolved = run_git(repo, "rev-parse", "--verify", f"{commit_hash}^{{commit}}")
-                        run_git(repo, "merge-base", "--is-ancestor", resolved.strip(), "HEAD")
+                        run_git(
+                            repo,
+                            "merge-base",
+                            "--is-ancestor",
+                            resolved.strip(),
+                            evidence_revision or "HEAD",
+                        )
                         message = run_git(repo, "show", "-s", "--format=%B", resolved.strip())
                         values, errors = parse_message(message)
                     except NovaError as exc:
@@ -1343,7 +1356,11 @@ def validate_delivery_ledger_data(
             milestone["state"] != "completed" for milestone in milestones
         ):
             raise NovaError(f"review_pending work item has incomplete milestones: {work_item}")
-        completed_record = load_completed_item(repo, work_item) if verify_review_state else None
+        completed_record = (
+            load_completed_item(repo, work_item, revision=evidence_revision or "HEAD")
+            if verify_review_state
+            else None
+        )
         if state == "completed" and verify_review_state and completed_record is None:
             raise NovaError(f"completed work item lacks trusted Review PASS: {work_item}")
         if state != "completed" and verify_review_state and completed_record is not None:
@@ -1358,7 +1375,14 @@ def validate_delivery_ledger_data(
             if dependency in by_id and by_id[dependency]["state"] != "completed":
                 if item["state"] != "planned":
                     raise NovaError(f"active work item has incomplete dependency: {work_item}")
-            elif dependency not in by_id and verify_evidence and load_completed_item(repo, dependency) is None:
+            elif (
+                dependency not in by_id
+                and verify_evidence
+                and load_completed_item(
+                    repo, dependency, revision=evidence_revision or "HEAD"
+                )
+                is None
+            ):
                 raise NovaError(f"external dependency lacks trusted PASS: {dependency}")
     visiting: set[str] = set()
     visited: set[str] = set()
@@ -1546,29 +1570,75 @@ def validate_delivery_plan_metadata(
     return errors
 
 
-def delivery_item_for_commit_boundary(repo: Path, work_item: str) -> dict[str, Any]:
-    delivery_root = safe_repo_path(repo, ".nova/delivery", "delivery directory")
-    candidates: list[tuple[Path, dict[str, Any]]] = []
-    for path in sorted(delivery_root.glob("REQ-*_v*.json")):
-        ledger = strict_json_object(path.read_bytes(), "delivery ledger")
+def delivery_item_for_commit_boundary(
+    repo: Path,
+    work_item: str,
+    *,
+    verify_review_state: bool = True,
+    revision: str | None = None,
+) -> dict[str, Any]:
+    candidates: list[tuple[str, bytes, dict[str, Any]]] = []
+    if revision is None:
+        delivery_root = safe_repo_path(repo, ".nova/delivery", "delivery directory")
+        sources = [
+            (str(path.relative_to(repo)), path.read_bytes())
+            for path in sorted(delivery_root.glob("REQ-*_v*.json"))
+        ]
+    else:
+        tree_revision = resolve_commit(repo, revision)
+        paths = run_git(
+            repo,
+            "ls-tree",
+            "-r",
+            "--name-only",
+            tree_revision,
+            "--",
+            ".nova/delivery",
+        ).splitlines()
+        sources = []
+        for relative in sorted(paths):
+            if re.fullmatch(r"\.nova/delivery/REQ-.*_v.*\.json", relative) is None:
+                continue
+            content = git_blob(repo, tree_revision, relative)
+            if content is None:
+                raise NovaError(f"delivery ledger is absent from Git snapshot: {relative}")
+            sources.append((relative, content))
+    for relative, content in sources:
+        ledger = strict_json_object(content, "delivery ledger")
         if any(item.get("work_item") == work_item for item in ledger.get("work_items", [])):
-            candidates.append((path, ledger))
+            candidates.append((relative, content, ledger))
     if len(candidates) != 1:
         raise NovaError(
             "additional FEAT commit requires exactly one delivery ledger with "
             f"pre-registered milestones: {work_item}"
         )
-    path, ledger = candidates[0]
-    if canonical_delivery_ledger(ledger) != path.read_bytes():
+    relative, content, ledger = candidates[0]
+    if canonical_delivery_ledger(ledger) != content:
         raise NovaError("delivery ledger must use canonical UTF-8 JSON")
-    blueprint = safe_repo_path(repo, ".nova/PROJECT_BLUEPRINT.md", "blueprint").read_text(
-        encoding="utf-8"
-    )
-    product = safe_repo_path(
-        repo, ".nova/PRODUCT_REQUIREMENTS.md", "product requirements"
-    ).read_text(encoding="utf-8")
+    if revision is None:
+        blueprint = safe_repo_path(
+            repo, ".nova/PROJECT_BLUEPRINT.md", "blueprint"
+        ).read_text(encoding="utf-8")
+        product = safe_repo_path(
+            repo, ".nova/PRODUCT_REQUIREMENTS.md", "product requirements"
+        ).read_text(encoding="utf-8")
+    else:
+        blueprint_bytes = git_blob(repo, tree_revision, ".nova/PROJECT_BLUEPRINT.md")
+        product_bytes = git_blob(repo, tree_revision, ".nova/PRODUCT_REQUIREMENTS.md")
+        if blueprint_bytes is None or product_bytes is None:
+            raise NovaError(
+                "delivery ledger Git snapshot lacks blueprint or product requirements"
+            )
+        blueprint = blueprint_bytes.decode("utf-8")
+        product = product_bytes.decode("utf-8")
     validate_delivery_ledger_data(
-        repo, ledger, blueprint=blueprint, product=product, verify_evidence=True
+        repo,
+        ledger,
+        blueprint=blueprint,
+        product=product,
+        verify_evidence=True,
+        verify_review_state=verify_review_state,
+        evidence_revision=revision,
     )
     return next(item for item in ledger["work_items"] if item["work_item"] == work_item)
 
@@ -1634,6 +1704,72 @@ def validate_work_item_commit_boundary(
     if set(recorded) != set(existing) or len(recorded) != len(existing):
         return [
             "existing FEAT commits must exactly match distinct completed milestone evidence"
+        ]
+    return []
+
+
+def validate_committed_work_item_boundary(
+    repo: Path,
+    work_item: str,
+    entries: list[dict[str, Any]] | None = None,
+    *,
+    revision: str | None = None,
+) -> list[str]:
+    """Recheck result-commit cardinality from immutable Git history."""
+    if entries is None:
+        entries = [
+            entry
+            for entry in scan_commits(repo, work_item, revision=revision)
+            if entry["metadata"].get("Work-Item") == work_item
+        ]
+    if not entries:
+        return []
+    schema_2_entries = [
+        entry for entry in entries if entry["metadata"].get("Nova-Schema") == SCHEMA
+    ]
+    if not schema_2_entries:
+        return []
+    if len(schema_2_entries) != len(entries):
+        return ["schema 2 must not reuse a schema 1 work-item identity"]
+    if any(entry["errors"] for entry in entries):
+        return [
+            f"invalid existing work-item commit {entry['commit']}: "
+            + "; ".join(entry["errors"])
+            for entry in entries
+            if entry["errors"]
+        ]
+    classes = {entry["metadata"].get("Change-Class") for entry in entries}
+    if len(classes) != 1:
+        return [f"inconsistent Change-Class across commits for {work_item}"]
+    change_class = next(iter(classes))
+    if len(entries) == 1:
+        return []
+    if change_class != "feature":
+        return [
+            f"{change_class} work items allow one implementation result commit before Review"
+        ]
+    try:
+        item = delivery_item_for_commit_boundary(
+            repo,
+            work_item,
+            verify_review_state=False,
+            revision=revision,
+        )
+    except (NovaError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return [str(exc)]
+    milestones = item["milestones"]
+    completed = [milestone for milestone in milestones if milestone["state"] == "completed"]
+    if len(milestones) < 2 or len(completed) != len(milestones):
+        return [
+            "multiple FEAT commits require distinct completed pre-registered milestones"
+        ]
+    if any(len(milestone["evidence"]) != 1 for milestone in completed):
+        return ["each completed internal milestone must bind exactly one FEAT commit"]
+    recorded = [milestone["evidence"][0] for milestone in completed]
+    committed = [entry["commit"] for entry in entries]
+    if set(recorded) != set(committed) or len(recorded) != len(committed):
+        return [
+            "FEAT commits must exactly match distinct completed milestone evidence"
         ]
     return []
 
@@ -2009,7 +2145,7 @@ def validate_review_record(record: Any, path: Path) -> dict[str, Any]:
     }
     schema = record.get("schema") if isinstance(record, dict) else None
     if schema == 2:
-        fields.update({"review_fix_sha256", "review_fix_scope"})
+        fields.update({"review_fix_sha256", "review_fix_scope", "review_heads"})
     if not isinstance(record, dict) or set(record) != fields:
         raise NovaError(f"invalid Review record fields: {path}")
     reviewed_at = parse_reviewed_at(record.get("reviewed_at"), "reviewed_at")
@@ -2021,6 +2157,7 @@ def validate_review_record(record: Any, path: Path) -> dict[str, Any]:
         or batch_id[3:11] != reviewed_at.strftime("%Y%m%d")
         or record.get("conclusion") != "PASS"
         or not isinstance(record.get("review_round"), int)
+        or isinstance(record.get("review_round"), bool)
         or record["review_round"] < 1
         or record["review_round"] > 3
         or re.fullmatch(
@@ -2053,6 +2190,19 @@ def validate_review_record(record: Any, path: Path) -> dict[str, Any]:
             or fix_scope != sorted(set(fix_scope))
         ):
             raise NovaError(f"invalid Review fix scope: {path}")
+        review_heads = record.get("review_heads")
+        if (
+            not isinstance(review_heads, dict)
+            or "main" not in review_heads
+            or any(
+                not isinstance(alias, str)
+                or REPOSITORY_ALIAS_RE.fullmatch(alias) is None
+                or not isinstance(head, str)
+                or re.fullmatch(r"[0-9a-f]{40,64}", head) is None
+                for alias, head in review_heads.items()
+            )
+        ):
+            raise NovaError(f"invalid Review start heads: {path}")
     seen: set[str] = set()
     item_fields = {
         "work_item",
@@ -2075,6 +2225,14 @@ def validate_review_record(record: Any, path: Path) -> dict[str, Any]:
         if item["work_item"] in seen:
             raise NovaError(f"duplicate Review item: {item['work_item']}")
         seen.add(item["work_item"])
+    if schema == 2:
+        referenced_aliases = {
+            commit_ref["repository"]
+            for item in record["items"]
+            for commit_ref in item["commits"]
+        }
+        if not referenced_aliases.issubset(record["review_heads"]):
+            raise NovaError(f"Review start heads do not cover all repositories: {path}")
     expected_paths = (
         Path(".nova/audit/reviews") / f"{reviewed_at.year:04d}" / f"{reviewed_at.month:02d}" / f"{batch_id}.yaml",
         Path("docs/audit/reviews") / f"{reviewed_at.year:04d}" / f"{reviewed_at.month:02d}" / f"{batch_id}.yaml",
@@ -2244,10 +2402,13 @@ def validate_recorded_commits(
         related_work_item = next(iter(related_values), None)
 
         required_main: set[str] = set()
-        for entry in scan_commits(repo, work_item, revision):
+        history_entries = [
+            entry
+            for entry in scan_commits(repo, work_item, revision)
+            if entry["metadata"].get("Work-Item") == work_item
+        ]
+        for entry in history_entries:
             metadata = entry["metadata"]
-            if metadata.get("Work-Item") != work_item:
-                continue
             if entry["errors"]:
                 raise NovaError(
                     f"invalid trailers in {entry['commit']}: " + "; ".join(entry["errors"])
@@ -2281,6 +2442,14 @@ def validate_recorded_commits(
                 f"audit commit coverage mismatch for {work_item}; "
                 f"missing={sorted(required_main - provided_main)}; "
                 f"extra={sorted(provided_main - required_main)}"
+            )
+        boundary_errors = validate_committed_work_item_boundary(
+            repo, work_item, history_entries, revision=revision
+        )
+        if boundary_errors:
+            raise NovaError(
+                f"invalid archived result-commit boundary for {work_item}: "
+                + "; ".join(boundary_errors)
             )
 
     _, main_scope = compute_review_evidence(reviewed_diffs)
@@ -2489,6 +2658,12 @@ def validate_audit_snapshot(
         raise NovaError("Review-Batch does not match Review record")
     if review["manifest_sha256"] != values["Manifest-SHA256"]:
         raise NovaError("Manifest-SHA256 does not match Review record")
+    if review["schema"] == 2:
+        review_parent = resolve_commit(repo, revision)
+        if review["review_heads"].get("main") != review_parent:
+            raise NovaError(
+                "Review start HEAD does not match the closure commit parent"
+            )
 
     expected_bytes = expected_audit_snapshot(
         repo,
@@ -2785,6 +2960,12 @@ def select_pending(
             for entry in entries
         ):
             raise NovaError(f"inconsistent metadata across commits for {work_item}")
+        boundary_errors = validate_committed_work_item_boundary(repo, work_item)
+        if boundary_errors:
+            raise NovaError(
+                f"invalid result-commit boundary for {work_item}: "
+                + "; ".join(boundary_errors)
+            )
         selected_item = {
             "work_item": work_item,
             "change_class": identity[0],
@@ -2796,7 +2977,8 @@ def select_pending(
             related_work_item = str(identity[2])
             if load_completed_item(repo, related_work_item) is None:
                 raise NovaError(
-                    f"Related-Work-Item is not a trusted archived PEND: {related_work_item}"
+                    "Related-Work-Item is not a trusted archived FEAT or legacy PEND: "
+                    f"{related_work_item}"
                 )
             selected_item["related_work_item"] = related_work_item
         selected.append(selected_item)
@@ -2867,6 +3049,89 @@ def manifest_repositories(primary_repo: Path, manifest: dict[str, Any]) -> dict[
     if repositories.get("main") != primary_repo.resolve():
         raise NovaError("repositories.main must target the primary repository")
     return repositories
+
+
+def validate_review_heads(
+    repositories: dict[str, Path],
+    value: Any,
+    *,
+    existing_batch: bool = False,
+    batch_id: str | None = None,
+    manifest_sha256: str | None = None,
+) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != set(repositories):
+        raise NovaError("review_heads must contain exactly one HEAD for each repository alias")
+    normalized: dict[str, str] = {}
+    for alias, repository in repositories.items():
+        head = value.get(alias)
+        if not isinstance(head, str) or re.fullmatch(r"[0-9a-f]{40,64}", head) is None:
+            raise NovaError(f"review_heads.{alias} must be a full lowercase commit hash")
+        current = run_git(repository, "rev-parse", "HEAD").strip()
+        if head == current:
+            normalized[alias] = head
+            continue
+        if not existing_batch or alias != "main":
+            raise NovaError(
+                f"repository HEAD changed after Review started: {alias}; "
+                f"expected={head}; actual={current}"
+            )
+        parents = run_git(
+            repository, "rev-list", "--parents", "-n", "1", current
+        ).split()
+        if len(parents) != 2 or parents[1] != head:
+            raise NovaError(
+                "existing Review batch HEAD must be its unique closure commit or "
+                f"the Review start HEAD: expected-parent={head}; actual={current}"
+            )
+        message = run_git(repository, "show", "-s", "--format=%B", current)
+        values, errors = parse_audit_message(message)
+        if (
+            errors
+            or values.get("Nova-Audit-Schema") != AUDIT_SCHEMA
+            or values.get("Review-Batch") != batch_id
+            or values.get("Manifest-SHA256") != manifest_sha256
+        ):
+            raise NovaError(
+                "existing Review batch HEAD is not the matching trusted closure commit"
+            )
+        raw = run_git(
+            repository,
+            "log",
+            "--format=%H%x1f%B%x1e",
+            "--fixed-strings",
+            f"--grep=Review-Batch: {batch_id}",
+            current,
+        )
+        matching: list[str] = []
+        for record in raw.split("\x1e"):
+            record = record.strip("\n")
+            if not record or "\x1f" not in record:
+                continue
+            commit_hash, candidate_message = record.split("\x1f", 1)
+            candidate_values, candidate_errors = parse_audit_message(candidate_message)
+            if (
+                not candidate_errors
+                and candidate_values.get("Nova-Audit-Schema") == AUDIT_SCHEMA
+                and candidate_values.get("Review-Batch") == batch_id
+            ):
+                matching.append(commit_hash)
+        if matching != [current]:
+            raise NovaError(
+                "existing Review batch must resolve to exactly one trusted closure commit"
+            )
+        diff = run_git(
+            repository, "show", "--format=", "--binary", "--no-ext-diff", current
+        )
+        validate_audit_snapshot(
+            repository,
+            values,
+            diff,
+            lambda path: git_blob(repository, current, path),
+            f"{current}^",
+            current,
+        )
+        normalized[alias] = head
+    return normalized
 
 
 def normalize_commit_refs(
@@ -2952,6 +3217,7 @@ def review_record_data(
     if manifest["schema"] == 2:
         record["review_fix_sha256"] = manifest["review_fix_sha256"]
         record["review_fix_scope"] = manifest["review_fix_scope"]
+        record["review_heads"] = manifest["review_heads"]
     return record
 
 
@@ -2987,7 +3253,9 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         raise NovaError("manifest schema must be 2 after Nova schema 2 activation")
     allowed_manifest_fields = set(base_manifest_fields)
     if manifest_schema == 2:
-        allowed_manifest_fields.update({"review_fix_sha256", "review_fix_scope"})
+        allowed_manifest_fields.update(
+            {"review_fix_sha256", "review_fix_scope", "review_heads"}
+        )
     required_manifest_fields = allowed_manifest_fields - {"repositories"}
     if not required_manifest_fields.issubset(manifest) or not set(manifest).issubset(
         allowed_manifest_fields
@@ -3032,6 +3300,14 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     )
     output_snapshot = capture_snapshot(snapshots, output)
     existing_batch = output_snapshot is not None
+    if manifest_schema == 2:
+        validate_review_heads(
+            repositories,
+            manifest.get("review_heads"),
+            existing_batch=existing_batch,
+            batch_id=batch_id,
+            manifest_sha256=digest,
+        )
     review_fix_paths: list[str] = []
     review_fix_diff = ""
     if manifest_schema == 2:
@@ -3079,9 +3355,7 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         work_item = item.get("work_item")
         change_class = item.get("change_class")
         class_patterns = (
-            LEGACY_WORK_ITEM_PATTERNS
-            if manifest_schema == 1
-            else NEW_WORK_ITEM_PATTERNS
+            LEGACY_WORK_ITEM_PATTERNS if manifest_schema == 1 else WORK_ITEM_PATTERNS
         )
         pattern = class_patterns.get(change_class)
         if not isinstance(work_item, str) or pattern is None or not pattern.fullmatch(work_item):
@@ -3128,7 +3402,8 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         related_work_item = next(iter(related_values), None)
         if related_work_item is not None and load_completed_item(repo, related_work_item) is None:
             raise NovaError(
-                f"Related-Work-Item is not a trusted archived PEND: {related_work_item}"
+                "Related-Work-Item is not a trusted archived FEAT or legacy PEND: "
+                f"{related_work_item}"
             )
 
         provided_commits = {
@@ -3136,10 +3411,12 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         }
         required_commits: set[tuple[str, str]] = set()
         for alias, commit_repo in repositories.items():
+            repository_entries: list[dict[str, Any]] = []
             for entry in scan_commits(commit_repo, work_item):
                 metadata = entry["metadata"]
                 if metadata.get("Work-Item") != work_item:
                     continue
+                repository_entries.append(entry)
                 if entry["errors"]:
                     raise NovaError(
                         f"invalid trailers in {entry['commit']}: "
@@ -3154,6 +3431,14 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                 ) != (change_class, design_ref, related_work_item):
                     raise NovaError(f"inconsistent required commit metadata for {work_item}")
                 required_commits.add((alias, entry["commit"]))
+            boundary_errors = validate_committed_work_item_boundary(
+                commit_repo, work_item, repository_entries
+            )
+            if boundary_errors:
+                raise NovaError(
+                    f"invalid result-commit boundary for {work_item} in {alias}: "
+                    + "; ".join(boundary_errors)
+                )
         if provided_commits != required_commits:
             missing = sorted(required_commits - provided_commits)
             extra = sorted(provided_commits - required_commits)
@@ -3304,11 +3589,29 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                     reserved_paths.add(str(value.relative_to(repo)))
             if item["change_class"] in {"designed", "feature"}:
                 reserved_paths.add(".nova/PRODUCT_REQUIREMENTS.md")
-        overlap = sorted(set(review_fix_paths) & reserved_paths)
-        if overlap or any(path.startswith(".nova/audit/") for path in review_fix_paths):
+        protected_authority = sorted(
+            path
+            for path in review_fix_paths
+            if path in {
+                ".nova/PROJECT_BLUEPRINT.md",
+                ".nova/PRODUCT_REQUIREMENTS.md",
+                ".nova/SHARED_CAPABILITIES.md",
+            }
+            or path.startswith(
+                (
+                    ".nova/design/",
+                    ".nova/delivery/",
+                    ".nova/requirements/",
+                    ".nova/architecture/",
+                    ".nova/audit/",
+                )
+            )
+        )
+        overlap = sorted((set(review_fix_paths) & reserved_paths) | set(protected_authority))
+        if overlap:
             raise NovaError(
                 "Review fixes must not overlap deterministic closure paths: "
-                + ", ".join(overlap or review_fix_paths)
+                + ", ".join(overlap)
             )
     expected_review = review_record_data(manifest, digest, normalized_items)
 
@@ -4367,16 +4670,20 @@ def query(repo: Path, work_item: str | None, year: int | None, month: int | None
     }
 
 
-def query_requirement(repo: Path, requirement_ref: str) -> dict[str, str]:
+def query_requirement(
+    repo: Path, requirement_ref: str, *, revision: str | None = None
+) -> dict[str, str]:
     if REQUIREMENT_REF_RE.fullmatch(requirement_ref) is None:
         raise NovaError("Requirement-Ref must be REQ-<UUIDv7>@vN")
-    raw = run_git(
-        repo,
+    args = [
         "log",
         "--format=%H%x1f%B%x1e",
         "--fixed-strings",
         f"--grep=Requirement-Ref: {requirement_ref}",
-    )
+    ]
+    if revision is not None:
+        args.append(resolve_commit(repo, revision))
+    raw = run_git(repo, *args)
     matches: list[dict[str, str]] = []
     for record in raw.split("\x1e"):
         record = record.strip("\n")

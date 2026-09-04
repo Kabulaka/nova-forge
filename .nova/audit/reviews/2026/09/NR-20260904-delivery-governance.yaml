@@ -1,0 +1,80 @@
+{
+  "batch_id": "NR-20260904-delivery-governance",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "feature",
+      "commits": [
+        {
+          "commit": "ecf02f5d8950d9b61951e3f624e8030ea8e346c0",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-04_交付治理分类与报告闭环.md#wp-01-delivery-governance-closure",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "17 Python suites (307 tests, 1 skipped); three independent Reviewer tracks (pass)",
+      "work_item": "FEAT-01a06ba4-274d-7725-8788-d99d322f42d2"
+    }
+  ],
+  "manifest_sha256": "439ce9d2a5b85522191b4c2494e145c1c568f69c5af93f050c2c9d0c245f7bf5",
+  "review_content_sha256": "f1340c5a343d2718dd3a77ac28dc33cf40e679c34be0e5859eab9b0f14c9680a",
+  "review_fix_scope": [
+    "main:codex/AGENTS.migration-map.md",
+    "main:skills/nova-development/SKILL.md",
+    "main:skills/nova-development/references/blueprint-migration-sop.md",
+    "main:skills/nova-development/references/blueprint-standard.md",
+    "main:skills/nova-development/references/implementation-sop.md",
+    "main:skills/nova-development/scripts/test_skill_routing.py",
+    "main:skills/nova-development/scripts/test_validate_blueprint.py",
+    "main:skills/nova-doctor/scripts/nova_doctor.py",
+    "main:skills/nova-doctor/scripts/test_nova_doctor.py",
+    "main:skills/nova-review/references/audit-contract.md",
+    "main:skills/nova-review/scripts/nova_review.py",
+    "main:skills/nova-review/scripts/test_nova_review.py",
+    "main:skills/nova-review/scripts/test_skill_contract.py"
+  ],
+  "review_fix_sha256": "2417ce954230a8a6e70e941696d004049317ee3d4cf9ad2d0de29e3b272bc5a9",
+  "review_heads": {
+    "main": "03b55eb953bdca523c8f0f7e4ef7d281c9539712"
+  },
+  "review_round": 3,
+  "review_scope": [
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/design/2026-09-04_交付治理分类与报告闭环.md",
+    "main:README.md",
+    "main:codex/AGENTS.global.md",
+    "main:codex/AGENTS.migration-map.md",
+    "main:skills/nova-architecture/SKILL.md",
+    "main:skills/nova-development/SKILL.md",
+    "main:skills/nova-development/references/blueprint-migration-sop.md",
+    "main:skills/nova-development/references/blueprint-standard.md",
+    "main:skills/nova-development/references/conversation-sop.md",
+    "main:skills/nova-development/references/design-document-standard.md",
+    "main:skills/nova-development/references/implementation-sop.md",
+    "main:skills/nova-development/scripts/test_nova_delivery.py",
+    "main:skills/nova-development/scripts/test_skill_routing.py",
+    "main:skills/nova-development/scripts/test_validate_blueprint.py",
+    "main:skills/nova-development/scripts/validate_blueprint.py",
+    "main:skills/nova-doctor/SKILL.md",
+    "main:skills/nova-doctor/scripts/nova_doctor.py",
+    "main:skills/nova-doctor/scripts/test_nova_doctor.py",
+    "main:skills/nova-requirements/SKILL.md",
+    "main:skills/nova-requirements/references/requirements-standard.md",
+    "main:skills/nova-requirements/scripts/test_validate_requirements.py",
+    "main:skills/nova-requirements/scripts/validate_requirements.py",
+    "main:skills/nova-review/SKILL.md",
+    "main:skills/nova-review/references/audit-contract.md",
+    "main:skills/nova-review/references/commit-contract.md",
+    "main:skills/nova-review/references/review-sop.md",
+    "main:skills/nova-review/scripts/nova_review.py",
+    "main:skills/nova-review/scripts/probe_default_flow.py",
+    "main:skills/nova-review/scripts/test_global_governance.py",
+    "main:skills/nova-review/scripts/test_nova_review.py",
+    "main:skills/nova-review/scripts/test_skill_contract.py"
+  ],
+  "reviewed_at": "2026-09-04T21:02:59+08:00",
+  "reviewer": "review_engine_core+review_doctor_req_arch+review_development_docs",
+  "schema": 2
+}

@@ -64,7 +64,7 @@
 
 1. 一个工作项默认只创建一个完整、可验证的实现结果 commit；不得按文件、一次编辑、测试轮次或代理工作拆提交。只有在设计或交付台账中预先登记、单独失败后可安全恢复且确有独立恢复价值的内部里程碑，才允许用同一工作项追加 commit；提交批次永远不能反向成为新工作项。
 2. 最低验收通过且无阻断后提交精确任务差异，不夹带历史修改，不提交未通过测试的代码。工作项已生成但尚未 Review、尚未对外共享的本地结果 commit，后续同范围修正优先重新校验并 amend 为同一个结果 commit；已对外共享、无法安全改写，或命中上一条真实里程碑例外时才追加同 ID commit，并在完成报告说明原因。
-3. 提交分类、稳定工作项、trailers 和客观豁免服从 `skills/nova-review/references/commit-contract.md`。schema 2 首行必须是 `type(scope): 中文结果摘要`；type 由提交种类确定，scope 只能取 `requirements / architecture / delivery / review / doctor / plugin / discovery / release` 中最能表示主要影响面的一个。可信审计归档后编号永久封存，后续变化重新分类建项；合法 `Review-Defer` 不复用当前编号。明确源于已归档历史 PEND 的新 FIX 必须写 `Related-Work-Item`。
+3. 提交分类、稳定工作项、trailers 和客观豁免服从 `skills/nova-review/references/commit-contract.md`。schema 2 首行必须是 `type(scope): 中文结果摘要`；type 由提交种类确定，scope 只能取 `requirements / architecture / delivery / review / doctor / plugin / discovery / release` 中最能表示主要影响面的一个。可信审计归档后编号永久封存，后续变化重新分类建项；合法 `Review-Defer` 不复用当前编号。明确源于已归档 FEAT 或历史 PEND 的新 FIX 必须写 `Related-Work-Item`。
 4. 提交前使用仓库感知的 `validate-message --repo <根目录> --message-file ... --diff-file ...` 校验完整 staged diff、身份/分类映射、中文首行、scope、归档 ID 复用与来源关联；失败不得提交。
 5. 只有 `FEAT-*` 在最低验收后把既有设计工作包和蓝图条目置为 `待Review`；`PATCH-*`、`FIX-*`、`MAINT-*` 不创建蓝图条目或工作包。只有 `Review-Policy: required` 的提交由元数据进入待审集合；合法 exempt 的 `MAINT-*` 以豁免证据直接完成。
 6. 默认不启动 Review。用户明确要求 Review 时才加载 `nova-review`；开发完成报告只写“未 Review / 待Review”或合法 `exempt`，不得把自检和测试称为 Review。Review 的 REJECT 修正不提交中间 commit，最终 PASS 的唯一 closure commit 由 `nova-review` 管理。

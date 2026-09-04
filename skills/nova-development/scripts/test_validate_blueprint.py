@@ -356,6 +356,20 @@ class ValidatorTests(unittest.TestCase):
             )
         )
 
+    def test_blueprint_standard_and_template_match_current_delivery_table(self) -> None:
+        standard = (SKILL_ROOT / "references/blueprint-standard.md").read_text(
+            encoding="utf-8"
+        )
+        template = (SKILL_ROOT / "assets/PROJECT_BLUEPRINT.template.md").read_text(
+            encoding="utf-8"
+        )
+        expected_header = "| " + " | ".join(VALIDATOR_MODULE.PENDING_HEADERS) + " |"
+        self.assertIn("6. 交付工作项：", standard)
+        self.assertIn("## 6. 交付工作项", template)
+        for document in (standard, template):
+            self.assertIn(expected_header, document)
+        self.assertNotIn("## 6. 待开发功能", standard)
+
     def test_current_delivery_table_enforces_three_states_and_concrete_clarification(self) -> None:
         work_item = "FEAT-019a1234-0001-7abc-8def-000000000001"
         valid = self.current_blueprint(
