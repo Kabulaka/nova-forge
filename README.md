@@ -129,6 +129,24 @@ python3 skills/nova-review/scripts/validate_discovery.py \
   --claude-home ~/.claude
 ```
 
+## 版本发布
+
+正式版本使用仓库内版本化 Release Notes，GitHub Actions 只负责校验、打包并原样发布正文，不根据提交标题自动编写版本说明。每个标签 `vX.Y.Z` 必须同时满足：
+
+- 与 `package.json.version`、双宿主 manifest 和 marketplace 版本完全一致；
+- 存在 `docs/release-notes/vX.Y.Z.md`，且包含 Overview、Highlights、安装、运行要求和升级说明；
+- `npm run check` 全部通过；
+- 标签由维护者人工创建，主分支推送不会创建 Release。
+
+发布前本地校验：
+
+```bash
+npm run check:release-notes
+npm run check
+```
+
+推送匹配标签后，[Release workflow](.github/workflows/release.yml) 会重新执行完整校验，生成不可变的 `nova-forge-X.Y.Z.tgz` 与 `SHA256SUMS`，并使用对应 Markdown 创建 GitHub Release。首个基线版本说明见 [v0.1.0](docs/release-notes/v0.1.0.md)。工作流失败不会删除标签；修复后必须遵守同一版本不可变原则，不得静默替换已经发布的资产。
+
 ## 使用
 
 可以在 Codex 或 Claude Code 中直接描述目标，也可以显式点名技能：

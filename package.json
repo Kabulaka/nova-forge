@@ -27,8 +27,9 @@
     "test": "node --test tests/*.test.mjs",
     "check:version": "node scripts/sync-version.mjs --check",
     "check:plugin": "node scripts/validate-plugin.mjs",
+    "check:release-notes": "node scripts/validate-release-notes.mjs",
     "check:workflow": "node scripts/validate-workflows.mjs",
     "check:package": "node scripts/check-package.mjs",
-    "check": "npm run check:version && npm run check:plugin && npm run check:workflow && npm run test && npm run check:package"
+    "check": "npm run check:version && npm run check:plugin && npm run check:release-notes && npm run check:workflow && npm run test && npm run check:package"
   }
 }

@@ -27,6 +27,7 @@ for (const command of [
   "npm test",
   "npm run check:version",
   "npm run check:plugin",
+  "npm run check:release-notes",
   "npm run check:workflow",
   "npm run check:package",
 ]) {
@@ -38,18 +39,28 @@ requirePattern(release, /^\s{2}push:\s*\n\s{4}tags:\s*\["v\*\.\*\.\*"\]\s*$/m, "
 forbidPattern(release, /^\s{2}(pull_request|workflow_dispatch):/m, "release must not have non-tag triggers");
 forbidPattern(release, /^\s{4}branches:/m, "release must not run for branch pushes");
 requirePattern(release, /^\s{2}contents:\s*write\s*$/m, "release requires contents: write");
+requirePattern(release, /fetch-depth:\s*0/, "release checkout must fetch complete tag history");
 requirePattern(
   release,
   /test "\$\{GITHUB_REF_NAME\}" = "v\$\{VERSION\}"/,
   "release must reject a tag that differs from package version",
 );
-for (const command of ["npm run check", "npm pack --ignore-scripts", "scripts/checksum.mjs", "gh release create"]) {
+for (const command of [
+  "scripts/validate-release-notes.mjs",
+  "npm run check",
+  "npm pack --ignore-scripts",
+  "scripts/checksum.mjs",
+  "gh release create",
+]) {
   requirePattern(
     release,
     new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     `release missing ${command}`,
   );
 }
+requirePattern(release, /--notes-file/, "release must publish committed release notes");
+requirePattern(release, /docs\/release-notes\/\$\{GITHUB_REF_NAME\}\.md/, "release notes must be selected by tag");
+forbidPattern(release, /--generate-notes/, "release must not replace curated notes with generated notes");
 
 if (errors.length) {
   errors.forEach((error) => process.stderr.write(`ERROR: ${error}\n`));

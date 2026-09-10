@@ -12,23 +12,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22.5.0
           cache: npm
       - name: Verify tag and version
+        id: preflight
         shell: bash
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          NOTES_PATH="docs/release-notes/${GITHUB_REF_NAME}.md"
+          test -f "${NOTES_PATH}"
+          node scripts/validate-release-notes.mjs --tag "${GITHUB_REF_NAME}"
+          echo "notes_path=${NOTES_PATH}" >> "${GITHUB_OUTPUT}"
           npm run check
       - name: Build immutable archive
+        id: package
         shell: bash
         run: |
           npm pack --ignore-scripts
-          node scripts/checksum.mjs "nova-forge-$(node -p "require('./package.json').version").tgz" > SHA256SUMS
+          ARCHIVE="nova-forge-$(node -p "require('./package.json').version").tgz"
+          node scripts/checksum.mjs "${ARCHIVE}" > SHA256SUMS
+          echo "archive=${ARCHIVE}" >> "${GITHUB_OUTPUT}"
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: gh release create "${GITHUB_REF_NAME}" nova-forge-*.tgz SHA256SUMS --verify-tag --generate-notes
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "${{ steps.package.outputs.archive }}" \
+            SHA256SUMS \
+            --verify-tag \
+            --title "Nova Forge ${GITHUB_REF_NAME}" \
+            --notes-file "${{ steps.preflight.outputs.notes_path }}"
