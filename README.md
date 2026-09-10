@@ -61,14 +61,7 @@
 
 ## 安装
 
-### 1. 克隆仓库
-
-```bash
-git clone https://github.com/Kabulaka/nova-forge.git
-cd nova-forge
-```
-
-### 2. 安装版本化插件
+### 1. 安装版本化插件（推荐，无需克隆）
 
 运行时要求 Node.js 22.5 或更高版本；插件不会自动安装 Node.js 或 Bun。正式版本只在仓库出现与 `package.json.version` 一致的人工 `vX.Y.Z` 标签后发布。
 
@@ -87,11 +80,43 @@ Claude Code 可添加同一仓库 marketplace，再从插件管理器安装 `nov
 
 安装后必须审阅并信任插件 Hook；未启用或未信任时，不得认为自动检查点和压缩恢复已经生效。Codex IDE 当前不提供插件入口，应使用下面的兼容方式。
 
-### 3. 兼容发现链接
+#### 从旧版兼容链接迁移
+
+旧版通过 `install_global_rules.py` 把全局规则和五个技能链接到用户目录。迁移前先结束相关宿主的当前会话，并逐项确认入口类型和实际目标：
+
+```bash
+ls -ld ~/.codex/AGENTS.md ~/.codex/skills/nova-* 2>/dev/null
+readlink -f ~/.codex/AGENTS.md
+
+ls -ld ~/.claude/CLAUDE.md ~/.claude/skills/nova-* 2>/dev/null
+readlink -f ~/.claude/CLAUDE.md
+```
+
+- 只有确认解析到旧版或当前 Nova Forge 工作区的软链接才属于兼容入口；解除时只删除链接本身，不得删除其指向的仓库文件或目录。只迁移一个宿主时，不要改动另一个宿主。
+- `~/.codex/AGENTS.md` 或 `~/.claude/CLAUDE.md` 如果是普通文件，应作为用户自己的规则保留，不得为了安装插件删除。普通个人规则文件可以与插件并存，不属于 Nova 兼容软链接。
+- 兼容安装器不备份个人规则，插件安装也不会自动还原这些文件。如果更早的手工安装曾移走个人 `AGENTS.md` 或 `CLAUDE.md`，应先解除 Nova 软链接，再从自己的备份恢复；没有可信备份时只能人工重建，不得把软链接目标或其他文件猜作备份覆盖回来。
+- 五个 `nova-*` 技能链接及旧的 `project-brainstorming`、`nova-brainstorming` 别名采用相同规则：只解除已确认属于 Nova 的软链接，普通文件或真实目录留给用户人工处理。
+- 清理兼容入口后再安装并启用插件、审阅并信任 Hook，最后新开会话。不要在仍加载旧软链接的会话中直接叠加插件。
+
+例如，已确认下面两个入口确实是 Nova 软链接时，可以只解除链接本身：
+
+```bash
+unlink ~/.codex/AGENTS.md
+unlink ~/.claude/CLAUDE.md
+```
+
+技能链接也必须逐项确认后再解除；不要用递归删除或未经检查的通配符清理用户目录。
+
+### 2. 本地开发或兼容发现链接（需要克隆）
 
 支持插件且已经启用 Nova 版本化插件的宿主，以插件入口为唯一发现权威，不要同时保留本节兼容链接。Codex IDE、旧版宿主或需要显式故障恢复时，才使用下述兼容安装器；两种入口即使解析到同一工作区源码也不能在同一宿主并存。
 
-从兼容链接切换到插件时，插件激活流程必须先全量预检，再原子移除该宿主的正常或失效 Nova 软链接；普通文件或真实目录冲突时零写入失败。禁用、卸载或插件故障后需要回退时，先让插件退出，再运行兼容安装器恢复链接、执行 discovery 校验并新开会话；不要在插件仍启用的会话中叠加软链接。
+兼容模式只提供用户级规则与五个技能，不注册插件 Hook、结构化检查点 MCP 或插件数据目录。需要修改源码、使用 Codex IDE、兼容旧宿主或执行故障回退时，先克隆仓库：
+
+```bash
+git clone https://github.com/Kabulaka/nova-forge.git
+cd nova-forge
+```
 
 Codex 从 `~/.codex/AGENTS.md` 加载用户级规则，Claude Code 从 `~/.claude/CLAUDE.md` 加载用户级规则；两者都指向本仓库唯一的 `codex/AGENTS.global.md`。五个 Nova 技能也会分别链接到两个宿主的用户级技能目录。
 
@@ -128,6 +153,14 @@ python3 skills/nova-review/scripts/validate_discovery.py \
   --codex-home ~/.codex \
   --claude-home ~/.claude
 ```
+
+### 3. 升级与回退注意事项
+
+- **版本化插件升级**：先结束当前会话并阅读目标版本 Release Notes，确认 Node.js 要求和升级说明；Codex 的 Git marketplace 使用固定标签，升级到新版本时按目标 Release Notes 重新配置对应 `vX.Y.Z`，不要把 `main` 当作正式版本。刷新或重新安装后，如 Hook 定义发生变化，必须重新审阅并信任，再新开会话验证。
+- **旧兼容版升级为插件**：先按“从旧版兼容链接迁移”核对并解除 Nova 软链接，恢复或保留个人 `~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md`，再启用插件。插件与兼容入口不能同时生效。
+- **插件回退到兼容模式**：先在宿主中禁用或卸载 Nova Forge 插件并结束当前会话，再克隆目标版本、处理用户级规则文件冲突并运行兼容安装器。若 `~/.codex/AGENTS.md` 或 `~/.claude/CLAUDE.md` 是普通文件，安装器会拒绝覆盖；应先自行备份、迁移或合并，不能强制删除。
+- **仓库路径迁移**：仅兼容模式依赖克隆目录。移动或重新克隆后再次运行安装器，并用 `readlink -f` 和 `validate_discovery.py` 确认所有入口都指向新目录；版本化插件不依赖工作区克隆路径。
+- **失败恢复**：任何一步发现目标类型或来源无法确认时立即停止。不要一边保留已启用插件，一边运行兼容安装器；回退完成后必须执行 discovery 校验并新开会话。
 
 ## 版本发布
 
