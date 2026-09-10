@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateGovernanceCheckout } from "./workflow-policy.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ci = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
@@ -34,11 +35,7 @@ for (const command of [
   requirePattern(ci, new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `CI missing ${command}`);
 }
 forbidPattern(ci, /^\s{4}tags:/m, "CI workflow must not publish from tags");
-requirePattern(
-  ci,
-  /^  governance:\s*$[\s\S]*?^      - uses: actions\/checkout@v4\s*$\n^        with:\s*$\n^          fetch-depth:\s*0\s*$/m,
-  "governance checkout must fetch complete review history",
-);
+errors.push(...validateGovernanceCheckout(ci));
 
 requirePattern(release, /^\s{2}push:\s*\n\s{4}tags:\s*\["v\*\.\*\.\*"\]\s*$/m, "release must be tag-only");
 forbidPattern(release, /^\s{2}(pull_request|workflow_dispatch):/m, "release must not have non-tag triggers");

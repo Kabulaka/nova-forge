@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
@@ -350,3 +351,19 @@ test(
     }
   },
 );
+
+test("hook entrypoint path resolution failures cannot exit successfully without output", () => {
+  const moduleUrl = pathToFileURL(path.join(pluginRoot, "hooks", "run.mjs")).href;
+  const missingPath = path.join(os.tmpdir(), `missing-nova-hook-${process.pid}-${Date.now()}.mjs`);
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "--eval", `await import(${JSON.stringify(moduleUrl)})`, missingPath],
+    {
+      cwd: pluginRoot,
+      encoding: "utf8",
+    },
+  );
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /ENOENT|realpath/i);
+});

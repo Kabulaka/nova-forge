@@ -1,0 +1,43 @@
+{
+  "batch_id": "NR-20260910-release-ci-fix-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "fix",
+      "commits": [
+        {
+          "commit": "1dafd30094f06e9d8781097361b68f8ebc759534",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "npm run check 73/73; governance unit tests; Nova Doctor 12/12 (pass)",
+      "work_item": "FIX-01a0893a-8c34-7188-8f82-deebf766dd66"
+    }
+  ],
+  "manifest_sha256": "1dc61cea4f909629692ebc73c9172ff077bc2421523bf33386ab0057be66f959",
+  "review_content_sha256": "dc0957043e6398018301d670464790eecc5c1f60389326eb8a7f56b15613fc6a",
+  "review_fix_scope": [
+    "main:hooks/run.mjs",
+    "main:scripts/validate-workflows.mjs",
+    "main:scripts/workflow-policy.mjs",
+    "main:tests/hook-adapter.test.mjs",
+    "main:tests/workflow.test.mjs"
+  ],
+  "review_fix_sha256": "e93acd5582a77607c20ab68367ca5aca760d00cd19d12eb3af1872d09e2a3b33",
+  "review_heads": {
+    "main": "1dafd30094f06e9d8781097361b68f8ebc759534"
+  },
+  "review_round": 3,
+  "review_scope": [
+    "main:.github/workflows/ci.yml",
+    "main:hooks/run.mjs",
+    "main:runtime/core/storage.mjs",
+    "main:scripts/validate-workflows.mjs",
+    "main:tests/hook-adapter.test.mjs"
+  ],
+  "reviewed_at": "2026-09-10T11:35:24+08:00",
+  "reviewer": "review_maint_release",
+  "schema": 2
+}

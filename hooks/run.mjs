@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import path from "node:path";
 import { handleHook } from "../runtime/adapters/hook.mjs";
 import { HOOK_INPUT_LIMIT } from "../runtime/core/constants.mjs";
 import { NovaError, redactError } from "../runtime/core/util.mjs";
@@ -7,11 +8,9 @@ import { fileURLToPath } from "node:url";
 
 function isMainModule(moduleUrl, argumentPath) {
   if (!argumentPath) return false;
-  try {
-    return fs.realpathSync(fileURLToPath(moduleUrl)) === fs.realpathSync(argumentPath);
-  } catch {
-    return false;
-  }
+  const modulePath = fileURLToPath(moduleUrl);
+  if (path.resolve(modulePath) === path.resolve(argumentPath)) return true;
+  return fs.realpathSync(modulePath) === fs.realpathSync(argumentPath);
 }
 
 export async function readHookInput(stream, inputLimit = HOOK_INPUT_LIMIT) {
