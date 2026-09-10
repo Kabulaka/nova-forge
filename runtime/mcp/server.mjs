@@ -3,7 +3,7 @@ import path from "node:path";
 import { JSON_RPC_FRAME_LIMIT, MCP_PROTOCOL_VERSION } from "../core/constants.mjs";
 import { registerMcpInstance, waitForBinding } from "../core/rendezvous.mjs";
 import { getCheckpoint, saveCheckpoint } from "../core/state-machine.mjs";
-import { NovaError, readPluginVersion, redactError } from "../core/util.mjs";
+import { isMainModule, NovaError, readPluginVersion, redactError } from "../core/util.mjs";
 
 function parseHost(argv) {
   const index = argv.indexOf("--host");
@@ -336,7 +336,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   main().catch((error) => {
     process.stderr.write(`${redactError(error)}\n`);
     process.exitCode = 1;

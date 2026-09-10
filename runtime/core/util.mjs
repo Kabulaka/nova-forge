@@ -11,6 +11,13 @@ export class NovaError extends Error {
   }
 }
 
+export function isMainModule(moduleUrl, argumentPath) {
+  if (!argumentPath) return false;
+  const modulePath = fileURLToPath(moduleUrl);
+  if (path.resolve(modulePath) === path.resolve(argumentPath)) return true;
+  return fs.realpathSync(modulePath) === fs.realpathSync(argumentPath);
+}
+
 export function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
