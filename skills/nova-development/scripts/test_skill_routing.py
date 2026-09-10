@@ -265,6 +265,24 @@ other body
         self.assertIn("REJECT 修正不提交", IMPLEMENTATION_SOP)
         self.assertIn("合法 `Review-Defer` 不复用当前编号", IMPLEMENTATION_SOP)
 
+    def test_planning_and_implementation_cannot_skip_architecture_contracts(self) -> None:
+        automatic = markdown_section(SKILL, "## 自动路由与有限加载")
+        pre_route = markdown_section(SKILL, "### 实施请求前置路由")
+        development = markdown_section(SKILL, "## 3. 研究与澄清")
+        handoff = markdown_section(SKILL, "### 已确认工作包的实施交接")
+        resources = markdown_section(SKILL, "## 资源路由")
+        for section in (automatic, pre_route, resources):
+            self.assertIn("ARCHITECTURE_CONTRACTS.md", section)
+        for document in (pre_route, handoff, IMPLEMENTATION_SOP):
+            self.assertIn("validate_architecture.py --ready", document)
+        self.assertIn("无法可靠缩小范围时读取全部已索引契约", pre_route)
+        self.assertIn("不得以不确定为由少读", IMPLEMENTATION_SOP)
+        for field in ("索引路径", "契约路径", "内容 SHA-256", "ARCH 依据", "ready 结果"):
+            self.assertIn(field, development)
+        self.assertIn("架构目录存在但索引缺失", pre_route)
+        self.assertIn("架构索引或相关契约指纹变化时必须失效", handoff)
+        self.assertIn("Research 先读相关代码、测试、配置", IMPLEMENTATION_SOP)
+
     def test_explicit_nonfeature_ids_resume_without_fictitious_work_packages(self) -> None:
         pre_route = markdown_section(SKILL, "### 实施请求前置路由")
         handoff = markdown_section(SKILL, "### 已确认工作包的实施交接")
