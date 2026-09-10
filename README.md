@@ -123,7 +123,7 @@ Codex 从 `~/.codex/AGENTS.md` 加载用户级规则，Claude Code 从 `~/.claud
 运行统一安装器：
 
 ```bash
-python3 codex/scripts/install_global_rules.py
+python codex/scripts/install_global_rules.py
 ```
 
 安装器会先检查全部目标，再开始修改：
@@ -148,10 +148,7 @@ readlink -f ~/.claude/CLAUDE.md
 安装后验证：
 
 ```bash
-python3 skills/nova-review/scripts/validate_discovery.py \
-  --workspace "$PWD" \
-  --codex-home ~/.codex \
-  --claude-home ~/.claude
+python skills/nova-review/scripts/validate_discovery.py --workspace "$PWD" --codex-home ~/.codex --claude-home ~/.claude
 ```
 
 ### 3. 升级与回退注意事项
@@ -211,38 +208,36 @@ npm run check
 在仓库根目录执行：
 
 ```bash
+# Windows、macOS 与 Linux 都使用当前 Python 3 解释器的 python 命令；Windows 不要求 WSL
+
 # 校验版本 3 项目蓝图
-python3 skills/nova-development/scripts/validate_blueprint.py .nova/PROJECT_BLUEPRINT.md
+python skills/nova-development/scripts/validate_blueprint.py .nova/PROJECT_BLUEPRINT.md
 
 # 共享能力目录存在时，校验登记项及源码位置
-python3 skills/nova-architecture/scripts/validate_shared_capabilities.py --if-present .nova/SHARED_CAPABILITIES.md
+python skills/nova-architecture/scripts/validate_shared_capabilities.py --if-present .nova/SHARED_CAPABILITIES.md
 
 # 运行各技能测试
-python3 -m unittest discover -s codex/scripts -p 'test_*.py'
-python3 -m unittest discover -s skills/nova-requirements/scripts -p 'test_*.py'
-python3 -m unittest discover -s skills/nova-architecture/scripts -p 'test_*.py'
-python3 -m unittest discover -s skills/nova-development/scripts -p 'test_*.py'
-python3 -m unittest discover -s skills/nova-doctor/scripts -p 'test_*.py'
-python3 -m unittest discover -s skills/nova-review/scripts -p 'test_*.py'
+python -m unittest discover -s codex/scripts -p 'test_*.py'
+python -m unittest discover -s skills/nova-requirements/scripts -p 'test_*.py'
+python -m unittest discover -s skills/nova-architecture/scripts -p 'test_*.py'
+python -m unittest discover -s skills/nova-development/scripts -p 'test_*.py'
+python -m unittest discover -s skills/nova-doctor/scripts -p 'test_*.py'
+python -m unittest discover -s skills/nova-review/scripts -p 'test_*.py'
 
 # 校验插件版本、结构、运行时和发布包
 npm run check
 
 # 只读检查当前项目的 Nova 数据
-python3 skills/nova-doctor/scripts/nova_doctor.py
+python skills/nova-doctor/scripts/nova_doctor.py
 
 # 校验技能与全局治理文件的发现链接
-python3 skills/nova-review/scripts/validate_discovery.py \
-  --workspace "$PWD" \
-  --codex-home ~/.codex \
-  --claude-home ~/.claude
+python skills/nova-review/scripts/validate_discovery.py --workspace "$PWD" --codex-home ~/.codex --claude-home ~/.claude
 ```
 
 设计文档可单独校验：
 
 ```bash
-python3 skills/nova-development/scripts/validate_blueprint.py \
-  --design .nova/design/YYYY-MM-DD_example.md
+python skills/nova-development/scripts/validate_blueprint.py --design .nova/design/YYYY-MM-DD_example.md
 ```
 
 ## 关键约束

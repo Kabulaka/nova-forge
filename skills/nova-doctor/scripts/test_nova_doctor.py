@@ -166,7 +166,10 @@ class NovaDoctorTests(unittest.TestCase):
             nova.mkdir()
             external = Path(external_directory) / "outside.md"
             external.write_text("EXTERNAL-SECRET\n", encoding="utf-8")
-            (nova / "PROJECT_BLUEPRINT.md").symlink_to(external)
+            try:
+                (nova / "PROJECT_BLUEPRINT.md").symlink_to(external)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
             results = DOCTOR.diagnose(root, WORKSPACE)
         self.assertEqual([result.status for result in results], ["FAIL"])
         report = " ".join(
@@ -215,6 +218,16 @@ class NovaDoctorTests(unittest.TestCase):
         self.assertEqual(result.status, "FAIL")
         self.assertEqual(result.message, f"cannot run requirements validator: {decode_error}")
         self.assertEqual(result.details, ("Run: validator document.md",))
+
+    def test_audit_fails_closed_for_pending_review_transaction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / ".nova/audit").mkdir(parents=True)
+            (root / ".git/nova-review-transaction").mkdir()
+            result = DOCTOR.check_audit(root, WORKSPACE)
+            self.assertEqual(result.status, "FAIL")
+            self.assertIn("requires recovery", " ".join((result.message, *result.details)))
 
     def test_audit_rejects_malformed_feature_record(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -45,19 +45,19 @@ closure commit 完成且 `query` 可信校验通过后，完整读取整个 [实
 ## 5. 工具入口
 
 ```bash
-python3 scripts/nova_review.py validate-message --repo /path/to/repo --message-file /path/to/message --diff-file /path/to/diff
-python3 scripts/nova_review.py validate-audit-message --repo /path/to/repo --message-file /path/to/message --diff-file /path/to/diff
-python3 scripts/nova_review.py select --repo /path/to/repo --mode current --session-item FEAT-<uuidv7>
-python3 scripts/nova_review.py check-manifest --repo /path/to/repo --manifest /path/to/review.json
-python3 scripts/nova_review.py record-pass --repo /path/to/repo --manifest /path/to/review.json
-python3 scripts/nova_review.py query --repo /path/to/repo --work-item FEAT-<uuidv7>
-python3 scripts/nova_review.py validate-report --stage review --report-file /project/outside/review-report.md
-python3 ../nova-development/scripts/nova_delivery.py query --repo /path/to/repo --requirement-ref REQ-...@v1
-python3 scripts/validate_discovery.py --workspace /path/to/skills --codex-home /path/to/.codex
-python3 scripts/probe_default_flow.py
+python scripts/nova_review.py validate-message --repo /path/to/repo --message-file /path/to/message --diff-file /path/to/diff
+python scripts/nova_review.py validate-audit-message --repo /path/to/repo --message-file /path/to/message --diff-file /path/to/diff
+python scripts/nova_review.py select --repo /path/to/repo --mode current --session-item FEAT-<uuidv7>
+python scripts/nova_review.py check-manifest --repo /path/to/repo --manifest /path/to/review.json
+python scripts/nova_review.py record-pass --repo /path/to/repo --manifest /path/to/review.json
+python scripts/nova_review.py query --repo /path/to/repo --work-item FEAT-<uuidv7>
+python scripts/nova_review.py validate-report --stage review --report-file /project/outside/review-report.md
+python ../nova-development/scripts/nova_delivery.py query --repo /path/to/repo --requirement-ref REQ-...@v1
+python scripts/validate_discovery.py --workspace /path/to/skills --codex-home /path/to/.codex
+python scripts/probe_default_flow.py
 ```
 
-工具只使用 Python 标准库。`validate-message`、`validate-audit-message`、`select`、`check-manifest`、`query`、`query-requirement`、报告校验和交付进度查询只读；Work-Item 的 `validate-message --repo` 额外校验当前编号未归档、单结果提交边界及 `Related-Work-Item` 的可信归档来源，安全 amend 时显式增加 `--amend`。requirement/delivery-plan 检查点强制同时提供 `--repo` 与完整 staged diff并校验精确范围、基线和唯一性。`select` 只发现 FEAT/PATCH/FIX/MAINT 与历史 PEND，排除 ARCH、requirement、delivery-plan、内部里程碑与 audit commit。`record-pass` 是唯一写审计/关闭入口，并把交付台账纳入同一原子更新；schema 2 关闭输出与 Review 修正在一个 closure commit 中提交，不形成新工作项或递归 Review。
+工具只使用 Python 标准库，并以当前解释器的 `python` 入口原生运行于 Ubuntu、macOS 与 Windows，不要求 WSL。`validate-message`、`validate-audit-message`、`select`、`check-manifest`、`query`、`query-requirement`、报告校验和交付进度查询只读；发现未完成关闭事务时失败封闭，使用相同 manifest 重新运行 `record-pass` 会先持锁恢复再幂等关闭。Work-Item 的 `validate-message --repo` 额外校验当前编号未归档、单结果提交边界及 `Related-Work-Item` 的可信归档来源，安全 amend 时显式增加 `--amend`。requirement/delivery-plan 检查点强制同时提供 `--repo` 与完整 staged diff并校验精确范围、基线和唯一性。`select` 只发现 FEAT/PATCH/FIX/MAINT 与历史 PEND，排除 ARCH、requirement、delivery-plan、内部里程碑与 audit commit。`record-pass` 是唯一写审计/关闭入口，并把交付台账纳入同一逻辑事务；Windows 与 macOS 使用仓库级排他锁、同卷临时文件、持久事务日志和逻辑提交标记保证普通失败回滚与中断恢复，不承诺多个普通文件物理同时可见或突然断电后的物理落盘原子性。schema 2 关闭输出与 Review 修正在一个 closure commit 中提交，不形成新工作项或递归 Review。
 
 ## 资源路由
 

@@ -127,7 +127,9 @@ def validate(
         try:
             path.stat()
         except FileNotFoundError:
-            return [], True
+            if path.parent.is_dir():
+                return [], True
+            return ["cannot inspect shared capability catalog: parent is not a directory"], False
         except (OSError, RuntimeError, ValueError) as exc:
             return [f"cannot inspect shared capability catalog: {exc}"], False
     try:

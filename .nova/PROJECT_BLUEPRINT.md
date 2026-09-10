@@ -203,6 +203,7 @@ flowchart LR
 | PEND-003 | 待澄清 | P2 | 历史迁移 | 技能目录索引 | 待澄清：尚未确认索引的权威数据源及生成时机 | 无 | 自动生成技能名称、用途、入口和验证状态，不复制技能正文 | 无 |
 | PEND-004 | 待澄清 | P3 | 历史迁移 | 持续集成 | 待澄清：尚未确认受控 CI 环境和必须执行的校验集合 | PEND-002 | 在受控环境执行无网络的结构、语法和正反用例检查 | 无 |
 | PEND-01a06626-fe17-7569-b31b-303218cc9c3b | 待澄清 | P1 | Review-Defer | 版本化插件入口迁移与真实宿主闭环 | 待澄清：尚未取得双宿主真实启停、卸载和故障回退验收环境 | 无 | 插件实现后可原子迁移兼容链接，并在双宿主完成启用、禁用、卸载、故障回退和新会话 E2E | [REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff@v1](requirements/REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff_Codex与Claude_Code插件分发及同会话压缩续接.md) |
+| FEAT-01a08b2d-e4d1-7a27-b2b6-edf275cef8e4 | 待Review | P0 | 用户提出 | Windows 原生审计关闭 | [WP-01](design/2026-09-10_Windows原生审计关闭.md#wp-01-windows-native-closure) | 无 | 原生 Windows 在中文空格路径完成 `check-manifest → record-pass → closure commit → query`，故障注入、强杀恢复、锁竞争、reparse point 和三平台治理回归通过 | 无 |
 
 ## 7. 系统架构
 

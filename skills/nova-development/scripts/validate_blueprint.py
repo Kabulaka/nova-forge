@@ -185,11 +185,6 @@ def validate_legacy_design_snapshot(path: Path, text_snapshot: str) -> list[str]
             f"terminal legacy design must match a registered Git HEAD snapshot: {path.name}"
         ]
 
-    content = text_snapshot.encode("utf-8")
-    actual = "sha256:" + hashlib.sha256(content).hexdigest()
-    if actual != expected:
-        return [f"legacy design snapshot content does not match manifest: {path.name}"]
-
     try:
         root_result = subprocess.run(
             ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
@@ -221,6 +216,10 @@ def validate_legacy_design_snapshot(path: Path, text_snapshot: str) -> list[str]
         return [f"cannot verify legacy design snapshot in Git HEAD: {exc}"]
     if head_result is None:
         return [f"legacy design snapshot is not present in Git HEAD: {path.name}"]
+    content = text_snapshot.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+    actual = "sha256:" + hashlib.sha256(content).hexdigest()
+    if actual != expected:
+        return [f"legacy design snapshot content does not match manifest: {path.name}"]
     if head_result.stdout != content:
         return [f"legacy design snapshot differs from Git HEAD: {path.name}"]
     return []
@@ -826,14 +825,26 @@ def git_head_matches_document(path: Path, text: str) -> bool:
     except ValueError:
         return False
     expected = text.encode("utf-8")
-    return any(
-        subprocess.run(
+    for candidate in git_head_path_candidates(relative):
+        result = subprocess.run(
             ["git", "-C", str(repo), "show", f"HEAD:{candidate}"],
             capture_output=True,
             check=False,
-        ).stdout == expected
-        for candidate in git_head_path_candidates(relative)
-    )
+        )
+        if result.returncode != 0:
+            continue
+        if result.stdout == expected:
+            return True
+        if candidate != relative or result.stdout.replace(b"\n", b"\r\n") != expected:
+            continue
+        clean = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
+            capture_output=True,
+            check=False,
+        )
+        if clean.returncode == 0:
+            return True
+    return False
 
 
 def validate_blueprint(path: Path) -> tuple[list[str], list[str]]:

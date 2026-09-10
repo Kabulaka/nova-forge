@@ -37,7 +37,7 @@ FEAT = "FEAT-019a1234-5678-7abc-8def-0123456789ac"
 class RequirementsValidatorTests(unittest.TestCase):
     def run_validator(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(VALIDATOR), *args],
+            [sys.executable, str(VALIDATOR), *args],
             text=True,
             capture_output=True,
             check=False,
@@ -179,6 +179,16 @@ class RequirementsValidatorTests(unittest.TestCase):
         result = self.run_validator("--index", str(EXAMPLE / "PRODUCT_REQUIREMENTS.md"))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS", result.stdout)
+
+    def test_pending_review_transaction_fails_requirement_reads_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            nova_root = self.audited_requirements(temporary)
+            NOVA_REVIEW._transaction_state_directory(nova_root.parent).mkdir()
+            result = self.run_validator(
+                "--index", str(nova_root / "PRODUCT_REQUIREMENTS.md")
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unfinished Nova Review transaction", result.stdout)
 
     def test_block_passes_independently(self) -> None:
         block = next((EXAMPLE / "requirements").glob("REQ-*.md"))

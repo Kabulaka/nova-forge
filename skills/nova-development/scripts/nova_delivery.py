@@ -125,8 +125,8 @@ def apply_plan(repo: Path, candidate_path: Path, expected_head: str) -> dict[str
     return {
         "requirement_ref": candidate["requirement_ref"],
         "plan_version": candidate["plan_version"],
-        "ledger": str(target.relative_to(repo)),
-        "product": str(product_path.relative_to(repo)),
+        "ledger": target.relative_to(repo).as_posix(),
+        "product": product_path.relative_to(repo).as_posix(),
         "expected_head": expected_head,
     }
 

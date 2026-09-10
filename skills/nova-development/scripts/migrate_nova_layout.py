@@ -392,11 +392,14 @@ def atomic_replace_bytes(path: Path, content: bytes, mode: int) -> None:
         os.close(descriptor)
         descriptor = -1
         os.replace(temporary, path)
-        directory_descriptor = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        try:
-            os.fsync(directory_descriptor)
-        finally:
-            os.close(directory_descriptor)
+        if os.name != "nt":
+            directory_descriptor = os.open(
+                path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            )
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
     finally:
         if descriptor >= 0:
             os.close(descriptor)

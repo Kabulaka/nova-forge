@@ -138,10 +138,10 @@ AI 结合已确认上下文发现候选做法时，只有准备把它作为已�
 以下操作完成后运行对应校验器：创建、修改或迁移蓝图/设计；新增、修改或删除共享能力目录；改变待办引用、工作包状态或文档生命周期；交付本轮已变更文档前。
 
 ```bash
-python3 scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
-python3 scripts/validate_blueprint.py --design /absolute/path/to/.nova/design/2026-08-26_example.md
-python3 ../nova-architecture/scripts/validate_architecture.py --ready /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
-python3 ../nova-architecture/scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md
+python scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
+python scripts/validate_blueprint.py --design /absolute/path/to/.nova/design/2026-08-26_example.md
+python ../nova-architecture/scripts/validate_architecture.py --ready /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
+python ../nova-architecture/scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md
 ```
 
 纯头脑风暴、继续提问、解释规则、读取项目和只读分析不运行校验器。校验不代替项目要求的测试、显式 Review 或提交门禁。

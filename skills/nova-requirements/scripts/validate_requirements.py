@@ -186,6 +186,8 @@ def git_repo_for_nova(nova_root: Path) -> Path | None:
         ["git", "-C", str(nova_root), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="strict",
         check=False,
     )
     if result.returncode:
@@ -259,6 +261,15 @@ def validate_index(path: Path) -> list[str]:
     text, errors = read_text(path)
     if text is None:
         return errors
+    module = nova_review_module()
+    repo = git_repo_for_nova(path.parent)
+    if module is not None and repo is not None:
+        transaction_guard = getattr(module, "assert_review_transaction_clean", None)
+        if transaction_guard is not None:
+            try:
+                transaction_guard(repo)
+            except (module.NovaError, OSError) as exc:
+                errors.append(f"unfinished Nova Review transaction: {exc}")
     errors.extend(common_errors(path, text, INDEX_SECTIONS))
     schema = metadata(text, "需求规范版本")
     product_version = metadata(text, "产品版本")

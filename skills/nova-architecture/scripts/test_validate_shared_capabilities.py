@@ -134,7 +134,10 @@ class SharedCapabilityValidatorTests(unittest.TestCase):
         outside = catalog.parent.parent / "outside.md"
         outside.write_text(self.valid_catalog(), encoding="utf-8")
         catalog.unlink()
-        catalog.symlink_to(outside)
+        try:
+            catalog.symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(f"symlink creation unavailable: {exc}")
         result = self.run_validator(catalog)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must not be symbolic links", result.stdout)
@@ -147,7 +150,10 @@ class SharedCapabilityValidatorTests(unittest.TestCase):
         (external_nova / "SHARED_CAPABILITIES.md").write_text(
             self.valid_catalog(), encoding="utf-8"
         )
-        (root / ".nova").symlink_to(external_nova, target_is_directory=True)
+        try:
+            (root / ".nova").symlink_to(external_nova, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"symlink creation unavailable: {exc}")
         result = self.run_validator(root / ".nova/SHARED_CAPABILITIES.md")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must not be symbolic links", result.stdout)
@@ -195,7 +201,10 @@ class SharedCapabilityValidatorTests(unittest.TestCase):
             self.valid_catalog().replace("src/shared/database.py", "loop")
         )
         self.addCleanup(temp2.cleanup)
-        (catalog2.parent.parent / "loop").symlink_to("loop")
+        try:
+            (catalog2.parent.parent / "loop").symlink_to("loop")
+        except OSError as exc:
+            self.skipTest(f"symlink creation unavailable: {exc}")
         result2 = self.run_validator(catalog2)
         self.assertNotEqual(result2.returncode, 0)
         self.assertIn("cannot resolve shared capability code location", result2.stdout)
@@ -219,7 +228,10 @@ class SharedCapabilityValidatorTests(unittest.TestCase):
         blueprint = catalog.parent / "PROJECT_BLUEPRINT.md"
         blueprint.write_text("# Blueprint\n", encoding="utf-8")
         alias = catalog.parent.parent / "src/shared/governance-alias.py"
-        alias.symlink_to(blueprint)
+        try:
+            alias.symlink_to(blueprint)
+        except OSError as exc:
+            self.skipTest(f"symlink creation unavailable: {exc}")
 
         result = self.run_validator(catalog)
         self.assertNotEqual(result.returncode, 0)
