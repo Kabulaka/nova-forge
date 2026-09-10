@@ -1,8 +1,18 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import { handleHook } from "../runtime/adapters/hook.mjs";
 import { HOOK_INPUT_LIMIT } from "../runtime/core/constants.mjs";
 import { NovaError, redactError } from "../runtime/core/util.mjs";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+
+function isMainModule(moduleUrl, argumentPath) {
+  if (!argumentPath) return false;
+  try {
+    return fs.realpathSync(fileURLToPath(moduleUrl)) === fs.realpathSync(argumentPath);
+  } catch {
+    return false;
+  }
+}
 
 export async function readHookInput(stream, inputLimit = HOOK_INPUT_LIMIT) {
   if (!Number.isSafeInteger(inputLimit) || inputLimit <= 0) {
@@ -55,4 +65,4 @@ export async function main({
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
+if (isMainModule(import.meta.url, process.argv[1])) await main();

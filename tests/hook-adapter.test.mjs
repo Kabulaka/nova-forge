@@ -319,3 +319,34 @@ test("hook entrypoint runs from installation paths requiring URL escaping", () =
     temp.cleanup();
   }
 });
+
+test(
+  "hook entrypoint runs when the invoked path resolves through a filesystem alias",
+  { skip: process.platform === "win32" },
+  () => {
+    const temp = temporaryDirectory("nova-alias-");
+    try {
+      const copiedRoot = path.join(temp.directory, "plugin-root");
+      const aliasRoot = path.join(temp.directory, "plugin-alias");
+      fs.mkdirSync(copiedRoot);
+      fs.cpSync(path.join(pluginRoot, "hooks"), path.join(copiedRoot, "hooks"), { recursive: true });
+      fs.cpSync(path.join(pluginRoot, "runtime"), path.join(copiedRoot, "runtime"), { recursive: true });
+      fs.symlinkSync(copiedRoot, aliasRoot, "dir");
+      const result = spawnSync(process.execPath, [path.join(aliasRoot, "hooks", "run.mjs")], {
+        cwd: aliasRoot,
+        input: "{not-json",
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          NOVA_HOST: "claude-code",
+          NOVA_PLUGIN_ROOT: aliasRoot,
+          NOVA_PLUGIN_DATA: path.join(temp.directory, "data"),
+        },
+      });
+      assert.equal(result.status, 2);
+      assert.match(result.stderr, /Nova hook failed/);
+    } finally {
+      temp.cleanup();
+    }
+  },
+);

@@ -616,7 +616,7 @@ export function writeEnvelope(
     try {
       faultInjector?.("write-temp");
       fs.writeFileSync(temporary, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
-      const descriptor = fs.openSync(temporary, "r");
+      const descriptor = fs.openSync(temporary, "r+");
       try {
         faultInjector?.("fsync-temp");
         fs.fsyncSync(descriptor);
