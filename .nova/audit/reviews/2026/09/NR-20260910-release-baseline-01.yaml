@@ -1,0 +1,43 @@
+{
+  "batch_id": "NR-20260910-release-baseline-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "maintenance",
+      "commits": [
+        {
+          "commit": "ea114934802c339434f3e14f3e95bf5e2202c3eb",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "release notes 20/20; npm run check 69/69; nova-doctor 12/12; git diff --check (pass)",
+      "work_item": "MAINT-01a088fd-c3da-776a-b2e7-b17dc6d11b34"
+    }
+  ],
+  "manifest_sha256": "46b4733325a8558fb9d600fa41e52e6704b42d88668ba0439e6ba7f4b3a4c6ed",
+  "review_content_sha256": "768ad5df77a88ee82a26a5b9aa8fefd4c8835ec5d3873040f1bc4317a67a2699",
+  "review_fix_scope": [
+    "main:scripts/validate-release-notes.mjs",
+    "main:tests/release-notes.test.mjs"
+  ],
+  "review_fix_sha256": "ad2babc4e5e2957f75231b3b558bbfd8fea6504bb6b89828efdc0e3351ff5d54",
+  "review_heads": {
+    "main": "ea114934802c339434f3e14f3e95bf5e2202c3eb"
+  },
+  "review_round": 3,
+  "review_scope": [
+    "main:.github/workflows/ci.yml",
+    "main:.github/workflows/release.yml",
+    "main:README.md",
+    "main:docs/release-notes/v0.1.0.md",
+    "main:package.json",
+    "main:scripts/validate-release-notes.mjs",
+    "main:scripts/validate-workflows.mjs",
+    "main:tests/release-notes.test.mjs"
+  ],
+  "reviewed_at": "2026-09-10T10:36:09+08:00",
+  "reviewer": "review_maint_release",
+  "schema": 2
+}
