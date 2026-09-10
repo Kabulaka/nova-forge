@@ -29,7 +29,13 @@ jobs:
       - run: npm run check:package
 
   governance:
-    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,7 +43,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m unittest discover -s codex/scripts -p 'test_*.py'
+      - if: runner.os != 'Windows'
+        run: python -m unittest discover -s codex/scripts -p 'test_*.py'
       - run: python -m unittest discover -s skills/nova-requirements/scripts -p 'test_*.py'
       - run: python -m unittest discover -s skills/nova-architecture/scripts -p 'test_*.py'
       - run: python -m unittest discover -s skills/nova-development/scripts -p 'test_*.py'

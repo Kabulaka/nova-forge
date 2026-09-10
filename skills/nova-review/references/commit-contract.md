@@ -18,12 +18,12 @@ FEAT 只能沿稳定能力边界拆分。需求、架构、编码、测试等流
 新 ID 使用无状态命令：
 
 ```bash
-python3 skills/nova-review/scripts/nova_review.py new-requirement-id
-python3 skills/nova-review/scripts/nova_review.py new-architecture-id
-python3 skills/nova-review/scripts/nova_review.py new-id --class feature
-python3 skills/nova-review/scripts/nova_review.py new-id --class patch
-python3 skills/nova-review/scripts/nova_review.py new-id --class fix
-python3 skills/nova-review/scripts/nova_review.py new-id --class maintenance
+python skills/nova-review/scripts/nova_review.py new-requirement-id
+python skills/nova-review/scripts/nova_review.py new-architecture-id
+python skills/nova-review/scripts/nova_review.py new-id --class feature
+python skills/nova-review/scripts/nova_review.py new-id --class patch
+python skills/nova-review/scripts/nova_review.py new-id --class fix
+python skills/nova-review/scripts/nova_review.py new-id --class maintenance
 ```
 
 历史 `PEND-*`、schema 1 的 `designed / adhoc / maintenance`、引用和可信审计保持原样且可继续完成；任何新入口都不得再生成 PEND。可信审计归档后编号永久封存。明确源于已归档 FEAT 或历史 PEND 的新 FIX 增加单值 `Related-Work-Item`，并由仓库感知校验验证来源。
@@ -112,7 +112,7 @@ Change-Class: feature
 Design-Ref: .nova/design/2026-09-04_example.md#wp-01-example
 Review-Policy: required
 Exemption-Rule: none
-Validation: python3 tests/example.py (pass)
+Validation: python tests/example.py (pass)
 ```
 
 映射固定：

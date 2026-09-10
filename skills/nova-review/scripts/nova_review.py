@@ -6,12 +6,12 @@ from __future__ import annotations
 import argparse
 import ctypes
 import errno
-import fcntl
 import hashlib
 import json
 import os
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import time
@@ -254,6 +254,8 @@ def run_git(repo: Path, *args: str) -> str:
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="strict",
     )
     if result.returncode:
         raise NovaError(result.stderr.strip() or result.stdout.strip() or "git command failed")
@@ -1156,6 +1158,25 @@ def canonical_delivery_ledger(value: dict[str, Any]) -> bytes:
     )
 
 
+def worktree_bytes_are_canonical_projection(
+    repo: Path, relative: str, content: bytes, canonical: bytes
+) -> bool:
+    """Accept Git's clean CRLF checkout projection of a canonical LF blob."""
+    if content == canonical:
+        return True
+    if content != canonical.replace(b"\n", b"\r\n"):
+        return False
+    head = run_git_bytes(repo, "show", f"HEAD:{relative}", allow_missing=True)
+    if head != canonical:
+        return False
+    clean = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
+        check=False,
+        capture_output=True,
+    )
+    return clean.returncode == 0
+
+
 def product_requirement_row(
     text: str, requirement_ref: str, *, allow_newer_version: bool = False
 ) -> list[str]:
@@ -1590,7 +1611,7 @@ def delivery_item_for_commit_boundary(
     if revision is None:
         delivery_root = safe_repo_path(repo, ".nova/delivery", "delivery directory")
         sources = [
-            (str(path.relative_to(repo)), path.read_bytes())
+            (path.relative_to(repo).as_posix(), path.read_bytes())
             for path in sorted(delivery_root.glob("REQ-*_v*.json"))
         ]
     else:
@@ -1622,7 +1643,11 @@ def delivery_item_for_commit_boundary(
             f"pre-registered milestones: {work_item}"
         )
     relative, content, ledger = candidates[0]
-    if canonical_delivery_ledger(ledger) != content:
+    canonical = canonical_delivery_ledger(ledger)
+    if canonical != content and not (
+        revision is None
+        and worktree_bytes_are_canonical_projection(repo, relative, content, canonical)
+    ):
         raise NovaError("delivery ledger must use canonical UTF-8 JSON")
     if revision is None:
         blueprint = safe_repo_path(
@@ -2296,7 +2321,7 @@ def load_completed_from_reader(
     reader: Callable[[str], bytes | None],
     feature_override: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    index_relative = str(feature_index_path(repo, work_item).relative_to(repo))
+    index_relative = feature_index_path(repo, work_item).relative_to(repo).as_posix()
     index_path = safe_repo_path(repo, index_relative, "feature index")
     index_bytes = reader(index_relative)
     if index_bytes is None:
@@ -2626,7 +2651,7 @@ def expected_audit_snapshot(
         json.dumps(review, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     )
     for item in review["items"]:
-        current_index = str(feature_index_path(repo, item["work_item"]).relative_to(repo))
+        current_index = feature_index_path(repo, item["work_item"]).relative_to(repo).as_posix()
         index_relative = (
             current_index.replace(".nova/audit/", "docs/audit/", 1)
             if legacy_layout
@@ -2783,7 +2808,7 @@ def validate_audit_snapshot(
         if completed is None or completed[1] != item:
             raise NovaError(f"audit records are incomplete for {work_item}")
         completed_items[work_item] = completed
-        current_index = str(feature_index_path(repo, work_item).relative_to(repo))
+        current_index = feature_index_path(repo, work_item).relative_to(repo).as_posix()
         expected.add(
             current_index.replace(".nova/audit/", "docs/audit/", 1)
             if legacy_layout
@@ -2833,7 +2858,8 @@ def load_completed_item(
     ] | None = None,
     revision: str = "HEAD",
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    index_relative = str(feature_index_path(repo, work_item).relative_to(repo))
+    assert_review_transaction_clean(repo)
+    index_relative = feature_index_path(repo, work_item).relative_to(repo).as_posix()
     commits: list[str] = []
     for candidate in nova_path_candidates(index_relative):
         found = run_git(
@@ -2898,6 +2924,7 @@ def load_completed_item(
 def validate_audit_message(
     repo: Path, message: str, diff: str
 ) -> tuple[dict[str, str], list[str]]:
+    assert_review_transaction_clean(repo)
     values, errors = parse_audit_message(message)
     if errors:
         return values, errors
@@ -2967,6 +2994,7 @@ def select_pending(
     session_items: set[str],
     explicit_items: set[str],
 ) -> list[dict[str, Any]]:
+    assert_review_transaction_clean(repo)
     if mode == "current" and not session_items:
         raise NovaError("current mode requires at least one --session-item")
     if mode == "explicit" and not explicit_items:
@@ -3062,28 +3090,33 @@ def canonical_manifest(manifest: dict[str, Any]) -> bytes:
 
 
 def reject_symlink_components(repo: Path, candidate: Path, field: str) -> None:
-    repo = repo.resolve()
+    repo = _absolute_path(repo)
+    candidate = _absolute_path(candidate)
     try:
-        relative = candidate.absolute().relative_to(repo)
+        relative = candidate.relative_to(repo)
     except ValueError as exc:
         raise NovaError(f"{field} must stay inside repository") from exc
     current = repo
-    for part in relative.parts:
-        current = current / part
+    for part in (Path("."), *relative.parts):
+        if part != Path("."):
+            current = current / part
         try:
-            mode = os.lstat(current).st_mode
+            os.lstat(current)
         except FileNotFoundError:
             continue
-        if os.path.islink(current):
-            raise NovaError(f"{field} must not traverse a symlink: {current}")
+        if _is_reparse_point(current):
+            raise NovaError(
+                f"{field} must not traverse a symlink or reparse point: {current}"
+            )
         if current != candidate and not os.path.isdir(current):
             raise NovaError(f"{field} parent is not a directory: {current}")
 
 
 def safe_repo_path(repo: Path, value: str, field: str) -> Path:
-    candidate = Path(os.path.abspath(repo / value))
+    repo = _absolute_path(repo)
+    candidate = _absolute_path(repo / value)
     try:
-        candidate.relative_to(repo.resolve())
+        candidate.relative_to(repo)
     except ValueError as exc:
         raise NovaError(f"{field} must stay inside repository") from exc
     reject_symlink_components(repo, candidate, field)
@@ -3298,12 +3331,13 @@ def feature_index_record(
         "schema": 1,
         "work_item": item["work_item"],
         "feature_year": reviewed_at.year,
-        "review_path": str(output.relative_to(repo)),
+        "review_path": output.relative_to(repo).as_posix(),
         "review_batch": batch_id,
     }
 
 
 def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    assert_review_transaction_clean(repo)
     base_manifest_fields = {
         "schema",
         "batch_id",
@@ -3365,7 +3399,7 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     digest = hashlib.sha256(canonical_manifest(manifest)).hexdigest()
     output = safe_repo_path(
         repo,
-        str(review_path_for_values(repo, reviewed_at, batch_id).relative_to(repo)),
+        review_path_for_values(repo, reviewed_at, batch_id).relative_to(repo).as_posix(),
         "review output",
     )
     output_snapshot = capture_snapshot(snapshots, output)
@@ -3642,21 +3676,23 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
 
     archive = safe_repo_path(
         repo,
-        str(feature_path(repo, reviewed_at).relative_to(repo)),
+        feature_path(repo, reviewed_at).relative_to(repo).as_posix(),
         "feature archive",
     )
     capture_snapshot(snapshots, archive)
     if manifest_schema == 2:
         reserved_paths = {
-            str(output.relative_to(repo)),
-            str(archive.relative_to(repo)),
+            output.relative_to(repo).as_posix(),
+            archive.relative_to(repo).as_posix(),
         }
         for item in normalized_items:
-            reserved_paths.add(str(feature_index_path(repo, item["work_item"]).relative_to(repo)))
+            reserved_paths.add(
+                feature_index_path(repo, item["work_item"]).relative_to(repo).as_posix()
+            )
             for field in ("blueprint_path", "design_path", "delivery_path"):
                 value = item.get(field)
                 if isinstance(value, Path):
-                    reserved_paths.add(str(value.relative_to(repo)))
+                    reserved_paths.add(value.relative_to(repo).as_posix())
             if item["change_class"] in {"designed", "feature"}:
                 reserved_paths.add(".nova/PRODUCT_REQUIREMENTS.md")
         overlap = forbidden_review_fix_paths(
@@ -3711,7 +3747,7 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                 raise NovaError(f"work item already archived: {item['work_item']}")
             index_path = safe_repo_path(
                 repo,
-                str(feature_index_path(repo, item["work_item"]).relative_to(repo)),
+                feature_index_path(repo, item["work_item"]).relative_to(repo).as_posix(),
                 "feature index",
             )
             if capture_snapshot(snapshots, index_path) is not None:
@@ -3939,6 +3975,7 @@ def milestone_progress(item: dict[str, Any]) -> dict[str, Any]:
 def query_delivery(
     repo: Path, requirement_ref: str | None = None, work_item: str | None = None
 ) -> dict[str, Any]:
+    assert_review_transaction_clean(repo)
     if bool(requirement_ref) == bool(work_item):
         raise NovaError("query-delivery requires exactly one of Requirement-Ref or Work-Item")
     delivery_root = safe_repo_path(repo, ".nova/delivery", "delivery directory")
@@ -3958,7 +3995,10 @@ def query_delivery(
         if len(candidates) != 1:
             raise NovaError(f"Work-Item must resolve to exactly one delivery ledger: {work_item}")
     path, ledger = candidates[0]
-    if canonical_delivery_ledger(ledger) != path.read_bytes():
+    content = path.read_bytes()
+    canonical = canonical_delivery_ledger(ledger)
+    relative = path.relative_to(repo).as_posix()
+    if not worktree_bytes_are_canonical_projection(repo, relative, content, canonical):
         raise NovaError("delivery ledger must use canonical UTF-8 JSON")
     blueprint = safe_repo_path(repo, ".nova/PROJECT_BLUEPRINT.md", "blueprint").read_text(
         encoding="utf-8"
@@ -4007,7 +4047,7 @@ def query_delivery(
             if item["state"] == "blocked"
         ],
         "evidence": {
-            "ledger": str(path.relative_to(repo)),
+            "ledger": path.relative_to(repo).as_posix(),
             "blueprint": ".nova/PROJECT_BLUEPRINT.md",
             "audits": [
                 item["work_item"]
@@ -4310,7 +4350,7 @@ def build_updates(
         records.append(json.dumps(record, ensure_ascii=False, sort_keys=True))
         index_path = safe_repo_path(
             repo,
-            str(feature_index_path(repo, item["work_item"]).relative_to(repo)),
+            feature_index_path(repo, item["work_item"]).relative_to(repo).as_posix(),
             "feature index",
         )
         expected[index_path] = validated["snapshots"][index_path]
@@ -4466,7 +4506,7 @@ def _write_temp_at(parent_fd: int, target_name: str, content: bytes, sequence: i
     return temp_name
 
 
-def atomic_write_group(
+def _atomic_write_group_posix(
     repo: Path,
     updates: dict[Path, tuple[bytes | None, bytes]],
     watched: dict[Path, bytes | None] | None = None,
@@ -4630,27 +4670,577 @@ def atomic_write_group(
                     pass
 
 
+TRANSACTION_SCHEMA = 1
+TRANSACTION_PHASES = ("PREPARED", "APPLYING", "COMMITTED", "CLEANED")
+TRANSACTION_DIRECTORY = "nova-review-transaction"
+
+
+def _is_reparse_point(path: Path) -> bool:
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(metadata.st_mode):
+        return True
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(attributes & reparse_flag)
+
+
+def _absolute_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _secure_relative_path(repo: Path, path: Path, label: str) -> tuple[Path, Path]:
+    root = _absolute_path(repo)
+    target = _absolute_path(path)
+    try:
+        relative = target.relative_to(root)
+    except ValueError as exc:
+        raise NovaError(f"{label} escapes repository: {path}") from exc
+    current = root
+    for part in (Path("."), *relative.parts):
+        if part != Path("."):
+            current /= part
+        if _is_reparse_point(current):
+            raise NovaError(f"{label} must not traverse a symlink or reparse point: {current}")
+    return target, relative
+
+
+def _nearest_existing(path: Path) -> Path:
+    current = path
+    while not current.exists():
+        parent = current.parent
+        if parent == current:
+            raise NovaError(f"cannot locate an existing volume ancestor for {path}")
+        current = parent
+    return current
+
+
+def _volume_identity(path: Path) -> tuple[str, int]:
+    existing = _nearest_existing(path)
+    anchor = existing.anchor.casefold() if os.name == "nt" else ""
+    return anchor, os.stat(existing, follow_symlinks=False).st_dev
+
+
+def _transaction_state_directory(repo: Path) -> Path:
+    try:
+        owner = Path(run_git(repo, "rev-parse", "--absolute-git-dir").strip())
+    except NovaError:
+        owner = _absolute_path(repo)
+    state = owner / TRANSACTION_DIRECTORY
+    if state.exists() and (_is_reparse_point(state) or not state.is_dir()):
+        raise NovaError(f"invalid Nova Review transaction state directory: {state}")
+    return state
+
+
+def _transaction_paths(repo: Path) -> tuple[Path, Path, Path]:
+    state = _transaction_state_directory(repo)
+    return state, state / "journal.json", state / "commit.json"
+
+
+def _write_fsynced(path: Path, content: bytes, *, exclusive: bool = True) -> None:
+    flags = os.O_WRONLY | os.O_CREAT
+    flags |= os.O_EXCL if exclusive else os.O_TRUNC
+    flags |= getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        view = memoryview(content)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("failed to write Nova Review transaction file")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
+    content = (
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    ).encode("utf-8")
+    temporary = path.with_name(f".{path.name}.{os.getpid()}-{secrets.token_hex(6)}")
+    _write_fsynced(temporary, content)
+    try:
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _read_transaction_json(path: Path, label: str) -> dict[str, Any] | None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    try:
+        value = json.loads(content)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise NovaError(f"invalid Nova Review {label}: {path}") from exc
+    if not isinstance(value, dict):
+        raise NovaError(f"invalid Nova Review {label}: {path}")
+    return value
+
+
+def _transaction_digest(transaction_id: str, entries: list[dict[str, Any]]) -> str:
+    stable = {
+        "schema": TRANSACTION_SCHEMA,
+        "transaction_id": transaction_id,
+        "entries": [
+            {
+                "path": entry["path"],
+                "expected_sha256": entry["expected_sha256"],
+                "content_sha256": entry["content_sha256"],
+                "existed": entry["existed"],
+                "new_file": entry["new_file"],
+                "backup_file": entry["backup_file"],
+            }
+            for entry in entries
+        ],
+    }
+    encoded = json.dumps(stable, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _transaction_fault(phase: str, step: int | None = None) -> None:
+    """Fault-injection seam used by deterministic crash-recovery tests."""
+
+
+def _validated_transaction(repo: Path) -> tuple[Path, Path, Path, dict[str, Any] | None, dict[str, Any] | None]:
+    state, journal_path, marker_path = _transaction_paths(repo)
+    journal = _read_transaction_json(journal_path, "transaction journal")
+    marker = _read_transaction_json(marker_path, "transaction commit marker")
+    if journal is None:
+        if marker is not None:
+            raise NovaError("orphaned Nova Review transaction commit marker")
+        return state, journal_path, marker_path, None, None
+    if journal.get("schema") != TRANSACTION_SCHEMA:
+        raise NovaError("unsupported Nova Review transaction journal schema")
+    transaction_id = journal.get("transaction_id")
+    phase = journal.get("phase")
+    entries = journal.get("entries")
+    digest = journal.get("digest")
+    if (
+        not isinstance(transaction_id, str)
+        or re.fullmatch(r"[0-9a-f]{32}", transaction_id) is None
+        or phase not in TRANSACTION_PHASES
+        or not isinstance(entries, list)
+        or not entries
+        or not isinstance(digest, str)
+    ):
+        raise NovaError("invalid Nova Review transaction journal fields")
+    required = {
+        "path",
+        "expected_sha256",
+        "content_sha256",
+        "existed",
+        "new_file",
+        "backup_file",
+    }
+    seen_paths: set[str] = set()
+    for sequence, entry in enumerate(entries):
+        if not isinstance(entry, dict) or set(entry) != required:
+            raise NovaError("invalid Nova Review transaction entry")
+        if (
+            not isinstance(entry["path"], str)
+            or not entry["path"]
+            or entry["path"] in seen_paths
+            or not isinstance(entry["existed"], bool)
+        ):
+            raise NovaError("invalid Nova Review transaction entry fields")
+        seen_paths.add(entry["path"])
+        for key in ("expected_sha256", "content_sha256"):
+            value = entry[key]
+            if value is not None and not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise NovaError(f"invalid Nova Review transaction {key}")
+        if entry["existed"] != (entry["expected_sha256"] is not None):
+            raise NovaError("Nova Review transaction existence metadata mismatch")
+        for key in ("new_file", "backup_file"):
+            value = entry[key]
+            if value is not None and (
+                not isinstance(value, str)
+                or Path(value).name != value
+                or value in {".", ".."}
+            ):
+                raise NovaError(f"invalid Nova Review transaction {key}")
+        expected_new = f"{transaction_id}-{sequence}.new"
+        expected_backup = f"{transaction_id}-{sequence}.old" if entry["existed"] else None
+        if entry["new_file"] != expected_new or entry["backup_file"] != expected_backup:
+            raise NovaError("Nova Review transaction payload names do not match the journal")
+    if digest != _transaction_digest(transaction_id, entries):
+        raise NovaError("Nova Review transaction journal digest mismatch")
+    if marker is not None:
+        if phase not in {"COMMITTED", "CLEANED"}:
+            raise NovaError(f"invalid Nova Review transaction marker during {phase}")
+        if marker != {
+            "schema": TRANSACTION_SCHEMA,
+            "transaction_id": transaction_id,
+            "digest": digest,
+        }:
+            raise NovaError("Nova Review transaction commit marker mismatch")
+    return state, journal_path, marker_path, journal, marker
+
+
+def _entry_paths(repo: Path, state: Path, entry: dict[str, Any]) -> tuple[Path, Path, Path | None]:
+    relative = Path(entry["path"])
+    if relative.is_absolute() or ".." in relative.parts:
+        raise NovaError(f"invalid Nova Review transaction output path: {relative}")
+    target, _ = _secure_relative_path(repo, repo / relative, "transaction output")
+    new_file = state / entry["new_file"]
+    backup_file = state / entry["backup_file"] if entry["backup_file"] else None
+    return target, new_file, backup_file
+
+
+def _path_bytes(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _matches_digest(content: bytes | None, digest: str | None) -> bool:
+    if content is None:
+        return digest is None
+    return digest is not None and hashlib.sha256(content).hexdigest() == digest
+
+
+def _remove_if_present(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _move_without_overwrite(source: Path, target: Path) -> bool:
+    try:
+        os.link(source, target, follow_symlinks=False)
+    except FileExistsError:
+        return False
+    source.unlink()
+    return True
+
+
+def _cleanup_transaction_state(
+    state: Path,
+    journal_path: Path,
+    marker_path: Path,
+    entries: list[dict[str, Any]],
+) -> None:
+    allowed = {journal_path.name, marker_path.name}
+    for entry in entries:
+        allowed.add(entry["new_file"])
+        if entry["backup_file"]:
+            allowed.add(entry["backup_file"])
+    unexpected = [path for path in state.iterdir() if path.name not in allowed]
+    if unexpected:
+        raise NovaError(f"Nova Review transaction cleanup found unknown files: {unexpected[0]}")
+    for entry in entries:
+        _remove_if_present(state / entry["new_file"])
+        if entry["backup_file"]:
+            _remove_if_present(state / entry["backup_file"])
+    _remove_if_present(marker_path)
+    _remove_if_present(journal_path)
+    try:
+        state.rmdir()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise NovaError(f"Nova Review transaction cleanup left unknown files: {state}") from exc
+
+
+def _recover_portable_transaction(repo: Path) -> bool:
+    state, journal_path, marker_path, journal, marker = _validated_transaction(repo)
+    if journal is None:
+        if not state.exists():
+            return False
+        try:
+            state.rmdir()
+        except OSError as exc:
+            raise NovaError(
+                f"Nova Review transaction state lacks a recoverable journal: {state}"
+            ) from exc
+        return True
+    entries = journal["entries"]
+    committed = marker is not None or journal["phase"] == "CLEANED"
+    for entry in reversed(entries):
+        target, new_file, backup = _entry_paths(repo, state, entry)
+        current = _path_bytes(target)
+        if committed:
+            if not _matches_digest(current, entry["content_sha256"]):
+                raise NovaError(f"committed Nova Review output changed before recovery: {target}")
+            continue
+        quarantine = state / f"{new_file.name}.rollback"
+        parked = _path_bytes(quarantine)
+        if parked is not None:
+            if _matches_digest(parked, entry["content_sha256"]):
+                if not _matches_digest(current, entry["expected_sha256"]):
+                    if current is not None:
+                        raise NovaError(
+                            f"unknown Nova Review output blocks resumed rollback: {target}"
+                        )
+                    if entry["existed"]:
+                        if backup is None or not _matches_digest(
+                            _path_bytes(backup), entry["expected_sha256"]
+                        ):
+                            raise NovaError(
+                                f"Nova Review rollback backup is missing or corrupt: {target}"
+                            )
+                        if not _move_without_overwrite(backup, target):
+                            raise NovaError(
+                                f"concurrent Nova Review output blocks resumed rollback: {target}"
+                            )
+                _remove_if_present(quarantine)
+                current = _path_bytes(target)
+            else:
+                if current is None:
+                    _move_without_overwrite(quarantine, target)
+                raise NovaError(
+                    f"unknown content was preserved during Nova Review rollback: {quarantine}"
+                )
+        if _matches_digest(current, entry["expected_sha256"]):
+            continue
+        try:
+            os.rename(target, quarantine)
+        except FileNotFoundError:
+            current = None
+        else:
+            parked = _path_bytes(quarantine)
+            if not _matches_digest(parked, entry["content_sha256"]):
+                _move_without_overwrite(quarantine, target)
+                raise NovaError(f"unknown Nova Review output blocks rollback: {target}")
+            current = None
+        if entry["existed"]:
+            if backup is None or not _matches_digest(
+                _path_bytes(backup), entry["expected_sha256"]
+            ):
+                raise NovaError(f"Nova Review rollback backup is missing or corrupt: {target}")
+            if not _move_without_overwrite(backup, target):
+                raise NovaError(f"concurrent Nova Review output blocks rollback: {target}")
+        _remove_if_present(quarantine)
+    if not committed:
+        for entry in entries:
+            target, _, _ = _entry_paths(repo, state, entry)
+            if not _matches_digest(_path_bytes(target), entry["expected_sha256"]):
+                raise NovaError(f"Nova Review rollback verification failed: {target}")
+    _cleanup_transaction_state(state, journal_path, marker_path, entries)
+    return True
+
+
+def review_transaction_pending(repo: Path) -> bool:
+    state, _, _ = _transaction_paths(repo)
+    return state.exists()
+
+
+def assert_review_transaction_clean(repo: Path) -> None:
+    if review_transaction_pending(repo):
+        raise NovaError(
+            "unfinished Nova Review transaction requires recovery before audit reads"
+        )
+
+
+def recover_review_transaction(repo: Path, *, lock_held: bool = False) -> bool:
+    if not review_transaction_pending(repo):
+        return False
+    if lock_held:
+        return _recover_portable_transaction(repo)
+    with review_lock(repo):
+        return _recover_portable_transaction(repo)
+
+
+def _atomic_write_group_portable(
+    repo: Path,
+    updates: dict[Path, tuple[bytes | None, bytes]],
+    watched: dict[Path, bytes | None] | None = None,
+) -> None:
+    if not updates:
+        return
+    assert_review_transaction_clean(repo)
+    state, journal_path, marker_path = _transaction_paths(repo)
+    targets: list[tuple[Path, Path, bytes | None, bytes]] = []
+    for path, (expected, content) in sorted(updates.items(), key=lambda value: str(value[0])):
+        target, relative = _secure_relative_path(repo, path, "transaction output")
+        targets.append((target, relative, expected, content))
+    state_parent = _nearest_existing(state.parent)
+    state_volume = _volume_identity(state_parent)
+    for target, _, _, _ in targets:
+        if _volume_identity(target.parent) != state_volume:
+            raise NovaError(f"Nova Review transaction output crosses volumes: {target}")
+    for path, expected in sorted((watched or {}).items(), key=lambda value: str(value[0])):
+        target, _ = _secure_relative_path(repo, path, "validated source")
+        if _path_bytes(target) != expected:
+            raise NovaError(f"validated source changed before Review closure: {target}")
+
+    state.mkdir(mode=0o700)
+    if _is_reparse_point(state):
+        raise NovaError(f"invalid Nova Review transaction state directory: {state}")
+    transaction_id = uuid.uuid4().hex
+    entries: list[dict[str, Any]] = []
+    marker_written = False
+    try:
+        for sequence, (target, relative, expected, content) in enumerate(targets):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _secure_relative_path(repo, target, "transaction output")
+            current = _path_bytes(target)
+            if current != expected:
+                raise NovaError(f"source changed during Review closure: {target}")
+            new_name = f"{transaction_id}-{sequence}.new"
+            backup_name = f"{transaction_id}-{sequence}.old" if expected is not None else None
+            _write_fsynced(state / new_name, content)
+            if backup_name:
+                _write_fsynced(state / backup_name, expected)
+            entries.append(
+                {
+                    "path": relative.as_posix(),
+                    "expected_sha256": (
+                        hashlib.sha256(expected).hexdigest() if expected is not None else None
+                    ),
+                    "content_sha256": hashlib.sha256(content).hexdigest(),
+                    "existed": expected is not None,
+                    "new_file": new_name,
+                    "backup_file": backup_name,
+                }
+            )
+        digest = _transaction_digest(transaction_id, entries)
+        journal = {
+            "schema": TRANSACTION_SCHEMA,
+            "transaction_id": transaction_id,
+            "phase": "PREPARED",
+            "digest": digest,
+            "entries": entries,
+        }
+        _write_json_atomic(journal_path, journal)
+        _transaction_fault("PREPARED")
+        journal["phase"] = "APPLYING"
+        _write_json_atomic(journal_path, journal)
+        for path, expected in sorted((watched or {}).items(), key=lambda value: str(value[0])):
+            target, _ = _secure_relative_path(repo, path, "validated source")
+            if _path_bytes(target) != expected:
+                raise NovaError(
+                    f"validated source changed immediately before Review closure: {target}"
+                )
+        for sequence, (target, _, expected, content) in enumerate(targets):
+            _secure_relative_path(repo, target, "transaction output")
+            if _path_bytes(target) != expected:
+                raise NovaError(f"source changed immediately before Review closure: {target}")
+            new_file = state / entries[sequence]["new_file"]
+            if expected is None:
+                try:
+                    os.link(new_file, target, follow_symlinks=False)
+                except FileExistsError as exc:
+                    raise NovaError(f"source appeared during Review closure: {target}") from exc
+            else:
+                os.replace(new_file, target)
+            if _path_bytes(target) != content:
+                raise NovaError(f"published Nova Review output failed verification: {target}")
+            _transaction_fault("APPLYING", sequence + 1)
+        journal["phase"] = "COMMITTED"
+        _write_json_atomic(journal_path, journal)
+        _write_json_atomic(
+            marker_path,
+            {
+                "schema": TRANSACTION_SCHEMA,
+                "transaction_id": transaction_id,
+                "digest": digest,
+            },
+        )
+        marker_written = True
+        _transaction_fault("COMMITTED")
+        journal["phase"] = "CLEANED"
+        _write_json_atomic(journal_path, journal)
+        _transaction_fault("CLEANED")
+        _cleanup_transaction_state(state, journal_path, marker_path, entries)
+    except Exception:
+        if marker_written:
+            try:
+                journal["phase"] = "CLEANED"
+                _write_json_atomic(journal_path, journal)
+                _cleanup_transaction_state(state, journal_path, marker_path, entries)
+            except Exception:
+                pass
+            return
+        if not journal_path.exists():
+            for entry in entries:
+                _remove_if_present(state / entry["new_file"])
+                if entry["backup_file"]:
+                    _remove_if_present(state / entry["backup_file"])
+            try:
+                state.rmdir()
+            except OSError:
+                pass
+            raise
+        try:
+            _recover_portable_transaction(repo)
+        except Exception as recovery_error:
+            raise NovaError(
+                f"Nova Review closure failed and rollback requires recovery: {recovery_error}"
+            ) from recovery_error
+        raise
+
+
+def atomic_write_group(
+    repo: Path,
+    updates: dict[Path, tuple[bytes | None, bytes]],
+    watched: dict[Path, bytes | None] | None = None,
+) -> None:
+    if sys.platform.startswith("linux"):
+        _atomic_write_group_posix(repo, updates, watched)
+    else:
+        _atomic_write_group_portable(repo, updates, watched)
+
+
 @contextmanager
 def review_lock(repo: Path, timeout_seconds: float = 5.0) -> Iterable[None]:
     git_directory = Path(run_git(repo, "rev-parse", "--absolute-git-dir").strip())
     lock_path = git_directory / "nova-review.lock"
-    with lock_path.open("a+", encoding="utf-8") as handle:
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+            os.fsync(handle.fileno())
         deadline = time.monotonic() + timeout_seconds
         while True:
             try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except BlockingIOError:
+            except (BlockingIOError, OSError) as exc:
+                if isinstance(exc, OSError) and exc.errno not in {
+                    errno.EACCES,
+                    errno.EAGAIN,
+                    errno.EDEADLK,
+                }:
+                    raise
                 if time.monotonic() >= deadline:
                     raise NovaError("timed out waiting for Nova Review closure lock")
                 time.sleep(0.05)
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def query(repo: Path, work_item: str | None, year: int | None, month: int | None) -> dict[str, Any]:
+    assert_review_transaction_clean(repo)
     commits: list[dict[str, Any]] = []
     if work_item:
         if not valid_work_item(work_item):
@@ -4673,11 +5263,9 @@ def query(repo: Path, work_item: str | None, year: int | None, month: int | None
             ):
                 features.append(feature)
                 reviews.append(
-                    str(
-                        review_path_for_values(
-                            repo, completed_at, feature["review_batch"]
-                        ).relative_to(repo)
-                    )
+                    review_path_for_values(
+                        repo, completed_at, feature["review_batch"]
+                    ).relative_to(repo).as_posix()
                 )
     else:
         assert year is not None
@@ -4712,11 +5300,9 @@ def query(repo: Path, work_item: str | None, year: int | None, month: int | None
                         )
                     features.append(feature)
                     reviews.append(
-                        str(
-                            review_path_for_values(
-                                repo, completed_at, feature["review_batch"]
-                            ).relative_to(repo)
-                        )
+                        review_path_for_values(
+                            repo, completed_at, feature["review_batch"]
+                        ).relative_to(repo).as_posix()
                     )
     return {
         "work_item": work_item,
@@ -4894,11 +5480,13 @@ def main() -> int:
             manifest = load_manifest(args.manifest)
             if args.command == "record-pass":
                 with review_lock(repo):
+                    recover_review_transaction(repo, lock_held=True)
                     validated = validate_manifest(repo, manifest)
                     updates = build_updates(repo, validated)
                     if updates:
                         atomic_write_group(repo, updates, validated["snapshots"])
             else:
+                assert_review_transaction_clean(repo)
                 validated = validate_manifest(repo, manifest)
                 build_updates(repo, validated)
             print(

@@ -43,10 +43,10 @@ AI 结合已确认上下文发现候选做法时，只有准备把它作为已�
 存在真实差量并写入后运行：
 
 ```bash
-python3 ../nova-development/scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
-python3 scripts/validate_architecture.py /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
-python3 scripts/validate_architecture.py --ready /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
-python3 scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md
+python ../nova-development/scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
+python scripts/validate_architecture.py /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
+python scripts/validate_architecture.py --ready /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
+python scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md
 ```
 
 架构交付在提交前把需要项及对应契约标记为 `已确认`，确认依据写本次 `ARCH-*`。按提交契约生成 `arch(scope): 中文结果摘要` 和 architecture trailers，以完整 staged diff 运行仓库感知 `validate-message`；成功提交后再运行 `--ready`。`--ready` 从 Git 归属验证 ARCH、需求 checkpoint、索引行及其确认时看到的契约字节；工作树变化、未提交 ARCH、ARCH 后漂移、无关工作项或手填批次名均不能解锁。schema 1 的既有 PEND Review 架构证据仅作历史兼容。

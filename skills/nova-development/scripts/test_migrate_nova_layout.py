@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -61,14 +62,17 @@ class LayoutMigrationTests(unittest.TestCase):
             encoding="utf-8",
         )
         (repo / "tool.py").write_text('PATH = "docs/design/active.md"\n', encoding="utf-8")
-        (repo / "external-link").symlink_to(external)
+        try:
+            (repo / "external-link").symlink_to(external)
+        except OSError:
+            (repo / "external-link").write_text("symlink unavailable\n", encoding="utf-8")
         git(repo, "add", ".")
         git(repo, "commit", "-qm", "baseline")
         return repo, external
 
     def run_script(self, repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(SCRIPT), "--repo", str(repo), *args],
+            [sys.executable, str(SCRIPT), "--repo", str(repo), *args],
             text=True,
             capture_output=True,
             check=False,
@@ -109,7 +113,11 @@ class LayoutMigrationTests(unittest.TestCase):
     def test_mode_change_invalidates_approved_plan(self) -> None:
         repo, _ = self.make_repo()
         token, _ = self.approved_plan(repo)
+        before = stat.S_IMODE((repo / "PROJECT_BLUEPRINT.md").stat().st_mode)
         os.chmod(repo / "PROJECT_BLUEPRINT.md", 0o600)
+        after = stat.S_IMODE((repo / "PROJECT_BLUEPRINT.md").stat().st_mode)
+        if after == before:
+            self.skipTest("filesystem does not expose Unix mode changes")
         result = self.apply_approved(repo, token)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("approved plan mismatch", result.stderr)
@@ -180,6 +188,7 @@ class LayoutMigrationTests(unittest.TestCase):
     def test_partial_temp_write_failure_restores_bytes_modes_and_git_state(self) -> None:
         repo, _ = self.make_repo()
         os.chmod(repo / "tool.py", 0o600)
+        expected_mode = stat.S_IMODE((repo / "tool.py").stat().st_mode)
         moves, rewrites = MIGRATION.plan(repo)
         original_write_all = MIGRATION._write_all
         calls = 0
@@ -198,7 +207,9 @@ class LayoutMigrationTests(unittest.TestCase):
         self.assertTrue((repo / "PROJECT_BLUEPRINT.md").is_file())
         self.assertFalse((repo / ".nova").exists())
         self.assertEqual((repo / "tool.py").read_text(encoding="utf-8"), 'PATH = "docs/design/active.md"\n')
-        self.assertEqual(os.stat(repo / "tool.py").st_mode & 0o777, 0o600)
+        self.assertEqual(
+            stat.S_IMODE((repo / "tool.py").stat().st_mode), expected_mode
+        )
         status = subprocess.run(
             ["git", "-C", str(repo), "status", "--porcelain"],
             text=True,
@@ -260,7 +271,10 @@ class LayoutMigrationTests(unittest.TestCase):
         repo, _ = self.make_repo()
         outside = repo.parent / "outside-nova"
         outside.mkdir()
-        (repo / ".nova").symlink_to(outside, target_is_directory=True)
+        try:
+            (repo / ".nova").symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"symlink creation unavailable: {exc}")
         result = self.run_script(repo)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("target parent is a symlink", result.stderr)

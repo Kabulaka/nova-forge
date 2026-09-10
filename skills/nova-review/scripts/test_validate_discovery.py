@@ -22,7 +22,10 @@ class DiscoveryTests(unittest.TestCase):
         (workspace / "codex/AGENTS.global.md").write_text("# global\n", encoding="utf-8")
         (codex_home / "skills").mkdir(parents=True)
         (claude_home / "skills").mkdir(parents=True)
-        (codex_home / "AGENTS.md").symlink_to(workspace / "codex/AGENTS.global.md")
+        try:
+            (codex_home / "AGENTS.md").symlink_to(workspace / "codex/AGENTS.global.md")
+        except OSError as exc:
+            self.skipTest(f"symlink creation unavailable: {exc}")
         (claude_home / "CLAUDE.md").symlink_to(workspace / "codex/AGENTS.global.md")
         for name in (
             "nova-requirements",
