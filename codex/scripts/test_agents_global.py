@@ -61,6 +61,13 @@ class AgentsGlobalContractTests(unittest.TestCase):
         )
         self.assertIn("不得阻断更高优先级的明确选择", section)
 
+    def test_fix_defaults_to_exempt_and_keeps_explicit_review_available(self) -> None:
+        section = self._section("工作项与提交")
+
+        self.assertIn("Review-Policy: exempt", section)
+        self.assertIn("Exemption-Rule: EX-FIX", section)
+        self.assertIn("用户明确时用 required + none", section)
+
     def _section(self, title: str) -> str:
         marker = f"## {title}\n"
         self.assertIn(marker, AGENTS)

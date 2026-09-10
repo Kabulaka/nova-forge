@@ -534,7 +534,10 @@ def validate_completion_report(stage: str, text: str) -> list[str]:
         review = content_by_section.get("Review 状态", "")
         if re.search(r"\bPASS\b", review, re.IGNORECASE):
             errors.append("delivery report must not claim Review PASS")
-        if stage == "maintenance" and "exempt" in review:
+        if stage == "fix" and "exempt" in review:
+            if "EX-FIX" not in review or "不适用" not in review:
+                errors.append("exempt fix report must state EX-FIX and Review round 不适用")
+        elif stage == "maintenance" and "exempt" in review:
             if "不适用" not in review:
                 errors.append("exempt maintenance report must state Review round 不适用")
         elif not all(value in review for value in ("未 Review", "待Review", "不适用")):
@@ -870,24 +873,28 @@ def validate_metadata(
     exemption = values.get("Exemption-Rule", "")
     if policy not in {"required", "exempt"}:
         errors.append("Review-Policy must be required or exempt")
-    if change_class in {"designed", "adhoc", "feature", "patch", "fix"} and policy != "required":
+    if change_class in {"designed", "adhoc", "feature", "patch"} and policy != "required":
         errors.append(f"{change_class} changes always require Review")
     if policy == "required" and exemption != "none":
         errors.append("required Review must use Exemption-Rule: none")
     if policy == "exempt":
-        if change_class != "maintenance":
-            errors.append("only maintenance changes may be exempt")
-        if exemption not in {"EX-DOC", "EX-FORMAT"}:
-            errors.append("exempt maintenance requires an allowed EX-* rule")
-        if diff is None:
-            errors.append("exempt maintenance requires a complete diff")
-        elif exemption == "EX-DOC":
-            if not documentation_only_diff(diff):
-                errors.append(
-                    "EX-DOC permits only non-runtime documentation paths on both diff sides"
-                )
-        elif exemption == "EX-FORMAT" and not whitespace_only_diff(diff):
-            errors.append("EX-FORMAT requires a whitespace-only complete diff")
+        if change_class == "fix":
+            if exemption != "EX-FIX":
+                errors.append("exempt fix requires Exemption-Rule: EX-FIX")
+        elif change_class == "maintenance":
+            if exemption not in {"EX-DOC", "EX-FORMAT"}:
+                errors.append("exempt maintenance requires an allowed EX-* rule")
+            if diff is None:
+                errors.append("exempt maintenance requires a complete diff")
+            elif exemption == "EX-DOC":
+                if not documentation_only_diff(diff):
+                    errors.append(
+                        "EX-DOC permits only non-runtime documentation paths on both diff sides"
+                    )
+            elif exemption == "EX-FORMAT" and not whitespace_only_diff(diff):
+                errors.append("EX-FORMAT requires a whitespace-only complete diff")
+        else:
+            errors.append("only fix and maintenance changes may be exempt")
 
     if re.search(r"\(pass\)\s*$", values.get("Validation", ""), re.IGNORECASE) is None:
         errors.append("Validation must end with (pass)")

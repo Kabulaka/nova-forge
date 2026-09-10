@@ -47,6 +47,8 @@ class NovaReviewSkillContractTests(unittest.TestCase):
         self.assertIn("内部里程碑", COMMIT)
         self.assertIn("可信审计归档后编号永久封存", COMMIT)
         self.assertIn("Related-Work-Item", COMMIT)
+        self.assertIn("Exemption-Rule: EX-FIX", COMMIT)
+        self.assertIn("只有用户对该 FIX 明确要求 Review", COMMIT)
         self.assertIn("蓝图删除活动行不释放编号", AUDIT)
         self.assertIn("无法证明 PATCH/FIX/MAINT 边界时停止分类", COMMIT)
         self.assertIn("任何新入口都不得再生成 PEND", COMMIT)

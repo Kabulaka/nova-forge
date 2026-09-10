@@ -66,7 +66,7 @@
 2. 最低验收通过且无阻断后提交精确任务差异，不夹带历史修改，不提交未通过测试的代码。工作项已生成但尚未 Review、尚未对外共享的本地结果 commit，后续同范围修正优先重新校验并 amend 为同一个结果 commit；已对外共享、无法安全改写，或命中上一条真实里程碑例外时才追加同 ID commit，并在完成报告说明原因。
 3. 提交分类、稳定工作项、trailers 和客观豁免服从 `skills/nova-review/references/commit-contract.md`。schema 2 首行必须是 `type(scope): 中文结果摘要`；type 由提交种类确定，scope 只能取 `requirements / architecture / delivery / review / doctor / plugin / discovery / release` 中最能表示主要影响面的一个。可信审计归档后编号永久封存，后续变化重新分类建项；合法 `Review-Defer` 不复用当前编号。明确源于已归档 FEAT 或历史 PEND 的新 FIX 必须写 `Related-Work-Item`。
 4. 提交前使用仓库感知的 `validate-message --repo <根目录> --message-file ... --diff-file ...` 校验完整 staged diff、身份/分类映射、中文首行、scope、归档 ID 复用与来源关联；失败不得提交。
-5. 只有 `FEAT-*` 在最低验收后把既有设计工作包和蓝图条目置为 `待Review`；`PATCH-*`、`FIX-*`、`MAINT-*` 不创建蓝图条目或工作包。只有 `Review-Policy: required` 的提交由元数据进入待审集合；合法 exempt 的 `MAINT-*` 以豁免证据直接完成。
+5. 只有 `FEAT-*` 在最低验收后把既有设计工作包和蓝图条目置为 `待Review`；`PATCH-*`、`FIX-*`、`MAINT-*` 不创建蓝图条目或工作包。只有 `Review-Policy: required` 的提交由元数据进入待审集合；`FIX-*` 默认以 `Review-Policy: exempt` 与 `Exemption-Rule: EX-FIX` 直接完成，只有用户对具体 FIX 明确要求 Review 时才改用 required + none；合法 exempt 的 `MAINT-*` 仍以客观豁免证据直接完成。
 6. 默认不启动 Review。用户明确要求 Review 时才加载 `nova-review`；开发完成报告只写“未 Review / 待Review”或合法 `exempt`，不得把自检和测试称为 Review。Review 的 REJECT 修正不提交中间 commit，最终 PASS 的唯一 closure commit 由 `nova-review` 管理。
 7. 全局治理代表精确范围本地 Git commit 的持续授权；用户明确“不提交”只撤回当次授权。Git push、远程配置和 SVN commit 始终需要针对具体操作的独立授权。
 
@@ -102,7 +102,7 @@ Plan mode 只由用户手动启用，并追加以下约束：
 
 需求和架构阶段分别由对应技能填写；本技能按工作项的 `Change-Class` 选择 `feature / patch / fix / maintenance`，不得复用 FEAT 报告冒充其他分类。各交付报告至少写明：规范工作项与分类；实际行为结果；关键文件的新增/修改/删除及作用；测试命令、工作目录、结果、覆盖验收、证据是否复用和未验证项；本地 commit hash 与中文主题或未提交原因；精确提交范围；远程/SVN 是否执行；Review 策略与“未 Review/待Review”或 `exempt`；临时基线是否清理。FEAT 另写蓝图、设计工作包和交付台账投影。
 
-`FIX` 的“缺陷证据与恢复结果”必须同时给出既有契约或可复现偏离证据、修复前表现和恢复后结果；拿不出偏离证据时应重新分类为 PATCH。`PATCH` 必须说明主动调整边界及为何未新增能力或公共契约。`MAINT` 必须说明产品行为是否保持不变；exempt 时列客观 `EX-*` 规则和完整 diff 命中证据。
+`FIX` 的“缺陷证据与恢复结果”必须同时给出既有契约或可复现偏离证据、修复前表现和恢复后结果；拿不出偏离证据时应重新分类为 PATCH。默认免审 FIX 的 Review 状态必须写 `exempt`、`EX-FIX` 与轮次“不适用”；用户明确要求 Review 的 FIX 才写 required 和待 Review 状态。`PATCH` 必须说明主动调整边界及为何未新增能力或公共契约。`MAINT` 必须说明产品行为是否保持不变；exempt 时列客观 `EX-*` 规则和完整 diff 命中证据。
 
 发送报告前执行：
 

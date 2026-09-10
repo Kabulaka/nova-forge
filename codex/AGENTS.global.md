@@ -63,7 +63,7 @@
 
 - `feature` 使用 `FEAT-*`，`Design-Ref` 必须指向设计锚点，且需要 Review；
 - `patch` 使用 `PATCH-*`，`Design-Ref: none`，仅限不新增能力或公共契约的主动局部调整，仍需要 Review；
-- `fix` 使用 `FIX-*`，`Design-Ref: none`，必须有实现偏离既有契约的证据并恢复预期行为，仍需要 Review；
+- `fix` 使用 `FIX-*`，`Design-Ref: none`，须据证恢复偏离；默认 `Review-Policy: exempt`、`Exemption-Rule: EX-FIX`；用户明确时用 required + none；
 - `maintenance` 使用 `MAINT-*`，`Design-Ref: none`，默认需要 Review，只有客观白名单可豁免；
 - schema 1 历史 `PEND-*`、`designed / adhoc / maintenance` 及可信审计只读兼容；新入口不得创建 PEND；
 - 缺失、矛盾或无法证明的分类一律停止并重新路由，不得靠更宽泛分类掩盖语义。
@@ -75,7 +75,7 @@ schema 2 首行固定为 `type(scope): 中文结果摘要`，scope 仅限 `requi
 - 用户裸“开始 Review”只审当前会话 ready 且要求 Review 的工作项；显式编号可包含多个任务；只有“全部未审查项”才跨会话扩围。
 - 用户可随时要求先调试、暂停或取消，工作项保持未审状态，后续可补齐 Review。
 - Review 的自检、独立子代理、问题分级、证据复用、复审和关闭全部服从 `nova-review`，本文件不重复 SOP。
-- 正式 `FEAT-*` 在 Review PASS 前保留于蓝图并处于 `待Review`；PASS 后才关闭并写分片审计。`PATCH-*`、`FIX-*`、`MAINT-*` 不进入蓝图，通过提交元数据及 Review 记录发现待审状态。REJECT 轮次不产生 commit；最终 PASS 只产生一个包含全部 Review 修正、审计和投影关闭的 closure commit。
+- 正式 `FEAT-*` 在 Review PASS 前保留于蓝图并处于 `待Review`；PASS 后才关闭并写分片审计。`PATCH-*`、`FIX-*`、`MAINT-*` 不进入蓝图，仅 `Review-Policy: required` 的提交进入待审；`EX-FIX` 不生成 Review 审计。REJECT 轮次不产生 commit；最终 PASS 只产生一个包含全部 Review 修正、审计和投影关闭的 closure commit。
 
 ## Plan mode 与完成报告
 

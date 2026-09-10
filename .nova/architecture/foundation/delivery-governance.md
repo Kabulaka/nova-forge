@@ -15,7 +15,7 @@
 | `requirement` | `REQ-*`；`Nova-Schema: 2`、Requirement-Ref、路径、内容 SHA-256 与 Validation | 当前需求块、总体需求索引及其直接需要的总体业务段落 | 不进入人工 Review，不生成工作项审计 | 以 commit、逐字 Requirement-Ref 和需求块 SHA-256 保存确认基线 |
 | `architecture` | `ARCH-*`；`Nova-Schema: 2`、Architecture-Ref、Requirement-Ref 与 Validation | 只含本次真实共享架构差量及使契约可确定校验的直接治理更新 | 不进入交付工作项表；无差量时连编号、文件和提交都不创建 | 保存已确认的共享工程骨架、数据所有权、公共 API、事件或 Mock 差量 |
 | `delivery-plan` | `Nova-Schema: 2`、Requirement-Ref、可信需求三元组、Plan-Version 与 Validation | 当前需求版本台账、蓝图投影、必要的需求状态行及台账逐字绑定的设计 | 不进入人工 Review，不生成工作项审计 | 一次性登记完整 FEAT 列表和内部里程碑并进入开发中 |
-| `work-item` | `FEAT-* / PATCH-* / FIX-* / MAINT-*`；Change-Class、Design-Ref、Review-Policy、Exemption-Rule 与 Validation | 默认一个完整实现结果提交；只有台账中真实内部里程碑需要独立恢复点时才可追加同编号提交 | required 项实现后待Review；合法 MAINT 豁免直接完成 | 交付独立、内聚、可暂停和可验收的能力、局部调整、缺陷恢复或维护结果 |
+| `work-item` | `FEAT-* / PATCH-* / FIX-* / MAINT-*`；Change-Class、Design-Ref、Review-Policy、Exemption-Rule 与 Validation | 默认一个完整实现结果提交；只有台账中真实内部里程碑需要独立恢复点时才可追加同编号提交 | required 项实现后待Review；FIX 默认以 EX-FIX 免审，只有用户明确要求时进入 Review；合法 MAINT 豁免直接完成 | 交付独立、内聚、可暂停和可验收的能力、局部调整、缺陷恢复或维护结果 |
 | `review` | `Nova-Audit-Schema: 2`、Review-Batch、Manifest-SHA256、Review-Fix-SHA256 与 Validation | REJECT 轮次零提交；最终 PASS 将全部 Review 修正和确定性审计一次提交 | 一个 Review 批次只形成一个闭环提交；提交哈希不写入自身审计内容 | 关闭目标工作项并更新蓝图、设计、台账和需求聚合状态 |
 
 `Nova-Schema: 1` 与 `Nova-Audit-Schema: 1` 的不可变历史继续只读验证；仓库出现首个 schema 2 提交后，所有新提交必须使用 schema 2。`Commit-Kind` 缺失的历史提交继续按旧 Work-Item 规则读取。任何新提交都不得混合 checkpoint、work-item、review 或可变 `Review-State` 字段。

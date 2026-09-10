@@ -119,19 +119,20 @@ Validation: python3 tests/example.py (pass)
 
 - feature → FEAT，必须有 `.nova/design/*.md#anchor`，必须 Review；
 - patch → PATCH，`Design-Ref: none`，必须 Review；
-- fix → FIX，`Design-Ref: none`，必须 Review；
+- fix → FIX，`Design-Ref: none`，默认 `Review-Policy: exempt` 与 `Exemption-Rule: EX-FIX`；只有用户对该 FIX 明确要求 Review 时才使用 `required` 与 `none`；
 - maintenance → MAINT，`Design-Ref: none`，默认 Review。
 
 一个工作项默认形成一个完整实现结果 commit。FEAT 只有在台账预先登记多个具有独立恢复价值的内部里程碑，且全部既有 FEAT commit 已各自唯一绑定已完成里程碑、当前另有一个活动里程碑时，才可追加同编号提交；PATCH/FIX/MAINT 在 Review 前只允许一个结果 commit。普通继续修改优先在未 Review、未对外共享且 HEAD 是同一工作项时 amend，并在提交校验命令增加 `--amend`；不得按文件或修复轮次制造碎片。
 
-## 8. 维护豁免
+## 8. 免审规则
 
-只有 maintenance 可豁免：
+- `EX-FIX`：所有满足缺陷恢复定义的 schema 2 FIX 默认使用；它免除强制 Review，不免除可引用缺陷证据、正常/失败路径实现、测试、提交校验和完成报告。用户仍可对具体 FIX 明确启动 Review，此时改用 `Review-Policy: required` 与 `Exemption-Rule: none`；
+- maintenance 只有以下客观白名单可豁免：
 
 - `EX-DOC`：完整 diff 的新旧两侧都只是非运行时 `.md/.txt/.rst`，不含脚本、配置、依赖、测试、fixture、符号链接、Gitlink 或二进制；
 - `EX-FORMAT`：无新增、删除、重命名、模式或二进制变化，逐文件删除所有空白后内容完全相同。
 
-命中时使用 `Review-Policy: exempt` 和对应 Exemption-Rule；其他情况 required + none。代码注释、日志、拼写或“改动很小”不能主观豁免。
+FIX 默认使用 `Review-Policy: exempt` 与 `EX-FIX`；用户明确要求该 FIX Review 时使用 required + none。maintenance 命中白名单时使用 exempt 和对应规则，其他 maintenance 使用 required + none。代码注释、日志、拼写或“改动很小”不能让 PATCH、FEAT 或未命中白名单的 MAINT 主观豁免。
 
 ## 9. Review 单提交闭环
 

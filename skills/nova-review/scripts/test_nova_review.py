@@ -565,6 +565,26 @@ class NovaReviewTests(unittest.TestCase):
             cases = (
                 (message("PEND-001", "designed", ".nova/design/2026-08-27_x.md#wp-01-x"), None),
                 (message("FIX-001", "adhoc"), None),
+                (
+                    message(
+                        "FIX-019a1234-0001-7abc-8def-000000000001",
+                        "fix",
+                        policy="exempt",
+                        exemption="EX-FIX",
+                        schema="2",
+                        subject="fix(delivery): 恢复报告行为",
+                    ),
+                    doc_diff,
+                ),
+                (
+                    message(
+                        "FIX-019a1234-0002-7abc-8def-000000000002",
+                        "fix",
+                        schema="2",
+                        subject="fix(delivery): 恢复并明确要求审查",
+                    ),
+                    doc_diff,
+                ),
                 (message("MAINT-001", "maintenance"), None),
                 (message("MAINT-002", "maintenance", policy="exempt", exemption="EX-DOC"), doc_diff),
                 (message("MAINT-003", "maintenance", policy="exempt", exemption="EX-FORMAT"), format_diff),
@@ -1544,6 +1564,14 @@ class NovaReviewTests(unittest.TestCase):
                     self.assertEqual(
                         NOVA_TOOL.validate_completion_report(stage, exempt), []
                     )
+                if stage == "fix":
+                    exempt = report.replace(
+                        content["Review 状态"],
+                        "exempt：EX-FIX；Review 轮次：不适用",
+                    )
+                    self.assertEqual(
+                        NOVA_TOOL.validate_completion_report(stage, exempt), []
+                    )
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2057,6 +2085,14 @@ class NovaReviewTests(unittest.TestCase):
             cases = (
                 message("PEND-001", "designed", "none"),
                 message("FIX-001", "adhoc", policy="exempt", exemption="EX-DOC"),
+                message(
+                    "FIX-019a1234-0003-7abc-8def-000000000003",
+                    "fix",
+                    policy="exempt",
+                    exemption="EX-DOC",
+                    schema="2",
+                    subject="fix(delivery): 使用错误豁免规则",
+                ),
                 message("MAINT-001", "maintenance", policy="exempt", exemption="EX-DOC"),
                 message("MAINT-002", "maintenance") + "Review-State: PASS\n",
                 message("FIX-002", "adhoc").replace("Validation: python3 -m unittest (pass)", "Validation:"),
