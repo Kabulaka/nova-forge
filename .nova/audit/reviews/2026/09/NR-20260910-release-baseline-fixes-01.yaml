@@ -1,0 +1,57 @@
+{
+  "batch_id": "NR-20260910-release-baseline-fixes-01",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "fix",
+      "commits": [
+        {
+          "commit": "2bac3ad0a2b9b8522566dba7a719e15b11e987bd",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "Hook/limits 19/19; workflow 2/2; npm run check 73/73; Nova Doctor 12/12 (pass)",
+      "work_item": "FIX-01a0896e-205a-75af-bc75-73330fe8bd88"
+    },
+    {
+      "change_class": "fix",
+      "commits": [
+        {
+          "commit": "8ca49d4e9d203936ec8157a00629e6b3db84b9f8",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "report CLI 1; skill contract 5; nova-review 98 tests, 1 skipped; project 73/73; skill validators; Nova Doctor 12/12; staged diff check (pass)",
+      "work_item": "FIX-01a089c0-61da-7063-ba7b-34e355a0cf1e"
+    }
+  ],
+  "manifest_sha256": "9488dd3ce485d4c09cff0a036da268709bee8b869184f48def4b9067a6f6b036",
+  "review_content_sha256": "29e4b232a27fc22dbd48f3bf4df82fe6be5551ad0d6c5cdb8a476887b19ac716",
+  "review_fix_scope": [
+    "main:skills/nova-development/references/implementation-sop.md",
+    "main:skills/nova-review/scripts/nova_review.py",
+    "main:skills/nova-review/scripts/test_nova_review.py"
+  ],
+  "review_fix_sha256": "5e45a23e609c17f85d9601e66f0c9c1dbe499f69233bd7ad5de642b12bfd3abf",
+  "review_heads": {
+    "main": "8ca49d4e9d203936ec8157a00629e6b3db84b9f8"
+  },
+  "review_round": 2,
+  "review_scope": [
+    "main:hooks/run.mjs",
+    "main:runtime/core/util.mjs",
+    "main:runtime/mcp/server.mjs",
+    "main:skills/nova-development/references/implementation-sop.md",
+    "main:skills/nova-review/scripts/nova_review.py",
+    "main:skills/nova-review/scripts/test_nova_review.py",
+    "main:skills/nova-review/scripts/test_skill_contract.py",
+    "main:tests/workflow.test.mjs"
+  ],
+  "reviewed_at": "2026-09-10T13:54:17+08:00",
+  "reviewer": "/root/review_two_release_fixes",
+  "schema": 2
+}

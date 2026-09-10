@@ -465,6 +465,8 @@ def validate_completion_report(stage: str, text: str) -> list[str]:
     if title is None or expected_sections is None:
         return [f"unsupported report stage: {stage}"]
     errors: list[str] = []
+    if not text.endswith("\n"):
+        errors.append("completion report must end with a newline")
     level_two = re.findall(r"^##\s+(.+?)\s*$", text, re.MULTILINE)
     if level_two != [title]:
         errors.append(f"report title must be exactly: {title}")

@@ -1581,6 +1581,16 @@ class NovaReviewTests(unittest.TestCase):
             )
             self.assertEqual(emitted.returncode, 0, emitted.stderr)
             self.assertEqual(emitted.stdout, valid_report)
+            without_final_newline = valid_report.removesuffix("\n")
+            self.assertIn(
+                "completion report must end with a newline",
+                NOVA_TOOL.validate_completion_report(
+                    "review", without_final_newline
+                ),
+            )
+            concatenated = emitted.stdout + emitted.stdout
+            self.assertEqual(concatenated.count("## Review 完成报告"), 2)
+            self.assertIn("\n## Review 完成报告", concatenated)
 
     def test_architecture_report_distinguishes_nonzero_delta_and_one_arch_id(self) -> None:
         first = "ARCH-019a1234-0001-7abc-8def-000000000001"
