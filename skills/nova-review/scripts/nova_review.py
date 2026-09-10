@@ -4772,6 +4772,11 @@ def parser() -> argparse.ArgumentParser:
     validate_report = commands.add_parser("validate-report")
     validate_report.add_argument("--stage", choices=tuple(REPORT_TITLES), required=True)
     validate_report.add_argument("--report-file", type=Path, required=True)
+    validate_report.add_argument(
+        "--emit-report",
+        action="store_true",
+        help="write the validated report bytes to stdout instead of a PASS summary",
+    )
     return root
 
 
@@ -4787,11 +4792,15 @@ def main() -> int:
         elif args.command == "report-template":
             print(completion_report_template(args.stage), end="")
         elif args.command == "validate-report":
-            report = args.report_file.read_text(encoding="utf-8")
+            report_bytes = args.report_file.read_bytes()
+            report = report_bytes.decode("utf-8")
             errors = validate_completion_report(args.stage, report)
             if errors:
                 raise NovaError("; ".join(errors))
-            print(f"PASS: {args.stage} completion report")
+            if args.emit_report:
+                sys.stdout.buffer.write(report_bytes)
+            else:
+                print(f"PASS: {args.stage} completion report")
         elif args.command == "validate-message":
             message = args.message_file.read_text(encoding="utf-8")
             diff = args.diff_file.read_text(encoding="utf-8") if args.diff_file else None

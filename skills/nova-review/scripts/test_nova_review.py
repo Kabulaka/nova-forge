@@ -1553,10 +1553,34 @@ class NovaReviewTests(unittest.TestCase):
             path = root / "report.md"
             path.write_text(template.stdout, encoding="utf-8")
             invalid = self.run_tool(
-                "validate-report", "--stage", "review", "--report-file", str(path)
+                "validate-report",
+                "--stage",
+                "review",
+                "--report-file",
+                str(path),
+                "--emit-report",
             )
             self.assertNotEqual(invalid.returncode, 0)
+            self.assertEqual(invalid.stdout, "")
             self.assertIn("placeholder", invalid.stderr)
+
+            valid_report = report
+            path.write_text(valid_report, encoding="utf-8")
+            validated = self.run_tool(
+                "validate-report", "--stage", "review", "--report-file", str(path)
+            )
+            self.assertEqual(validated.returncode, 0, validated.stderr)
+            self.assertEqual(validated.stdout, "PASS: review completion report\n")
+            emitted = self.run_tool(
+                "validate-report",
+                "--stage",
+                "review",
+                "--report-file",
+                str(path),
+                "--emit-report",
+            )
+            self.assertEqual(emitted.returncode, 0, emitted.stderr)
+            self.assertEqual(emitted.stdout, valid_report)
 
     def test_architecture_report_distinguishes_nonzero_delta_and_one_arch_id(self) -> None:
         first = "ARCH-019a1234-0001-7abc-8def-000000000001"

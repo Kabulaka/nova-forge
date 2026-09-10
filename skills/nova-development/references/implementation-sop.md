@@ -108,7 +108,7 @@ Plan mode 只由用户手动启用，并追加以下约束：
 
 ```bash
 python3 skills/nova-review/scripts/nova_review.py report-template --stage <stage>
-python3 skills/nova-review/scripts/nova_review.py validate-report --stage <stage> --report-file /project/outside/temp-report.md
+python3 skills/nova-review/scripts/nova_review.py validate-report --stage <stage> --report-file /project/outside/temp-report.md --emit-report
 ```
 
-候选报告文件必须位于项目外，验证成功后清理。校验失败不得发送；不得省略章节，无事实时写清“无”或“不适用”及原因。“遗留与下一步”必须明确下一步动作；`required` 项未启动 Review 时只写“未 Review / 待Review”，轮次为“不适用”，不得把自检、测试或豁免表述为 Review PASS。
+候选报告文件必须位于项目外。`--emit-report` 校验成功后只向 stdout 原样输出候选报告；该输出是待发送的规范正文，不得重新概括、改写、删减章节或用项目符号摘要替代。单阶段完成时，最终回复必须完整、原样使用这份输出；同一轮完成多个阶段时，必须为每个阶段分别生成并校验候选报告，再按阶段实际发生顺序完整、原样拼接各份输出，不得以后一阶段报告覆盖前一阶段报告。校验失败不得发送；不得省略章节，无事实时写清“无”或“不适用”及原因。“遗留与下一步”必须明确下一步动作；`required` 项未启动 Review 时只写“未 Review / 待Review”，轮次为“不适用”，不得把自检、测试或豁免表述为 Review PASS。发送内容固定后清理项目外候选文件，并在对应报告中记录清理结果。
