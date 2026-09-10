@@ -12,8 +12,8 @@ description: 在用户明确要求 Review 时，按稳定工作项编号选择�
 先读取 [工作项与提交契约](references/commit-contract.md)，再用 `scripts/nova_review.py select` 得到候选：
 
 - 裸“开始 Review”：`current`，只取当前会话明确记录为 ready、且 `Review-Policy: required` 的编号；
-- 用户列出编号：`explicit`，只取所列 `FEAT-*`、`PATCH-*`、`FIX-*`、`MAINT-*` 或历史 `PEND-*`，允许多个；
-- 用户明确“全部未审查项”：`all`，才扫描全部带 Nova trailers 且尚无 Review 记录的提交。
+- 用户列出编号：`explicit`，只取所列 `FEAT-*`、`PATCH-*`、`FIX-*`、`MAINT-*` 或历史 `PEND-*`，允许多个；该模式可选择已提交未归档的 `exempt + EX-FIX` 并保留原实现元数据，其他 exempt 项仍不进入 Review；
+- 用户明确“全部未审查项”：`all`，才扫描全部带 Nova trailers、`Review-Policy: required` 且尚无 Review 记录的工作项。
 
 固定每项的编号、全部未审 required commit、设计引用、整体完成定义、内部里程碑状态、有效测试证据、未验证事项和工作副本差异。内部里程碑没有独立 Review 身份，不得单独选择或关闭；同一 FEAT 只有整体完成定义满足后才启动一次 Review。ARCH、requirement 和 delivery-plan checkpoint 永远不是 Review 工作项。SVN/Git 历史中不属于这些编号的旧改动不得纳入。选择为空时报告原因，不把空范围当 PASS。
 

@@ -29,6 +29,7 @@ class NovaReviewSkillContractTests(unittest.TestCase):
         self.assertIn("裸“开始 Review”", SKILL)
         self.assertIn("用户列出编号", SKILL)
         self.assertIn("用户明确“全部未审查项”", SKILL)
+        self.assertIn("`Review-Policy: required` 且尚无 Review 记录", SKILL)
         self.assertIn("历史中不属于这些编号的旧改动不得纳入", SKILL)
 
     def test_commit_contract_has_stable_identity_and_fail_closed_exemptions(self) -> None:
@@ -48,7 +49,12 @@ class NovaReviewSkillContractTests(unittest.TestCase):
         self.assertIn("可信审计归档后编号永久封存", COMMIT)
         self.assertIn("Related-Work-Item", COMMIT)
         self.assertIn("Exemption-Rule: EX-FIX", COMMIT)
-        self.assertIn("只有用户对该 FIX 明确要求 Review", COMMIT)
+        self.assertIn("实现提交前用户明确要求 Review", COMMIT)
+        self.assertIn("已提交未归档的 EX-FIX 可按编号显式 Review", COMMIT)
+        self.assertIn("PASS 后仍生成闭环审计", COMMIT)
+        self.assertIn("EX-FIX` 只免除强制 Review", IMPLEMENTATION)
+        self.assertIn("显式 Review 已提交未归档的 EX-FIX", AUDIT)
+        self.assertIn("不得遗漏或混入其他 exempt commit", AUDIT)
         self.assertIn("蓝图删除活动行不释放编号", AUDIT)
         self.assertIn("无法证明 PATCH/FIX/MAINT 边界时停止分类", COMMIT)
         self.assertIn("任何新入口都不得再生成 PEND", COMMIT)

@@ -114,9 +114,9 @@ AI 结合已确认上下文发现候选做法时，只有准备把它作为已�
 
 创建新工作项前先执行独立性检查：候选必须有完整可验收结果，并能独立排期、暂停、恢复、Review 或取消；若多个候选只有共同完成才有交付价值，或只是同一规模可控修改的流程阶段、实现步骤、文件、模块、技能、代理或提交批次，必须合并为一个工作项和内部里程碑。边界成立后再按提交契约确定分类，并调用 `skills/nova-review/scripts/nova_review.py new-id --class <分类>` 生成一次 UUIDv7 编号。编号一经进入蓝图或提交即固定，原范围开发、测试、里程碑推进和 Review 修复不得重新生成或替换；可信审计归档后编号永久封存。
 
-默认实施流程是编码、最低验收、记录有效测试证据和本地 Git commit。只有 `FEAT-*` 的设计工作包在最低验收后更新为 `待Review`；`PATCH-*`、`FIX-*`、`MAINT-*` 不创建蓝图条目或工作包。`Review-Policy: required` 的提交进入待审集合；`FIX-*` 默认以 `Review-Policy: exempt` 与 `Exemption-Rule: EX-FIX` 直接完成，只有用户对具体 FIX 明确要求 Review 时才改用 required + none；合法 exempt 的 `MAINT-*` 以客观豁免证据直接完成。全局治理中的持续授权使精确范围本地 commit 无需逐次询问，用户明确要求不提交时只撤回当次授权。不得自动启动 Review。正式 `FEAT-*` 在 Review PASS 前继续保留于蓝图，提交使用 `Change-Class: feature`、相同 `Work-Item` 和设计引用；用户测试后要求继续修改时，只有修正仍服务于原设计和验收才沿用同一编号。明确源于已归档 FEAT 或历史 PEND 的新 FIX 必须写 `Related-Work-Item` 并用仓库感知校验确认该来源可信；新 FEAT 以“演进来源”链接终态设计。push 和 SVN commit 必须另行授权。
+默认实施流程是编码、最低验收、记录有效测试证据和本地 Git commit。只有 `FEAT-*` 的设计工作包在最低验收后更新为 `待Review`；`PATCH-*`、`FIX-*`、`MAINT-*` 不创建蓝图条目或工作包。`Review-Policy: required` 的提交进入待审集合；`FIX-*` 默认以 `Review-Policy: exempt` 与 `Exemption-Rule: EX-FIX` 直接完成，实现提交前用户明确要求 Review 时才改用 required + none；已提交未归档的 EX-FIX 仍可按编号显式 Review，保留原实现元数据，且 PASS 后生成审计。合法 exempt 的 `MAINT-*` 以客观豁免证据直接完成。全局治理中的持续授权使精确范围本地 commit 无需逐次询问，用户明确要求不提交时只撤回当次授权。不得自动启动 Review。正式 `FEAT-*` 在 Review PASS 前继续保留于蓝图，提交使用 `Change-Class: feature`、相同 `Work-Item` 和设计引用；用户测试后要求继续修改时，只有修正仍服务于原设计和验收才沿用同一编号。明确源于已归档 FEAT 或历史 PEND 的新 FIX 必须写 `Related-Work-Item` 并用仓库感知校验确认该来源可信；新 FEAT 以“演进来源”链接终态设计。push 和 SVN commit 必须另行授权。
 
-用户明确要求 Review 时才加载 `nova-review`。Review 中断则保留 `待Review` 并返回调试；PASS 后由 `nova-review` 完成蓝图删除、设计终态和审计归档。Review-Defer、新增待办及无关蓝图变化不自动进入当前范围，也不得复用当前工作项；待审选择发现已归档编号承载新 commit 时必须在 Reviewer 启动前失败。
+用户明确要求 Review 时才加载 `nova-review`。Review 中断则保留 `待Review` 并返回调试；EX-FIX 保留既有免审实现状态。PASS 后由 `nova-review` 完成蓝图删除、设计终态和审计归档。Review-Defer、新增待办及无关蓝图变化不自动进入当前范围，也不得复用当前工作项；待审选择发现已归档编号承载新 commit 时必须在 Reviewer 启动前失败。
 
 ## 4. 形成文档
 

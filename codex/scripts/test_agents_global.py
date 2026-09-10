@@ -64,9 +64,11 @@ class AgentsGlobalContractTests(unittest.TestCase):
     def test_fix_defaults_to_exempt_and_keeps_explicit_review_available(self) -> None:
         section = self._section("工作项与提交")
 
-        self.assertIn("Review-Policy: exempt", section)
-        self.assertIn("Exemption-Rule: EX-FIX", section)
-        self.assertIn("用户明确时用 required + none", section)
+        self.assertIn("默认 exempt + EX-FIX", section)
+        self.assertIn("提交前指定 Review 用 required + none", section)
+        self.assertIn("已提交未归档 EX-FIX 可按编号 Review", section)
+        self.assertIn("current/all", self._section("人工 Review"))
+        self.assertIn("PASS 生成审计", self._section("人工 Review"))
 
     def _section(self, title: str) -> str:
         marker = f"## {title}\n"

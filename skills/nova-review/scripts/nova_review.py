@@ -1941,7 +1941,10 @@ def scan_commits(
             continue
         if not errors:
             diff = None
-            if values.get("Review-Policy") == "exempt":
+            if (
+                values.get("Review-Policy") == "exempt"
+                and values.get("Change-Class") == "maintenance"
+            ):
                 diff = run_git(repo, "show", "--format=", "--no-ext-diff", commit_hash)
             design_ref = values.get("Design-Ref", "")
             legacy_allowed = legacy_design_ref_allowed(repo, commit_hash, design_ref)
@@ -2061,6 +2064,36 @@ def review_fix_evidence(
             f"expected={sorted(paths)}; actual={sorted(actual_paths)}"
         )
     return hashlib.sha256(diff.encode("utf-8")).hexdigest(), paths, diff
+
+
+def forbidden_review_fix_paths(
+    review_fix_paths: Iterable[str],
+    reviewed_scope: Iterable[str],
+    reserved_paths: Iterable[str],
+) -> list[str]:
+    reviewed = set(reviewed_scope)
+    protected_authority = {
+        path
+        for path in review_fix_paths
+        if path in {
+            ".nova/PROJECT_BLUEPRINT.md",
+            ".nova/PRODUCT_REQUIREMENTS.md",
+            ".nova/SHARED_CAPABILITIES.md",
+        }
+        or path.startswith(
+            (
+                ".nova/design/",
+                ".nova/delivery/",
+                ".nova/requirements/",
+                ".nova/audit/",
+            )
+        )
+        or (
+            path.startswith(".nova/architecture/")
+            and f"main:{path}" not in reviewed
+        )
+    }
+    return sorted((set(review_fix_paths) & set(reserved_paths)) | protected_authority)
 
 
 def valid_commit_ref(value: Any) -> bool:
@@ -2362,7 +2395,7 @@ def validate_recorded_commits(
     repo: Path,
     review: dict[str, Any],
     revision: str,
-) -> None:
+) -> list[str]:
     reviewed_diffs: dict[tuple[str, str], str] = {}
     has_external = False
     for item in review["items"]:
@@ -2393,14 +2426,15 @@ def validate_recorded_commits(
                 )
             if errors:
                 raise NovaError(f"invalid reviewed commit {commit_hash}: " + "; ".join(errors))
-            expected = (work_item, item["change_class"], item["design_ref"], "required")
+            expected = (work_item, item["change_class"], item["design_ref"])
             actual = (
                 metadata.get("Work-Item"),
                 metadata.get("Change-Class"),
                 metadata.get("Design-Ref"),
-                metadata.get("Review-Policy"),
             )
-            if actual != expected:
+            if actual != expected or not reviewable_commit(
+                metadata, allow_exempt_fix=True
+            ):
                 raise NovaError(f"reviewed commit metadata mismatch for {commit_hash}")
             related_values.add(metadata.get("Related-Work-Item"))
             provided_main.add(commit_hash)
@@ -2410,7 +2444,7 @@ def validate_recorded_commits(
             raise NovaError(f"inconsistent Related-Work-Item across commits for {work_item}")
         related_work_item = next(iter(related_values), None)
 
-        required_main: set[str] = set()
+        reviewable_main: set[str] = set()
         history_entries = [
             entry
             for entry in scan_commits(repo, work_item, revision)
@@ -2426,7 +2460,7 @@ def validate_recorded_commits(
                 raise NovaError(
                     f"inconsistent Related-Work-Item across commits for {work_item}"
                 )
-            if metadata.get("Review-Policy") != "required":
+            if not reviewable_commit(metadata, allow_exempt_fix=True):
                 continue
             if (
                 metadata.get("Change-Class"),
@@ -2437,8 +2471,8 @@ def validate_recorded_commits(
                 item["design_ref"],
                 related_work_item,
             ):
-                raise NovaError(f"inconsistent required commit metadata for {work_item}")
-            required_main.add(entry["commit"])
+                raise NovaError(f"inconsistent reviewable commit metadata for {work_item}")
+            reviewable_main.add(entry["commit"])
         if (
             related_work_item is not None
             and load_completed_item(repo, related_work_item, revision=revision) is None
@@ -2446,11 +2480,11 @@ def validate_recorded_commits(
             raise NovaError(
                 f"Related-Work-Item is not a trusted archived FEAT or legacy PEND: {related_work_item}"
             )
-        if provided_main != required_main:
+        if provided_main != reviewable_main:
             raise NovaError(
                 f"audit commit coverage mismatch for {work_item}; "
-                f"missing={sorted(required_main - provided_main)}; "
-                f"extra={sorted(provided_main - required_main)}"
+                f"missing={sorted(reviewable_main - provided_main)}; "
+                f"extra={sorted(provided_main - reviewable_main)}"
             )
         boundary_errors = validate_committed_work_item_boundary(
             repo, work_item, history_entries, revision=revision
@@ -2471,6 +2505,7 @@ def validate_recorded_commits(
         digest, scope = compute_review_evidence(reviewed_diffs)
         if review["review_content_sha256"] != digest or review["review_scope"] != scope:
             raise NovaError("Review content evidence does not match the committed diffs")
+    return main_scope
 
 
 def expected_audit_snapshot(
@@ -2674,6 +2709,8 @@ def validate_audit_snapshot(
                 "Review start HEAD does not match the closure commit parent"
             )
 
+    recorded_main_scope = validate_recorded_commits(repo, review, revision)
+
     expected_bytes = expected_audit_snapshot(
         repo,
         review,
@@ -2692,6 +2729,16 @@ def validate_audit_snapshot(
             raise NovaError("Review fix digest does not match the closure diff")
         if values.get("Review-Fix-SHA256") != computed_fix_digest:
             raise NovaError("Review-Fix-SHA256 does not match Review record")
+        overlap = forbidden_review_fix_paths(
+            normalized_fix_paths,
+            recorded_main_scope,
+            expected_bytes,
+        )
+        if overlap:
+            raise NovaError(
+                "Review fixes must not overlap deterministic closure paths: "
+                + ", ".join(overlap)
+            )
     expected_changed = set(expected_bytes) | fix_paths
     if changed != expected_changed:
         raise NovaError(
@@ -2774,7 +2821,6 @@ def validate_audit_snapshot(
             continue
         if reader(path) is None:
             raise NovaError(f"audit snapshot lacks changed path: {path}")
-    validate_recorded_commits(repo, review, revision)
     return completed_items
 
 
@@ -2904,6 +2950,17 @@ def reviewed_commits(repo: Path, work_items: set[str] | None = None) -> set[str]
     return result
 
 
+def reviewable_commit(metadata: dict[str, str], *, allow_exempt_fix: bool) -> bool:
+    if metadata.get("Review-Policy") == "required":
+        return True
+    return (
+        allow_exempt_fix
+        and metadata.get("Review-Policy") == "exempt"
+        and metadata.get("Change-Class") == "fix"
+        and metadata.get("Exemption-Rule") == "EX-FIX"
+    )
+
+
 def select_pending(
     repo: Path,
     mode: str,
@@ -2939,7 +2996,9 @@ def select_pending(
             raise NovaError(
                 f"invalid trailers in {entry['commit']}: " + "; ".join(entry["errors"])
             )
-        if entry["commit"] in reviewed or metadata.get("Review-Policy") != "required":
+        if entry["commit"] in reviewed or not reviewable_commit(
+            metadata, allow_exempt_fix=mode == "explicit"
+        ):
             continue
         if load_completed_item(repo, work_item) is not None:
             raise NovaError(f"work item already archived: {work_item}")
@@ -2948,7 +3007,9 @@ def select_pending(
     if mode == "explicit":
         missing = explicit_items - grouped.keys()
         if missing:
-            raise NovaError("no unreviewed required commits for: " + ", ".join(sorted(missing)))
+            raise NovaError(
+                "no unreviewed reviewable commits for: " + ", ".join(sorted(missing))
+            )
 
     selected: list[dict[str, Any]] = []
     for work_item in sorted(grouped):
@@ -3402,8 +3463,8 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
             )
             if actual != expected:
                 raise NovaError(f"commit metadata mismatch for {commit_hash}")
-            if metadata.get("Review-Policy") != "required":
-                raise NovaError(f"manifest commit does not require Review: {commit_hash}")
+            if not reviewable_commit(metadata, allow_exempt_fix=True):
+                raise NovaError(f"manifest commit is not reviewable: {commit_hash}")
             related_values.add(metadata.get("Related-Work-Item"))
 
         if len(related_values) > 1:
@@ -3418,7 +3479,7 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         provided_commits = {
             (value["repository"], value["commit"]) for value in commit_refs
         }
-        required_commits: set[tuple[str, str]] = set()
+        reviewable_commits: set[tuple[str, str]] = set()
         for alias, commit_repo in repositories.items():
             repository_entries: list[dict[str, Any]] = []
             for entry in scan_commits(commit_repo, work_item):
@@ -3431,15 +3492,15 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                         f"invalid trailers in {entry['commit']}: "
                         + "; ".join(entry["errors"])
                     )
-                if metadata.get("Review-Policy") != "required":
+                if not reviewable_commit(metadata, allow_exempt_fix=True):
                     continue
                 if (
                     metadata.get("Change-Class"),
                     metadata.get("Design-Ref"),
                     metadata.get("Related-Work-Item"),
                 ) != (change_class, design_ref, related_work_item):
-                    raise NovaError(f"inconsistent required commit metadata for {work_item}")
-                required_commits.add((alias, entry["commit"]))
+                    raise NovaError(f"inconsistent reviewable commit metadata for {work_item}")
+                reviewable_commits.add((alias, entry["commit"]))
             boundary_errors = validate_committed_work_item_boundary(
                 commit_repo, work_item, repository_entries
             )
@@ -3448,9 +3509,9 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                     f"invalid result-commit boundary for {work_item} in {alias}: "
                     + "; ".join(boundary_errors)
                 )
-        if provided_commits != required_commits:
-            missing = sorted(required_commits - provided_commits)
-            extra = sorted(provided_commits - required_commits)
+        if provided_commits != reviewable_commits:
+            missing = sorted(reviewable_commits - provided_commits)
+            extra = sorted(provided_commits - reviewable_commits)
             raise NovaError(
                 f"manifest commit coverage mismatch for {work_item}; "
                 f"missing={missing}; extra={extra}"
@@ -3598,25 +3659,11 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                     reserved_paths.add(str(value.relative_to(repo)))
             if item["change_class"] in {"designed", "feature"}:
                 reserved_paths.add(".nova/PRODUCT_REQUIREMENTS.md")
-        protected_authority = sorted(
-            path
-            for path in review_fix_paths
-            if path in {
-                ".nova/PROJECT_BLUEPRINT.md",
-                ".nova/PRODUCT_REQUIREMENTS.md",
-                ".nova/SHARED_CAPABILITIES.md",
-            }
-            or path.startswith(
-                (
-                    ".nova/design/",
-                    ".nova/delivery/",
-                    ".nova/requirements/",
-                    ".nova/architecture/",
-                    ".nova/audit/",
-                )
-            )
+        overlap = forbidden_review_fix_paths(
+            review_fix_paths,
+            computed_scope,
+            reserved_paths,
         )
-        overlap = sorted((set(review_fix_paths) & reserved_paths) | set(protected_authority))
         if overlap:
             raise NovaError(
                 "Review fixes must not overlap deterministic closure paths: "
