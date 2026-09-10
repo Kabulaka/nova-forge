@@ -90,7 +90,8 @@ export function validateReleaseNotes({ root = scriptRoot, tag } = {}) {
   const structure = markdownStructure(notes);
   const requiredHeadings = ["Overview", "Highlights", "Installation", "Requirements", "Upgrade Notes"];
 
-  if (!notes.startsWith(`# Nova Forge ${releaseTag}\n`)) {
+  const expectedTitle = `# Nova Forge ${releaseTag}`;
+  if (!notes.startsWith(`${expectedTitle}\n`) && !notes.startsWith(`${expectedTitle}\r\n`)) {
     errors.push(`release notes must start with \"# Nova Forge ${releaseTag}\"`);
   }
   for (const heading of requiredHeadings) {

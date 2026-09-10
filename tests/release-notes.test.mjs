@@ -62,6 +62,19 @@ test("accepts a complete version-pinned release note", () => {
   }
 });
 
+test("accepts release notes checked out with CRLF line endings", () => {
+  const { root, notes } = fixture();
+  try {
+    fs.writeFileSync(
+      path.join(root, "docs", "release-notes", "v1.2.3.md"),
+      notes.replaceAll("\n", "\r\n"),
+    );
+    assert.deepEqual(validateReleaseNotes({ root, tag: "v1.2.3" }).errors, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects a tag that differs from package version", () => {
   const { root } = fixture();
   try {
