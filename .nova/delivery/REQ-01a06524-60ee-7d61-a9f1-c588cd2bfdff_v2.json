@@ -1,0 +1,44 @@
+{
+  "changes": [
+    {
+      "kind": "created",
+      "plan_version": 1,
+      "reason": "initial-plan-and-activation",
+      "work_items": [
+        "FEAT-01a08f23-5743-7912-953f-a1371d11807d"
+      ]
+    }
+  ],
+  "plan_version": 1,
+  "requirement_checkpoint": {
+    "commit": "f136c9b1ef6d792da497a10b79f9e60aca632b06",
+    "path": ".nova/requirements/REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff_Codex与Claude_Code插件分发及同会话压缩续接.md",
+    "sha256": "a9d788238bb3331fd05ce169a525c8d9727be39ce710882fe84071bfb60c5df5"
+  },
+  "requirement_ref": "REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff@v2",
+  "schema": 2,
+  "status": "development",
+  "work_items": [
+    {
+      "blocked_reason": null,
+      "change_reason": "initial-plan-and-activation",
+      "dependencies": [],
+      "design_ref": ".nova/design/2026-09-11_Nova插件状态自动初始化与迁移.md#wp-01-plugin-state-bootstrap-migration",
+      "done_definition": "默认或绝对覆盖状态根可自动初始化并真实验证写入，双宿主旧有效检查点按宿主非破坏迁移，Hook 与 MCP 不依赖插件缓存可写性且打包测试通过",
+      "milestones": [
+        {
+          "blocked_reason": null,
+          "done_definition": "状态根解析、bootstrap、迁移、双入口接入、兼容安装器、文档和自动化验收作为一个可 Review 结果交付",
+          "evidence": [],
+          "id": "M-01",
+          "state": "active",
+          "title": "插件状态自动初始化与迁移"
+        }
+      ],
+      "state": "active",
+      "supersedes": [],
+      "title": "Nova 插件状态自动初始化与迁移",
+      "work_item": "FEAT-01a08f23-5743-7912-953f-a1371d11807d"
+    }
+  ]
+}
