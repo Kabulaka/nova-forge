@@ -1,6 +1,6 @@
 {
   "name": "nova-forge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Nova workflow skills and fail-closed same-session compaction recovery for Codex.",
   "author": {
     "name": "Nova Forge contributors",

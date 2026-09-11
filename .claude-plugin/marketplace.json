@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Versioned Nova workflow plugins",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "plugins": [
     {
@@ -13,10 +13,10 @@
       "source": {
         "source": "github",
         "repo": "Kabulaka/nova-forge",
-        "ref": "v0.1.0"
+        "ref": "v0.2.0"
       },
       "description": "Nova workflows with local same-session compaction recovery.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "Nova Forge contributors"
       },
