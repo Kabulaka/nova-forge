@@ -40,11 +40,13 @@
 |----------|-------|-------------|----------|
 | 会话启动或恢复 | `SessionStart` 的 `startup`、`resume` | `SessionStart` 的 `startup`、`resume` | 从宿主事件建立不可由模型选择的当前会话作用域；加载静态规则，且仅 `resume` 查询该作用域检查点并记录 `injectedGeneration` |
 | 输入与工具事件 | `UserPromptSubmit`、`PostToolUse` | `UserPromptSubmit`、`PostToolUse` | 不分析自然语言，按可信宿主事件递增 `eventWatermark` 并置 dirty；检查点 MCP 自身事件不重复置 dirty |
-| 回合结束 | `Stop` | `Stop` | dirty 未被当前检查点覆盖时阻止结束并要求 AI 调用结构化 MCP；重复阻断不推进水位 |
-| 压缩前 | `PreCompact` 的 `manual`、`auto` | `PreCompact` 的 `manual`、`auto` | 只有检查点 `coveredEventWatermark` 等于当前水位且 dirty=false 时，才冻结 `attemptId + generation + watermark`；否则阻断并显式报错 |
-| 压缩完成 | `PostCompact` | `PostCompact` | 必须匹配已冻结 attempt，记录 completed generation/watermark；不把宿主压缩摘要提升为权威状态，错配或重复冲突即失败封闭 |
-| 压缩后续接 | `SessionStart` 的 `compact` | `SessionStart` 的 `compact` | 必须匹配已完成 attempt，在下一模型请求前注入同一 generation 的有界胶囊并原子记录 `injectedGeneration`；缺少完成记录时停止安全续接 |
+| 回合结束 | `Stop` | `Stop` | dirty 未被当前检查点覆盖时报告降级但放行宿主回答；不得依赖 Stop 阻断后由 AI 自救，也不得把旧代冒充最新权威 |
+| 压缩前 | `PreCompact` 的 `manual`、`auto` | `PreCompact` 的 `manual`、`auto` | 只有检查点 `coveredEventWatermark` 等于当前水位且 dirty=false 时才冻结 `attemptId + generation + watermark`；缺失、未覆盖或状态故障时不冻结 Nova authority，报告降级并放行宿主原生压缩 |
+| 压缩完成 | `PostCompact` | `PostCompact` | 匹配已冻结 attempt 时记录 completed generation/watermark；无冻结、错配或重复冲突时不得提升宿主摘要或写入 `injectedGeneration`，但必须放行宿主完成压缩 |
+| 压缩后续接 | `SessionStart` 的 `compact` | `SessionStart` 的 `compact` | 匹配已完成 attempt 时注入同一 generation 的有界胶囊并原子记录 `injectedGeneration`；缺少有效完成记录时只注入静态规则和降级上下文，不得阻断宿主会话 |
 | 权威状态变化 | AI 调用插件 MCP 工具 | AI 调用插件 MCP 工具 | 工具使用隐式可信作用域，以明确字段和 authority 类型绑定当前 `eventWatermark` 创建新 authority generation；持久化成功后才清除 dirty |
+
+生命周期 Hook 遵循“宿主可用性放行、checkpoint 权威性失败封闭”：首次安装、从无检查点版本升级、老会话恢复、MCP 不可用、状态根不可写、状态缺失/损坏/schema 不兼容或 Hook 输入异常，均不得通过非零退出、`continue:false` 或 `decision:block` 锁死普通对话与原生压缩；失败时只允许注入静态规则、无权威恢复提示或可见诊断，任何无效状态仍不得成为恢复 authority。
 
 ### 2.3 发现入口权威、迁移与回退
 

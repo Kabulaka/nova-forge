@@ -7,8 +7,8 @@
 
 | 门禁 | 是否需要 | 状态 | 确认依据 |
 |------|----------|------|-------------|
-| 共享工程骨架 | 是 | 已确认 | ARCH-01a08f0a-d52f-76bc-a12a-65798f12e02e |
-| 数据所有权与契约 | 是 | 已确认 | ARCH-01a08f0a-d52f-76bc-a12a-65798f12e02e |
+| 共享工程骨架 | 是 | 已确认 | ARCH-01a0911a-d22d-7220-826f-4cc801422f77 |
+| 数据所有权与契约 | 是 | 已确认 | ARCH-01a0911a-d22d-7220-826f-4cc801422f77 |
 | 公共 API 契约 | 否 | 不适用 | 无 |
 | 事件契约 | 否 | 不适用 | 无 |
 | Mock 与测试夹具 | 否 | 不适用 | 无 |
@@ -19,8 +19,8 @@
 |----------|----------|------|------|--------|
 | 工程骨架 | Nova 三阶段访谈 | [访谈治理工程骨架](foundation/interview-governance.md) | 已确认 | 工作区治理 |
 | 数据 | 委托、证据、候选与确认状态 | [访谈决策状态契约](data/interview-decision-state.md) | 已确认 | 访谈治理 |
-| 工程骨架 | Codex 与 Claude Code 插件分发、状态初始化及同会话续接 | [双宿主插件工程骨架](foundation/dual-host-plugin.md) | 已确认 | 插件运行时 |
-| 数据 | 用户私有根中的双宿主隔离检查点 | [会话检查点数据契约](data/session-checkpoint.md) | 已确认 | 状态核心 |
+| 工程骨架 | Codex 与 Claude Code 插件分发、状态初始化、异常降级及同会话续接 | [双宿主插件工程骨架](foundation/dual-host-plugin.md) | 已确认 | 插件运行时 |
+| 数据 | 用户私有根中的双宿主隔离检查点与无权威降级 | [会话检查点数据契约](data/session-checkpoint.md) | 已确认 | 状态核心 |
 | 工程骨架 | 需求确认、分类提交、阶段报告、开发交接与跨平台 Review 关闭 | [交付治理工程骨架](foundation/delivery-governance.md) | 已确认 | 交付治理 |
 | 数据 | 每个需求版本的 FEAT、内部里程碑和聚合进度 | [需求交付台账数据契约](data/requirement-delivery-ledger.md) | 已确认 | 交付治理 |
 

@@ -173,7 +173,7 @@ flowchart LR
 | C-23 | `package.json.version` 是 SemVer 单一来源，双 manifest、双 marketplace 和构建产物必须一致；主分支只运行 CI，只有维护者人工创建匹配的 `vX.Y.Z` 标签才允许正式 GitHub 发布 | 版本失配、错误标签、主分支无发布、三平台打包和产物校验和测试 |
 | C-24 | AI 只通过绑定宿主适配器可信当前会话作用域的最小本地 MCP，以显式字段和 authority 类型写入权威检查点；检查点只是会话内权威状态的持久化投影，`taskCapsule` 必须无损保存并恢复含 inheritedContracts、stageEvidence、stageDecisions、unresolvedDeltas、resolutionBasis 的完整 stageProjection；工具不接受 host/sessionId 参数，Hook、transcript 和压缩摘要不得推断、补齐或提升正式决定 | 作用域缺失/错配/重放、MCP schema、五字段映射与恢复、resolutionBasis 保留、authority 隔离、候选提升拒绝与 transcript/summary 污染负例 |
 | C-25 | 检查点位于默认 `~/.nova` 或绝对 `NOVA_HOME`，先按宿主再按绑定宿主与会话的摘要隔离；使用 schema、单调 authorityGeneration、独立 leaseVersion、SHA-256、原子 envelope 和单个最后有效备份；可信活动后保留 30 天，不保存秘密，不存于插件缓存且不跨会话、宿主、设备或团队继承 | 默认/覆盖路径、读写/租约/清理并发、双宿主同项目、时钟回拨、损坏、回退、TTL、秘密扫描、缓存升级和隔离矩阵测试 |
-| C-26 | 双宿主可信输入/工具事件递增 eventWatermark 并置 dirty，MCP 成功覆盖当前水位后才清除；`Stop` 和 `PreCompact` 阻断漏写或旧代，`PreCompact → PostCompact → SessionStart(compact)` 以 attempt/generation/watermark 握手后注入，resume 只允许同作用域最近有效代 | 漏写、旧/未来水位、dirty、手动/自动压缩、错序/缺失/重复事件、恢复、阻断和降级负例 |
+| C-26 | 双宿主可信输入/工具事件递增 eventWatermark 并置 dirty，MCP 成功覆盖当前水位后才清除；`Stop`、`PreCompact`、`PostCompact` 与 `SessionStart` 对缺失、未覆盖、损坏或错序状态停止 Nova authority 提升并报告降级，但始终放行宿主回答、原生压缩和续接；只有完整 `PreCompact → PostCompact → SessionStart(compact)` attempt/generation/watermark 握手才注入压缩恢复胶囊，resume 也只允许同作用域最近有效代 | 漏写、旧/未来水位、dirty、首次安装、旧版升级、MCP/状态根故障、手动/自动压缩、错序/缺失/重复事件、无权威降级和正常恢复正反用例 |
 | C-27 | 首版运行时固定 Node.js 22.5+、ESM 和标准库，插件不得自动安装 Node.js 或 Bun；Ubuntu、macOS、Windows 均须通过单元、打包和真实路径/引号兼容检查后才可发布 | 三平台 Actions、缺失/低版本运行时、路径空格、Windows 分隔符和无外部依赖检查 |
 | C-28 | MCP frame、检查点字段/集合/嵌套/总字节、每宿主会话数与磁盘、全局磁盘均有确定上限；超限在解析、规范化、哈希或临时写入的对应最早阶段拒绝，只清理已过期未锁定作用域，未过期状态不因配额被静默逐出 | 边界值、超限、30 天内大量会话、备份放大、配额清理顺序与零临时文件负例 |
 | C-29 | Codex 与 Claude Code 的用户级全局规则入口解析到同一份工作区权威规则；插件安装或启用前必须原子移除该宿主兼容软链接，禁用、卸载或故障恢复只能在插件退出后原子恢复链接并新开会话；所有切换先完成全目标预检，规范入口和旧别名软链接只解除链接本身，普通文件或真实目录一律拒绝覆盖或清理，任一失败恢复切换前状态且不得遗留双入口 | 隔离用户目录中的插件启用/禁用/卸载、兼容恢复、首次安装、重复安装、正常与失效软链接、旧别名清理、普通文件、真实目录、中途失败回滚及链接解析测试 |
@@ -254,10 +254,10 @@ flowchart LR
 | 人工 Review 拒绝或中断 | 主代理 | 按 `nova-review` 统一修复并复审，或保留未审状态返回调试；不自动关闭待办 |
 | 旧布局迁移 | `nova-development` 迁移器 | 冲突或校验失败时零写入；成功后只保留 `.nova/` 实体，旧路径由确定性映射解析 |
 | 语义边界检查点写入 | 状态核心 | 临时文件完整同步后原子替换；失败保留最后有效代并立即暴露，用户无需手工保存 |
-| 回合新鲜度 | 双宿主输入/工具与 `Stop` 适配器 | 可信事件递增水位并置 dirty；检查点未覆盖当前水位时阻断回合结束，重复阻断不推进水位 |
-| 压缩前检查 | 双宿主 `PreCompact` 适配器 | 只接受覆盖当前水位且 dirty=false 的结构化检查点并冻结 attempt；否则阻断，不从 transcript 补写 |
-| 压缩后核验 | 双宿主 `PostCompact` 适配器 | 匹配冻结 attempt 并记录完成 generation/watermark，不把压缩摘要作为权威状态；错序或不一致时失败封闭 |
-| 压缩或会话恢复 | 双宿主 `SessionStart` 适配器 | compact 必须匹配已完成 attempt 后注入并记录同代；resume 只为可信同作用域注入最近有效胶囊；缺失时停止安全声明 |
+| 回合新鲜度 | 双宿主输入/工具与 `Stop` 适配器 | 可信事件递增水位并置 dirty；检查点未覆盖时不提升旧代、报告降级并放行回合结束，不依赖阻断后由模型自救 |
+| 压缩前检查 | 双宿主 `PreCompact` 适配器 | 只为覆盖当前水位且 dirty=false 的结构化检查点冻结 attempt；否则不建立 Nova authority、报告降级并放行宿主原生压缩，不从 transcript 补写 |
+| 压缩后核验 | 双宿主 `PostCompact` 适配器 | 匹配冻结 attempt 时记录完成 generation/watermark；错序或不一致时不提升压缩摘要、报告降级并放行宿主完成压缩 |
+| 压缩或会话恢复 | 双宿主 `SessionStart` 适配器 | compact 只有匹配已完成 attempt 才注入并记录同代，resume 只注入可信同作用域最近有效胶囊；首次安装、升级旧会话、缺失/损坏/未覆盖时只注入静态规则和无权威降级上下文，不阻断宿主续接 |
 | 过期状态 | 状态核心清理器 | 最后活动后保留 30 天；清理跳过正在写入的隔离键，重复执行幂等 |
 | 运行时缺失 | 宿主适配器 | 明确提示 Node.js 22.5+ 要求并停用动态能力，不自动安装 Node.js 或 Bun |
 | 状态根初始化或迁移 | 状态核心 | 兼容安装器尽力预建，首次 Hook 与 MCP 初始化前幂等补建并验证真实写入；旧状态按宿主验证后非破坏性迁移，中断保留原根；目标不可写或冲突时报告路径和 `NOVA_HOME`，不静默回退或宣称续接可用 |

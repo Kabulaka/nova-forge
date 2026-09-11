@@ -21,13 +21,13 @@
 | pluginVersion | SemVer | 记录写入方版本，不替代 schema 兼容判断 | 插件升级后仍须通过 schema 兼容校验 |
 | scopeBinding | 宿主适配器从 Hook 公共输入建立的只读当前 host、sessionId 摘要和随机能力 | MCP 进程实例只服务该绑定，写入/查询参数不接受 host 或 sessionId；缺失、错配、重放能力一律拒绝 | 新会话必须建立新能力；能力不落入检查点、日志或模型上下文 |
 | host、sessionId | `codex` 或 `claude-code`；可信绑定中宿主原始会话 ID 的不可逆摘要 | 二者共同构成隔离键，原始会话 ID 不进入文件名 | 不允许跨 host 或 sessionId 回退查找 |
-| eventWatermark、coveredEventWatermark、dirty | 宿主事件单调水位、检查点覆盖水位、布尔值 | `UserPromptSubmit` 与除本插件 MCP 外的 `PostToolUse` 只递增事件水位并置 dirty；检查点持久化成功且覆盖当前水位后才清除 dirty | 漏写、旧水位或未来水位检查点均不得通过 `Stop` 或 `PreCompact` |
+| eventWatermark、coveredEventWatermark、dirty | 宿主事件单调水位、检查点覆盖水位、布尔值 | `UserPromptSubmit` 与除本插件 MCP 外的 `PostToolUse` 只递增事件水位并置 dirty；检查点持久化成功且覆盖当前水位后才清除 dirty | 漏写、旧水位或未来水位检查点均不得成为 Stop 后或压缩后的恢复 authority；宿主回答与原生压缩仍须放行 |
 | authorityGeneration | 单调递增正整数 | 只在权威 taskCapsule 改变时递增；同一隔离键只有更高 authority generation 可替换权威状态 | 重复提交相同幂等键、payload 和覆盖水位返回既有代 |
 | leaseVersion、lastActivityAt、expiresAt | 独立单调租约版本和 UTC 时间戳 | 可信 `SessionStart` 或成功检查点写入刷新租约；普通 MCP 查询不刷新；`lastActivityAt=max(旧值, 当前时钟)`，`expiresAt=lastActivityAt+30天` | 同 authority generation 只允许更高 leaseVersion 原子替换；时钟回拨不得缩短保留期 |
 | authorityState | `user-confirmed`、`delegated-ai-candidate`、`verified-evidence`、`explicitly-excluded`、`pending` | 每项状态保留来源类别，候选与 pending 不得作为确认项注入 | 新类别需要 schema 升级和正反用例 |
 | taskCapsule | 目标、阶段、确认决定、排除、委托范围、当前问题、未决差量、`stageProjection`、活动交付范围、证据、文件与提交状态、下一动作 | 必填集合通过 schema 校验；`stageProjection` 必须按下表从同一权威快照生成，空数组与未知不能互相替代 | 缺失必填字段或无法无损重建完整 `stageProjection` 使整代无效，不用默认值猜测 |
 | controlDocuments | 绝对路径、SHA-256、加载状态 | 不保存正文；路径与指纹共同决定是否复用已有理解 | 指纹变化时只标记需精确重载受影响文档 |
-| compactionHandshake | attemptId、frozenGeneration、frozenWatermark、completedGeneration、injectedGeneration | `PreCompact` 冻结，`PostCompact` 完成，`SessionStart(compact)` 注入并记录；三者必须同作用域且 generation/watermark 相等 | 重复同事件幂等，错序、缺失或冲突事件停止安全续接 |
+| compactionHandshake | attemptId、frozenGeneration、frozenWatermark、completedGeneration、injectedGeneration | 有覆盖检查点时由 `PreCompact` 冻结、`PostCompact` 完成、`SessionStart(compact)` 注入并记录；三者必须同作用域且 generation/watermark 相等 | 重复同事件幂等；错序、缺失或冲突事件停止 Nova authority 续接并降级为无权威上下文，但不停止宿主原生续接 |
 | resourceLimits | JSON-RPC frame 320 KiB；规范化 checkpoint payload 256 KiB；字符串 8 KiB；每数组 128 项；嵌套深度 4；每宿主 512 MiB/2000 会话，全局 1 GiB | frame 超限在完整读取/JSON 解析前终止；字段和 payload 超限在规范化、哈希、临时文件前拒绝；当前代与备份均计入配额 | 先清理过期且未加锁作用域；未过期状态不逐出，仍不足则拒绝新写入或新会话 |
 | checksum | 覆盖规范化 authority、租约及握手 envelope 的 SHA-256 | 写入完成前计算，读取不一致则拒绝该 envelope | 算法变化需要 schema 升级 |
 | secretScan | 禁止字段名、令牌形态和调用方显式敏感标记 | 命中即拒绝整次写入且不产生新代 | 规则更新不追溯解密或上传历史状态 |
@@ -63,13 +63,13 @@
 | 失败点 | 对外结果 | 恢复或补偿 | 责任方 |
 |--------|----------|------------|--------|
 | Node.js 22.5+ 不可用 | 插件明确报告运行时缺失，自动检查点与恢复不生效 | 用户自行安装受支持运行时后重新启用；插件不安装 Node.js 或 Bun | 宿主适配器 |
-| 状态根为空、相对、越界或无法真实写入 | Hook 与 MCP 在读取或注册会话前报告规范化目标路径和 `NOVA_HOME` 恢复方向，不宣称动态能力生效 | 修正绝对覆盖或目录权限后重新启用；不得静默切换项目目录、临时目录或插件缓存 | 状态核心 bootstrap |
+| 状态根为空、相对、越界或无法真实写入 | Hook 报告降级并放行宿主，MCP 明确拒绝状态操作；二者均报告规范化目标路径和 `NOVA_HOME` 恢复方向，不宣称动态能力生效 | 修正绝对覆盖或目录权限后重试；不得静默切换项目目录、临时目录或插件缓存 | 状态核心 bootstrap |
 | 旧根迁移损坏、中断或目标冲突 | 当前宿主迁移不提交权威切换，目标未完成内容不可读，原根保持完整 | 修复冲突后幂等重试；只复制通过 schema、校验和、宿主及会话作用域验证的状态 | 状态核心迁移器 |
 | 作用域绑定缺失、错配或能力重放 | MCP 在读取任何其他会话状态前拒绝调用并记录无敏感值诊断 | 由当前宿主 `SessionStart` 重建新能力；不得接受模型提供的替代键 | 宿主适配器与 MCP |
-| 边界漏写、旧水位或 dirty 未清除 | `Stop` 与 `PreCompact` 阻断，报告未覆盖水位 | AI 以当前可信水位重新提交完整结构化 taskCapsule；不得复用旧代冒充最新 | 宿主适配器 |
+| 边界漏写、旧水位或 dirty 未清除 | `Stop` 报告降级并放行回答；`PreCompact` 不冻结 Nova authority、报告降级并放行宿主原生压缩 | AI 可在后续可用时以当前可信水位重新提交完整结构化 taskCapsule；不得依赖阻断自救，不得复用旧代冒充最新 | 宿主适配器 |
 | frame、字段、payload、会话数或磁盘配额超限 | 在对应分配阶段前确定性拒绝且不创建临时文件 | 只清理过期未锁定作用域；仍不足时保持旧有效代并要求缩减当前 payload 或释放明确范围 | MCP 与状态核心 |
-| 写入、同步、替换、租约或秘密扫描失败 | MCP 写入失败且 Hook 可观察；不清除 dirty、不推进 current 指针 | 保留最近有效 envelope；没有覆盖当前水位的有效代时 `PreCompact` 阻止不安全压缩 | 状态核心 |
+| 写入、同步、替换、租约或秘密扫描失败 | MCP 写入失败且 Hook 可观察；不清除 dirty、不推进 current 指针；Hook 不阻断宿主回答或原生压缩 | 保留最近有效 envelope；没有覆盖当前水位的有效代时不建立或注入 Nova compaction authority，只使用无权威恢复上下文 | 状态核心 |
 | 当前代损坏 | 拒绝当前代并记录校验失败 | 仅在备份同宿主、同会话、未过期且校验通过时恢复 | 状态核心 |
 | 检查点缺失、过期、schema 不兼容或 `stageProjection` 不可完整重建 | 不注入权威状态，不宣称安全恢复 | 从当前会话与工作区事实定向恢复；仍缺失时只询问具体差量，禁止以默认值补齐五字段或提升 authorityState | 恢复流程 |
 | `SessionStart` 注入超限 | 不截断单个权威字段后伪装完整 | 按固定优先级生成有界胶囊并显式列出未注入字段定位，必要时阻止推进 | 状态核心 |
-| 压缩握手错序、缺失或 generation/watermark 不一致 | 显式报告连续性核验失败，不写 `injectedGeneration` | 停止把续接视为安全，重新查询当前作用域最近有效代并只恢复差量 | 宿主适配器 |
+| 压缩握手错序、缺失或 generation/watermark 不一致 | 显式报告 Nova 连续性核验失败，不写 `injectedGeneration`，但放行宿主续接 | 停止把 Nova checkpoint 续接视为权威，只注入静态规则和降级上下文；后续可从当前可见事实创建新检查点 | 宿主适配器 |
