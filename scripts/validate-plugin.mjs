@@ -98,6 +98,12 @@ requireValue(
 );
 
 for (const name of skillNames) {
+  const rootAlias = path.join(root, name);
+  requireValue(
+    fs.lstatSync(rootAlias, { throwIfNoEntry: false }) === undefined,
+    `legacy root skill alias must be absent: ${name}`,
+    errors,
+  );
   const skillFile = path.join(root, "skills", name, "SKILL.md");
   requireValue(fs.existsSync(skillFile), `missing skill ${name}`, errors);
   if (fs.existsSync(skillFile)) {
