@@ -37,7 +37,7 @@ description: 通过单问题访谈把绿地项目或新的业务需求收敛为�
 
 - 总体契约固定为 `.nova/PRODUCT_REQUIREMENTS.md`，新建时严格使用 [总体需求模板](assets/PRODUCT_REQUIREMENTS.template.md)。
 - 每个需求块固定为 `.nova/requirements/REQ-<uuidv7>_具体名称.md`，新建时严格使用 [需求块模板](assets/REQUIREMENT_BLOCK.template.md)。
-- 新 Key 用 `python3 ../nova-review/scripts/nova_review.py new-requirement-id` 生成；Key 永久不变，需求块原地更新完整定义并递增版本，不创建日期副本或差量文档。
+- 新 Key 用 `python ../nova-review/scripts/nova_review.py new-requirement-id` 生成；Key 永久不变，需求块原地更新完整定义并递增版本，不创建日期副本或差量文档。
 - 状态只允许 `待实现 / 开发中 / 已实现 / 已更新`。新需求为待实现；完整 delivery-plan 检查点成功后进入开发中；全部有效开发任务可信 PASS 后才为已实现；已实现需求的业务定义改变后为已更新。开发中时“已实现版本”和“实现依据”保留上一完整实现或同时为“无”，不得把当前未完成版本写成已实现。
 - 普通规则调整只更新目标需求块和索引；只有总体流程、业务模块或项目范围改变时才更新总体章节。
 
@@ -46,8 +46,8 @@ description: 通过单问题访谈把绿地项目或新的业务需求收敛为�
 写入后运行：
 
 ```bash
-python3 scripts/validate_requirements.py --index /absolute/path/to/.nova/PRODUCT_REQUIREMENTS.md
-python3 scripts/validate_requirements.py --block /absolute/path/to/.nova/requirements/REQ-..._name.md
+python scripts/validate_requirements.py --index /absolute/path/to/.nova/PRODUCT_REQUIREMENTS.md
+python scripts/validate_requirements.py --block /absolute/path/to/.nova/requirements/REQ-..._name.md
 ```
 
 需求确认同时授权在上述校验通过后立即创建精确范围本地 requirement 检查点，不等待架构或开发。提交前按 `../nova-review/references/commit-contract.md` 的 requirement 契约生成 trailers，并用 `../nova-review/scripts/nova_review.py validate-message --repo ... --message-file ... --diff-file ...` 校验完整 staged diff；任一步失败不得提交或进入下游阶段。检查点不进入人工 Review，Git push、远程配置和 SVN commit 仍须独立授权。

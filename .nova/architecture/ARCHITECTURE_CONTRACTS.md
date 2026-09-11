@@ -7,7 +7,7 @@
 
 | 门禁 | 是否需要 | 状态 | 确认依据 |
 |------|----------|------|-------------|
-| 共享工程骨架 | 是 | 已确认 | ARCH-01a06b7b-567e-7f64-8159-d3cdb619525b |
+| 共享工程骨架 | 是 | 已确认 | ARCH-01a08b14-f0d5-75c7-bd17-53c3ece7548b |
 | 数据所有权与契约 | 是 | 已确认 | ARCH-01a06b7b-567e-7f64-8159-d3cdb619525b |
 | 公共 API 契约 | 否 | 不适用 | 无 |
 | 事件契约 | 否 | 不适用 | 无 |
@@ -21,7 +21,7 @@
 | 数据 | 委托、证据、候选与确认状态 | [访谈决策状态契约](data/interview-decision-state.md) | 已确认 | 访谈治理 |
 | 工程骨架 | Codex 与 Claude Code 插件分发及同会话续接 | [双宿主插件工程骨架](foundation/dual-host-plugin.md) | 已确认 | 插件运行时 |
 | 数据 | 本机同宿主同会话检查点 | [会话检查点数据契约](data/session-checkpoint.md) | 已确认 | 状态核心 |
-| 工程骨架 | 需求确认、分类提交、阶段报告、开发与 Review 交接 | [交付治理工程骨架](foundation/delivery-governance.md) | 已确认 | 交付治理 |
+| 工程骨架 | 需求确认、分类提交、阶段报告、开发交接与跨平台 Review 关闭 | [交付治理工程骨架](foundation/delivery-governance.md) | 已确认 | 交付治理 |
 | 数据 | 每个需求版本的 FEAT、内部里程碑和聚合进度 | [需求交付台账数据契约](data/requirement-delivery-ledger.md) | 已确认 | 交付治理 |
 
 ## 3. 硬依赖

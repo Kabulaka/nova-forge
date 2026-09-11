@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -89,6 +90,88 @@ class NovaReviewTests(unittest.TestCase):
             ["git", "-C", str(root), "config", "user.email", "nova@example.invalid"],
             check=True,
         )
+
+    def test_module_import_does_not_require_fcntl(self) -> None:
+        code = textwrap.dedent(
+            """
+            import builtins
+            import importlib.util
+            import sys
+
+            original = builtins.__import__
+            def guarded(name, *args, **kwargs):
+                if name == "fcntl":
+                    raise ImportError("fcntl unavailable")
+                return original(name, *args, **kwargs)
+            builtins.__import__ = guarded
+            spec = importlib.util.spec_from_file_location("nova_review_no_fcntl", sys.argv[1])
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(TOOL)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_canonical_delivery_accepts_only_clean_crlf_checkout_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            relative = ".nova/delivery/REQ-example_v1.json"
+            path = repo / relative
+            path.parent.mkdir(parents=True)
+            canonical = NOVA_TOOL.canonical_delivery_ledger({"value": 1})
+            (repo / ".gitattributes").write_text(
+                ".nova/delivery/*.json text\n", encoding="utf-8"
+            )
+            path.write_bytes(canonical)
+            subprocess.run(
+                ["git", "-C", str(repo), "add", ".gitattributes", relative], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-qm", "fixture"], check=True
+            )
+
+            crlf = canonical.replace(b"\n", b"\r\n")
+            path.write_bytes(crlf)
+            clean = subprocess.run(
+                ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
+                check=False,
+            )
+            self.assertEqual(clean.returncode, 0)
+            self.assertTrue(
+                NOVA_TOOL.worktree_bytes_are_canonical_projection(
+                    repo, relative, crlf, canonical
+                )
+            )
+
+            path.write_bytes(crlf.replace(b'"value": 1', b'"value": 2'))
+            self.assertFalse(
+                NOVA_TOOL.worktree_bytes_are_canonical_projection(
+                    repo, relative, path.read_bytes(), canonical
+                )
+            )
+
+            (repo / ".gitattributes").write_text(
+                ".nova/delivery/*.json -text\n", encoding="utf-8"
+            )
+            path.write_bytes(crlf)
+            subprocess.run(
+                ["git", "-C", str(repo), "add", ".gitattributes", relative], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-qm", "noncanonical fixture"],
+                check=True,
+            )
+            self.assertFalse(
+                NOVA_TOOL.worktree_bytes_are_canonical_projection(
+                    repo, relative, crlf, canonical
+                )
+            )
 
     def commit(self, repo: Path, relative: str, content: str, commit_message: str) -> str:
         path = repo / relative
@@ -538,6 +621,143 @@ class NovaReviewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.commit_audit(repo, manifest)
         return commit_hash
+
+    def test_native_path_end_to_end_manifest_record_commit_and_query(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "团队 Windows 审计仓库"
+            repo.mkdir()
+            self.init_repo(repo)
+            work_item = "FIX-001"
+            implementation = self.commit(
+                repo, "修复 文件.py", "fixed\n", message(work_item, "adhoc")
+            )
+            manifest = {
+                "schema": 1,
+                "batch_id": "NR-20260910-native-path",
+                "reviewed_at": "2026-09-10T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": work_item,
+                        "change_class": "adhoc",
+                        "commits": [implementation],
+                        "validation": "python -m unittest (pass)",
+                        "design_ref": "none",
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "审查 manifest.json"
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+            )
+            checked = self.run_tool(
+                "check-manifest", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            self.commit_audit(repo, manifest)
+            queried = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertEqual(queried.returncode, 0, queried.stderr)
+            result = json.loads(queried.stdout)
+            self.assertEqual(result["features"][0]["work_item"], work_item)
+            self.assertFalse(NOVA_TOOL.review_transaction_pending(repo))
+
+    def test_record_pass_recovers_interrupted_portable_transaction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "portable recovery repo"
+            repo.mkdir()
+            self.init_repo(repo)
+            work_item = "FIX-001"
+            implementation = self.commit(
+                repo, "fix.py", "fixed\n", message(work_item, "adhoc")
+            )
+            manifest = {
+                "schema": 1,
+                "batch_id": "NR-20260910-portable-recovery",
+                "reviewed_at": "2026-09-10T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": work_item,
+                        "change_class": "adhoc",
+                        "commits": [implementation],
+                        "validation": "python -m unittest (pass)",
+                        "design_ref": "none",
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            child = textwrap.dedent(
+                """
+                import importlib.util
+                import os
+                import sys
+
+                spec = importlib.util.spec_from_file_location("nova_review_portable_cli", sys.argv[1])
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                tool, repo, manifest, crash = sys.argv[1:]
+                module.sys.platform = "darwin"
+                if crash == "yes":
+                    def kill(phase, step=None):
+                        if phase == "APPLYING" and step == 1:
+                            os._exit(91)
+                    module._transaction_fault = kill
+                sys.argv = [tool, "record-pass", "--repo", repo, "--manifest", manifest]
+                raise SystemExit(module.main())
+                """
+            )
+            interrupted = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    child,
+                    str(TOOL),
+                    str(repo),
+                    str(manifest_path),
+                    "yes",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(interrupted.returncode, 91, interrupted.stderr)
+            blocked = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("requires recovery", blocked.stderr)
+            recovered = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    child,
+                    str(TOOL),
+                    str(repo),
+                    str(manifest_path),
+                    "no",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+            self.assertFalse(NOVA_TOOL.review_transaction_pending(repo))
+            self.commit_audit(repo, manifest)
+            queried = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertEqual(queried.returncode, 0, queried.stderr)
 
     def test_valid_classes_and_objective_exemptions(self) -> None:
         doc_diff = textwrap.dedent(
@@ -1122,6 +1342,7 @@ class NovaReviewTests(unittest.TestCase):
             ("patch", ".nova/PROJECT_BLUEPRINT.md"),
             ("fix", ".nova/design/injected.md"),
             ("maintenance", ".nova/delivery/injected.json"),
+            ("fix", ".nova/architecture/injected.md"),
         )
         for change_class, protected_path in cases:
             with self.subTest(change_class=change_class, protected_path=protected_path), tempfile.TemporaryDirectory() as directory:
@@ -1180,6 +1401,171 @@ class NovaReviewTests(unittest.TestCase):
                 )
                 self.assertNotEqual(rejected.returncode, 0)
                 self.assertIn("deterministic closure paths", rejected.stderr)
+
+    def test_review_fix_can_correct_reviewed_architecture_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            work_item = NOVA_TOOL.new_work_item("fix")
+            architecture_path = ".nova/architecture/foundation/delivery.md"
+            implementation = self.commit(
+                repo,
+                architecture_path,
+                "implemented\n",
+                message(
+                    work_item,
+                    "fix",
+                    schema="2",
+                    subject="fix(delivery): 修复交付治理契约",
+                ),
+            )
+            manifest: dict[str, object] = {
+                "schema": 2,
+                "batch_id": "NR-20260904-reviewed-architecture",
+                "reviewed_at": "2026-09-04T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": work_item,
+                        "change_class": "fix",
+                        "commits": [implementation],
+                        "validation": "reviewed architecture fixture (pass)",
+                        "design_ref": "none",
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, manifest)
+            (repo / architecture_path).write_text("review-corrected\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "add", architecture_path], check=True
+            )
+            fix_scope = [f"main:{architecture_path}"]
+            fix_digest, _, _ = NOVA_TOOL.review_fix_evidence(repo, fix_scope)
+            manifest["review_fix_scope"] = fix_scope
+            manifest["review_fix_sha256"] = fix_digest
+            manifest_path = repo / "review.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            checked = self.run_tool(
+                "check-manifest", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            self.commit_audit(repo, manifest)
+            queried = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertEqual(queried.returncode, 0, queried.stdout + queried.stderr)
+
+    def test_audit_reconstruction_rejects_injected_architecture_fix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            work_item = NOVA_TOOL.new_work_item("fix")
+            implementation = self.commit(
+                repo,
+                "src/value.txt",
+                "implemented\n",
+                message(
+                    work_item,
+                    "fix",
+                    schema="2",
+                    subject="fix(delivery): 修复局部交付结果",
+                ),
+            )
+            manifest: dict[str, object] = {
+                "schema": 2,
+                "batch_id": "NR-20260904-forged-architecture",
+                "reviewed_at": "2026-09-04T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": work_item,
+                        "change_class": "fix",
+                        "commits": [implementation],
+                        "validation": "forged architecture fixture (pass)",
+                        "design_ref": "none",
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+
+            injected_path = ".nova/architecture/injected.md"
+            target = repo / injected_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("injected\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", injected_path], check=True)
+            fix_scope = [f"main:{injected_path}"]
+            fix_digest, _, _ = NOVA_TOOL.review_fix_evidence(repo, fix_scope)
+            manifest["review_fix_scope"] = fix_scope
+            manifest["review_fix_sha256"] = fix_digest
+            manifest_digest = NOVA_TOOL.hashlib.sha256(
+                NOVA_TOOL.canonical_manifest(manifest)
+            ).hexdigest()
+            review_path = NOVA_TOOL.review_path_for_values(
+                repo,
+                NOVA_TOOL.parse_reviewed_at(manifest["reviewed_at"], "reviewed_at"),
+                str(manifest["batch_id"]),
+            )
+            review_record = json.loads(review_path.read_text(encoding="utf-8"))
+            review_record["review_fix_scope"] = fix_scope
+            review_record["review_fix_sha256"] = fix_digest
+            review_record["manifest_sha256"] = manifest_digest
+            review_path.write_text(
+                json.dumps(review_record, ensure_ascii=False, indent=2, sort_keys=True)
+                + "\n",
+                encoding="utf-8",
+            )
+            reviewed_at = NOVA_TOOL.parse_reviewed_at(
+                manifest["reviewed_at"], "reviewed_at"
+            )
+            audit_paths = [
+                injected_path,
+                str(review_path.relative_to(repo)),
+                str(NOVA_TOOL.feature_path(repo, reviewed_at).relative_to(repo)),
+                str(NOVA_TOOL.feature_index_path(repo, work_item).relative_to(repo)),
+            ]
+            subprocess.run(
+                ["git", "-C", str(repo), "add", "--", *audit_paths], check=True
+            )
+            audit_message = (
+                f"review(review): 完成 {manifest['batch_id']} 审查闭环\n\n"
+                "Nova-Audit-Schema: 2\n"
+                f"Review-Batch: {manifest['batch_id']}\n"
+                f"Manifest-SHA256: {manifest_digest}\n"
+                f"Review-Fix-SHA256: {fix_digest}\n"
+                "Validation: forged audit fixture (pass)\n"
+            )
+            diff = NOVA_TOOL.run_git(
+                repo, "diff", "--cached", "--binary", "--no-ext-diff"
+            )
+            _, errors = NOVA_TOOL.validate_audit_message(repo, audit_message, diff)
+            self.assertTrue(
+                any("deterministic closure paths" in error for error in errors), errors
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-q", "-F", "-"],
+                input=audit_message,
+                text=True,
+                check=True,
+            )
+            queried = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertNotEqual(queried.returncode, 0)
+            self.assertIn("deterministic closure paths", queried.stderr)
 
     def test_review_round_accepts_only_integer_one_through_three(self) -> None:
         base = {
@@ -2381,7 +2767,7 @@ class NovaReviewTests(unittest.TestCase):
                 "FIX-002",
             )
             self.assertNotEqual(explicit.returncode, 0)
-            self.assertIn("no unreviewed required commits for: FIX-001", explicit.stderr)
+            self.assertIn("no unreviewed reviewable commits for: FIX-001", explicit.stderr)
 
             explicit = self.run_tool(
                 "select", "--repo", str(repo), "--mode", "explicit",
@@ -2399,6 +2785,215 @@ class NovaReviewTests(unittest.TestCase):
                 [item["work_item"] for item in json.loads(all_items.stdout)],
                 ["FIX-002", "FIX-003", "MAINT-002", "PEND-001"],
             )
+
+    def test_explicit_review_accepts_exempt_schema_2_fix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            work_item = NOVA_TOOL.new_work_item("fix")
+            commit_hash = self.commit(
+                repo,
+                "fix.py",
+                "fixed\n",
+                message(
+                    work_item,
+                    "fix",
+                    policy="exempt",
+                    exemption="EX-FIX",
+                    schema="2",
+                    subject="fix(delivery): 恢复显式审查入口",
+                ),
+            )
+
+            current = self.run_tool(
+                "select", "--repo", str(repo), "--mode", "current",
+                "--session-item", work_item,
+            )
+            self.assertEqual(current.returncode, 0, current.stderr)
+            self.assertEqual(json.loads(current.stdout), [])
+            all_items = self.run_tool("select", "--repo", str(repo), "--mode", "all")
+            self.assertEqual(all_items.returncode, 0, all_items.stderr)
+            self.assertEqual(json.loads(all_items.stdout), [])
+
+            explicit = self.run_tool(
+                "select", "--repo", str(repo), "--mode", "explicit",
+                "--work-item", work_item,
+            )
+            self.assertEqual(explicit.returncode, 0, explicit.stderr)
+            selected = json.loads(explicit.stdout)
+            self.assertEqual(selected[0]["work_item"], work_item)
+            self.assertEqual(selected[0]["commits"], [commit_hash])
+
+            manifest: dict[str, object] = {
+                "schema": 2,
+                "batch_id": "NR-20260910-exempt-fix",
+                "reviewed_at": "2026-09-10T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": work_item,
+                        "change_class": "fix",
+                        "commits": [commit_hash],
+                        "validation": "explicit exempt FIX review (pass)",
+                        "design_ref": "none",
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            checked = self.run_tool(
+                "check-manifest", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            self.commit_audit(repo, manifest)
+            queried = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertEqual(queried.returncode, 0, queried.stderr)
+            self.assertEqual(len(json.loads(queried.stdout)["reviews"]), 1)
+
+            archived = self.run_tool(
+                "select", "--repo", str(repo), "--mode", "explicit",
+                "--work-item", work_item,
+            )
+            self.assertNotEqual(archived.returncode, 0)
+            self.assertIn("no unreviewed reviewable commits", archived.stderr)
+
+    def test_exempt_fix_scan_skips_full_diff_loading(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            work_item = NOVA_TOOL.new_work_item("fix")
+            self.commit(
+                repo,
+                "fix.py",
+                "fixed\n",
+                message(
+                    work_item,
+                    "fix",
+                    policy="exempt",
+                    exemption="EX-FIX",
+                    schema="2",
+                    subject="fix(delivery): 避免读取完整差异",
+                ),
+            )
+
+            with mock.patch.object(
+                NOVA_TOOL, "run_git", wraps=NOVA_TOOL.run_git
+            ) as run_git:
+                entries = NOVA_TOOL.scan_commits(repo, work_item)
+            self.assertEqual(len(entries), 1)
+            diff_reads = [
+                call
+                for call in run_git.call_args_list
+                if "--format=" in call.args[1:]
+            ]
+            self.assertEqual(diff_reads, [])
+
+    def test_explicit_review_rejects_other_exemptions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            maintenance_item = NOVA_TOOL.new_work_item("maintenance")
+            maintenance_commit = self.commit(
+                repo,
+                "docs/note.md",
+                "note\n",
+                message(
+                    maintenance_item,
+                    "maintenance",
+                    policy="exempt",
+                    exemption="EX-DOC",
+                    schema="2",
+                    subject="maint(plugin): 更新说明文档",
+                ),
+            )
+            maintenance_select = self.run_tool(
+                "select", "--repo", str(repo), "--mode", "explicit",
+                "--work-item", maintenance_item,
+            )
+            self.assertNotEqual(maintenance_select.returncode, 0)
+            self.assertIn("no unreviewed reviewable commits", maintenance_select.stderr)
+
+            maintenance_manifest: dict[str, object] = {
+                "schema": 2,
+                "batch_id": "NR-20260910-exempt-maint",
+                "reviewed_at": "2026-09-10T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": maintenance_item,
+                        "change_class": "maintenance",
+                        "commits": [maintenance_commit],
+                        "validation": "documentation maintenance (pass)",
+                        "design_ref": "none",
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, maintenance_manifest)
+            maintenance_path = repo / "maintenance-review.json"
+            maintenance_path.write_text(
+                json.dumps(maintenance_manifest), encoding="utf-8"
+            )
+            maintenance_check = self.run_tool(
+                "check-manifest", "--repo", str(repo),
+                "--manifest", str(maintenance_path),
+            )
+            self.assertNotEqual(maintenance_check.returncode, 0)
+            self.assertIn("manifest commit is not reviewable", maintenance_check.stderr)
+
+            invalid_item = NOVA_TOOL.new_work_item("fix")
+            invalid_commit = self.commit(
+                repo,
+                "invalid.py",
+                "invalid\n",
+                message(
+                    invalid_item,
+                    "fix",
+                    policy="exempt",
+                    exemption="EX-DOC",
+                    schema="2",
+                    subject="fix(delivery): 构造错误豁免",
+                ),
+            )
+            invalid_select = self.run_tool(
+                "select", "--repo", str(repo), "--mode", "explicit",
+                "--work-item", invalid_item,
+            )
+            self.assertNotEqual(invalid_select.returncode, 0)
+            self.assertIn("exempt fix requires Exemption-Rule: EX-FIX", invalid_select.stderr)
+
+            invalid_manifest: dict[str, object] = {
+                "schema": 2,
+                "batch_id": "NR-20260910-invalid-fix",
+                "reviewed_at": "2026-09-10T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": invalid_item,
+                        "change_class": "fix",
+                        "commits": [invalid_commit],
+                        "validation": "invalid exemption fixture (pass)",
+                        "design_ref": "none",
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, invalid_manifest)
+            invalid_path = repo / "invalid-review.json"
+            invalid_path.write_text(json.dumps(invalid_manifest), encoding="utf-8")
+            invalid_check = self.run_tool(
+                "check-manifest", "--repo", str(repo), "--manifest", str(invalid_path)
+            )
+            self.assertNotEqual(invalid_check.returncode, 0)
+            self.assertIn("exempt fix requires Exemption-Rule: EX-FIX", invalid_check.stderr)
 
     def designed_documents(
         self, *, role_column: bool = False, requirement_ref: str | None = None
@@ -3427,13 +4022,253 @@ class NovaReviewTests(unittest.TestCase):
                 )
             self.assertEqual(path.read_bytes(), b"current\n")
 
+    def test_portable_transaction_recovers_each_persisted_phase(self) -> None:
+        expectations = {
+            "PREPARED": (b"a-old\n", b"b-old\n"),
+            "APPLYING": (b"a-old\n", b"b-old\n"),
+            "COMMITTED": (b"a-new\n", b"b-new\n"),
+            "CLEANED": (b"a-new\n", b"b-new\n"),
+        }
+        for phase, expected in expectations.items():
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                repo = Path(directory)
+                first = repo / "a.txt"
+                second = repo / "b.txt"
+                first.write_bytes(b"a-old\n")
+                second.write_bytes(b"b-old\n")
+
+                def crash(current: str, step: int | None = None) -> None:
+                    if current == phase and (current != "APPLYING" or step == 1):
+                        raise SystemExit(f"crash at {current}")
+
+                with mock.patch.object(NOVA_TOOL, "_transaction_fault", side_effect=crash):
+                    with self.assertRaises(SystemExit):
+                        NOVA_TOOL._atomic_write_group_portable(
+                            repo,
+                            {
+                                first: (b"a-old\n", b"a-new\n"),
+                                second: (b"b-old\n", b"b-new\n"),
+                            },
+                        )
+                self.assertTrue(NOVA_TOOL.review_transaction_pending(repo))
+                self.assertTrue(NOVA_TOOL._recover_portable_transaction(repo))
+                self.assertEqual((first.read_bytes(), second.read_bytes()), expected)
+                self.assertFalse(NOVA_TOOL.review_transaction_pending(repo))
+
+    def test_portable_transaction_rolls_back_ordinary_apply_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            first = repo / "a.txt"
+            second = repo / "b.txt"
+            first.write_bytes(b"a-old\n")
+            second.write_bytes(b"b-old\n")
+
+            def fail(current: str, step: int | None = None) -> None:
+                if current == "APPLYING" and step == 1:
+                    raise OSError("forced apply failure")
+
+            with mock.patch.object(NOVA_TOOL, "_transaction_fault", side_effect=fail):
+                with self.assertRaises(OSError):
+                    NOVA_TOOL._atomic_write_group_portable(
+                        repo,
+                        {
+                            first: (b"a-old\n", b"a-new\n"),
+                            second: (b"b-old\n", b"b-new\n"),
+                        },
+                    )
+            self.assertEqual(first.read_bytes(), b"a-old\n")
+            self.assertEqual(second.read_bytes(), b"b-old\n")
+            self.assertFalse(NOVA_TOOL.review_transaction_pending(repo))
+
+    def test_portable_transaction_preserves_unknown_concurrent_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            first = repo / "a.txt"
+            second = repo / "b.txt"
+            first.write_bytes(b"a-old\n")
+            second.write_bytes(b"b-old\n")
+
+            def race(current: str, step: int | None = None) -> None:
+                if current == "APPLYING" and step == 1:
+                    first.write_bytes(b"concurrent\n")
+                    raise OSError("forced failure after concurrent write")
+
+            with mock.patch.object(NOVA_TOOL, "_transaction_fault", side_effect=race):
+                with self.assertRaisesRegex(NOVA_TOOL.NovaError, "requires recovery"):
+                    NOVA_TOOL._atomic_write_group_portable(
+                        repo,
+                        {
+                            first: (b"a-old\n", b"a-new\n"),
+                            second: (b"b-old\n", b"b-new\n"),
+                        },
+                    )
+            self.assertEqual(first.read_bytes(), b"concurrent\n")
+            self.assertEqual(second.read_bytes(), b"b-old\n")
+            self.assertTrue(NOVA_TOOL.review_transaction_pending(repo))
+
+    def test_portable_transaction_reader_fails_closed_until_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            target = repo / "审计 记录.json"
+            target.write_bytes(b"old\n")
+
+            def crash(current: str, step: int | None = None) -> None:
+                if current == "PREPARED":
+                    raise SystemExit("prepared crash")
+
+            with mock.patch.object(NOVA_TOOL, "_transaction_fault", side_effect=crash):
+                with self.assertRaises(SystemExit):
+                    NOVA_TOOL._atomic_write_group_portable(
+                        repo, {target: (b"old\n", b"new\n")}
+                    )
+            with self.assertRaisesRegex(NOVA_TOOL.NovaError, "requires recovery"):
+                NOVA_TOOL.assert_review_transaction_clean(repo)
+            NOVA_TOOL._recover_portable_transaction(repo)
+            self.assertEqual(target.read_bytes(), b"old\n")
+
+    def test_portable_transaction_recovers_after_process_kill(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            first = repo / "a.txt"
+            second = repo / "b.txt"
+            first.write_bytes(b"a-old\n")
+            second.write_bytes(b"b-old\n")
+            code = textwrap.dedent(
+                """
+                import importlib.util
+                import os
+                import pathlib
+                import sys
+
+                spec = importlib.util.spec_from_file_location("nova_review_killed", sys.argv[1])
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                repo = pathlib.Path(sys.argv[2])
+                first = repo / "a.txt"
+                second = repo / "b.txt"
+                def kill(phase, step=None):
+                    if phase == "APPLYING" and step == 1:
+                        os._exit(91)
+                module._transaction_fault = kill
+                module._atomic_write_group_portable(
+                    repo,
+                    {
+                        first: (b"a-old\\n", b"a-new\\n"),
+                        second: (b"b-old\\n", b"b-new\\n"),
+                    },
+                )
+                """
+            )
+            killed = subprocess.run(
+                [sys.executable, "-c", code, str(TOOL), str(repo)], check=False
+            )
+            self.assertEqual(killed.returncode, 91)
+            self.assertTrue(NOVA_TOOL.review_transaction_pending(repo))
+            NOVA_TOOL._recover_portable_transaction(repo)
+            self.assertEqual(first.read_bytes(), b"a-old\n")
+            self.assertEqual(second.read_bytes(), b"b-old\n")
+            self.assertFalse(NOVA_TOOL.review_transaction_pending(repo))
+
+    def test_portable_transaction_rejects_symlink_component(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            repo = Path(directory)
+            linked = repo / "linked"
+            try:
+                linked.symlink_to(Path(outside), target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
+            with self.assertRaisesRegex(NOVA_TOOL.NovaError, "symlink or reparse point"):
+                NOVA_TOOL._atomic_write_group_portable(
+                    repo, {linked / "audit.json": (None, b"new\n")}
+                )
+            self.assertEqual(list(Path(outside).iterdir()), [])
+
+    def test_portable_transaction_rejects_cross_volume_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            target = repo / "audit.json"
+
+            def volume(path: Path) -> tuple[str, int]:
+                return ("state", 1) if ".git" in path.parts else ("worktree", 2)
+
+            with mock.patch.object(NOVA_TOOL, "_volume_identity", side_effect=volume):
+                with self.assertRaisesRegex(NOVA_TOOL.NovaError, "crosses volumes"):
+                    NOVA_TOOL._atomic_write_group_portable(
+                        repo, {target: (None, b"new\n")}
+                    )
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows junction contract")
+    def test_portable_transaction_rejects_windows_junction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            repo = Path(directory)
+            linked = repo / "junction"
+            result = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(linked), str(Path(outside))],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                self.skipTest(f"junction creation unavailable: {result.stderr}")
+            with self.assertRaisesRegex(NOVA_TOOL.NovaError, "symlink or reparse point"):
+                NOVA_TOOL._atomic_write_group_portable(
+                    repo, {linked / "audit.json": (None, b"new\n")}
+                )
+
+    def test_review_lock_is_released_after_holder_is_killed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.init_repo(repo)
+            ready = repo / "holder-ready"
+            code = textwrap.dedent(
+                """
+                import importlib.util
+                import pathlib
+                import sys
+                import time
+
+                spec = importlib.util.spec_from_file_location("nova_review_child", sys.argv[1])
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                with module.review_lock(pathlib.Path(sys.argv[2]), timeout_seconds=2):
+                    pathlib.Path(sys.argv[3]).write_text("ready", encoding="utf-8")
+                    time.sleep(60)
+                """
+            )
+            holder = subprocess.Popen(
+                [sys.executable, "-c", code, str(TOOL), str(repo), str(ready)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while not ready.exists() and holder.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(ready.exists(), f"lock holder exited with {holder.poll()}")
+                with self.assertRaisesRegex(NOVA_TOOL.NovaError, "timed out"):
+                    with NOVA_TOOL.review_lock(repo, timeout_seconds=0.1):
+                        pass
+                holder.kill()
+                holder.wait(timeout=5)
+                with NOVA_TOOL.review_lock(repo, timeout_seconds=1):
+                    pass
+            finally:
+                if holder.poll() is None:
+                    holder.kill()
+                    holder.wait(timeout=5)
+
     def test_atomic_writer_rejects_symlink_output_without_escape(self) -> None:
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
             repo = Path(directory)
             external = Path(outside) / "external.json"
             external.write_bytes(b"outside\n")
             target = repo / "ledger.json"
-            target.symlink_to(external)
+            try:
+                target.symlink_to(external)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
             with self.assertRaises(NOVA_TOOL.NovaError):
                 NOVA_TOOL.atomic_write_group(repo, {target: (None, b"replacement\n")})
             self.assertEqual(external.read_bytes(), b"outside\n")
@@ -3445,7 +4280,10 @@ class NovaReviewTests(unittest.TestCase):
             self.init_repo(repo)
             commit_hash = self.commit(repo, "fix.py", "fixed\n", message("FIX-001", "adhoc"))
             (repo / ".nova").mkdir()
-            (repo / ".nova/audit").symlink_to(Path(outside), target_is_directory=True)
+            try:
+                (repo / ".nova/audit").symlink_to(Path(outside), target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
             manifest = {
                 "schema": 1,
                 "batch_id": "NR-20260827-symlink",
@@ -3472,6 +4310,7 @@ class NovaReviewTests(unittest.TestCase):
             self.assertIn("must not traverse a symlink", result.stderr)
             self.assertEqual(list(Path(outside).iterdir()), [])
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux renameat2 contract")
     def test_atomic_writer_detects_last_moment_race_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
@@ -3515,6 +4354,7 @@ class NovaReviewTests(unittest.TestCase):
                 )
             self.assertEqual(target.read_bytes(), b"old target\n")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux renameat2 contract")
     def test_atomic_writer_rollback_does_not_overwrite_later_concurrent_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
@@ -3545,6 +4385,7 @@ class NovaReviewTests(unittest.TestCase):
             self.assertEqual(first.read_bytes(), b"concurrent\n")
             self.assertEqual(second.read_bytes(), b"b-old\n")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux renameat2 contract")
     def test_atomic_writer_new_file_rollback_moves_before_checking(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
@@ -3586,6 +4427,7 @@ class NovaReviewTests(unittest.TestCase):
             self.assertEqual(first.read_bytes(), b"concurrent\n")
             self.assertEqual(second.read_bytes(), b"b-old\n")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux renameat2 contract")
     def test_atomic_writer_existing_rollback_preserves_still_later_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
@@ -3640,6 +4482,7 @@ class NovaReviewTests(unittest.TestCase):
             self.assertEqual(len(preserved), 1)
             self.assertEqual(preserved[0].read_bytes(), b"concurrent-c\n")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux renameat2 contract")
     def test_atomic_writer_cleanup_failure_does_not_rollback_committed_group(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)

@@ -518,6 +518,54 @@ class ValidatorTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("exactly one Requirement-Ref", result.stdout)
 
+    def test_terminal_design_accepts_clean_crlf_checkout_projection(self) -> None:
+        design = valid_design(
+            state="已实现", package_states=("已完成", "已完成")
+        )
+        design = re.sub(
+            r"^> Requirement-Ref：.*\n", "", design, flags=re.MULTILINE
+        )
+        design = refresh_confirmation(design)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / ".nova/design/2026-08-31_terminal.md"
+            path.parent.mkdir(parents=True)
+            (root / ".gitattributes").write_text(
+                ".nova/design/*.md text\n", encoding="utf-8"
+            )
+            path.write_text(design, encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.email", "test@example.invalid"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.name", "Nova Test"],
+                check=True,
+            )
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "-qm", "fixture"], check=True
+            )
+
+            path.write_bytes(design.encode("utf-8").replace(b"\n", b"\r\n"))
+            clean = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "diff",
+                    "--quiet",
+                    "HEAD",
+                    "--",
+                    path.relative_to(root).as_posix(),
+                ],
+                check=False,
+            )
+            self.assertEqual(clean.returncode, 0)
+            result = self.run_validator(path, design=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_blueprint_requirement_must_match_referenced_design(self) -> None:
         requirement_a = "REQ-019a1234-5678-7abc-8def-0123456789ab@v1"
         requirement_b = "REQ-019a2234-5678-7abc-8def-0123456789ab@v1"

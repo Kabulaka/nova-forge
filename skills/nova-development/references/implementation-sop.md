@@ -1,10 +1,10 @@
 # Nova 实施与交付 SOP
 
-本文件承接旧全局 `AGENTS.md` 中除独立 Review 之外的实施约束。默认流程改为“编码 → 测试 → 本地 commit → 待人工 Review”；此顺序变化不删除任务基线、编码契约、测试证据、plan mode 或完成报告要求。
+本文件承接旧全局 `AGENTS.md` 中除独立 Review 之外的实施约束。默认流程改为“编码 → 测试 → 本地 commit → required 项待人工 Review / exempt 项直接完成”；此顺序变化不删除任务基线、编码契约、测试证据、plan mode 或完成报告要求。
 
 ## 1. 准入、范围与任务差异基线
 
-1. 当前实现事实以代码、测试和配置为准，项目级公共约束以 `.nova/PROJECT_BLUEPRINT.md` 为准；存在 `.nova/SHARED_CAPABILITIES.md` 时把它作为复用路由索引，但目录缺失或无命中不证明实现不存在。开发正式待办时必须读取其“设计依据”引用的工作包，但不得用设计文档或共享能力目录证明代码已经实现。
+1. 当前实现事实以代码、测试和配置为准，项目级公共约束以 `.nova/PROJECT_BLUEPRINT.md` 为准；存在 `.nova/architecture/ARCHITECTURE_CONTRACTS.md` 时先完整读取其门禁与契约索引，再按当前工作项的设计、代码影响和直接依赖读取相关已索引契约，记录索引/契约路径、内容 SHA-256、ARCH 依据和 `--ready` 结果；无法可靠缩小时读取全部已索引契约，不得以不确定为由少读。架构目录存在但索引缺失、索引或契约字节漂移、ARCH 依据不可信、或 `validate_architecture.py --ready` 失败时停止并返回架构阶段。存在 `.nova/SHARED_CAPABILITIES.md` 时把它作为复用路由索引，但目录缺失或无命中不证明实现不存在。开发正式待办时必须读取其“设计依据”引用的工作包，但不得用设计文档、架构契约或共享能力目录证明代码已经实现。
 2. 任务开始时，根据用户明确目标、当时蓝图条目及其设计依据固定工作项、范围、验收矩阵和未验证事项。建立新工作项前必须验证它是独立、内聚、可控的交付单元：有完整结果和验收，能独立排期、暂停、恢复、Review 或取消。大型需求优先沿领域能力或端到端功能块边界拆分；若多个候选只有共同完成才有价值，或只是流程阶段、实现步骤、文件、模块、技能、代理或提交批次，必须合并为一个工作项并以内部里程碑跟踪。执行期间新增待办、`Review-Defer` 或无关变化不自动纳入。
 3. 标记“待澄清”的待办不得进入实施计划、编码、测试或 Review。只有用户完成澄清，补齐已确认设计依据和可执行验收后才能实施；主代理不得替用户推断、补写或选择结论。
 4. 实施前记录仓库类型和根目录、Git/SVN 完整状态、任务声明路径或模块，以及这些范围内既有修改和未跟踪文件的可重建基线。相关路径已有修改时，在源码目录外保存只读内容快照或等价补丁；仅有文件名或哈希不能分离同文件的新旧行块。
@@ -24,7 +24,7 @@
 
 ## 2. 编码前契约
 
-对 `Review-Policy: required` 的变更，编码前在计划或对话中的结构化变更说明固定：
+除命中 `EX-DOC` 或 `EX-FORMAT` 的 MAINT 外，所有 FEAT、PATCH、FIX 和 MAINT 变更在编码前都必须于计划或对话中固定结构化变更说明，Review 策略不改变该门禁：
 
 1. **接口契约**：输入、输出、错误语义、兼容性、状态变化，以及跨调用边界的唯一权威定义与一致性要求；
 2. **核心不变量**：必须始终成立的数据、状态、权限、资源或顺序约束；
@@ -34,7 +34,7 @@
 6. **验收标准**：每条核心契约和不变量对应的可执行验证。
 7. **分层落位**：每个新增或移动的代码入口对应蓝图“代码落位规则”和“分层与代码映射”中的区域，并满足允许依赖；缺失映射，或需要新增技术栈、层、共享依赖、数据所有权或公共契约时停止并返回架构确认。
 
-非 plan mode 也必须在编码前输出上述结构；plan mode 写入待审批计划。客观豁免项仍须固定目标、精确范围和最低验收，但不强行为纯文档/格式变更虚构不适用的运行时契约。
+非 plan mode 也必须在编码前输出上述结构；plan mode 写入待审批计划。只有命中 `EX-DOC` 或 `EX-FORMAT` 的 MAINT 仍只须固定目标、精确范围和最低验收，不强行为纯文档/格式变更虚构不适用的运行时契约；`EX-FIX` 只免除强制 Review，不削弱本节任何编码前契约。
 
 ## 3. 编码约束
 
@@ -66,7 +66,7 @@
 2. 最低验收通过且无阻断后提交精确任务差异，不夹带历史修改，不提交未通过测试的代码。工作项已生成但尚未 Review、尚未对外共享的本地结果 commit，后续同范围修正优先重新校验并 amend 为同一个结果 commit；已对外共享、无法安全改写，或命中上一条真实里程碑例外时才追加同 ID commit，并在完成报告说明原因。
 3. 提交分类、稳定工作项、trailers 和客观豁免服从 `skills/nova-review/references/commit-contract.md`。schema 2 首行必须是 `type(scope): 中文结果摘要`；type 由提交种类确定，scope 只能取 `requirements / architecture / delivery / review / doctor / plugin / discovery / release` 中最能表示主要影响面的一个。可信审计归档后编号永久封存，后续变化重新分类建项；合法 `Review-Defer` 不复用当前编号。明确源于已归档 FEAT 或历史 PEND 的新 FIX 必须写 `Related-Work-Item`。
 4. 提交前使用仓库感知的 `validate-message --repo <根目录> --message-file ... --diff-file ...` 校验完整 staged diff、身份/分类映射、中文首行、scope、归档 ID 复用与来源关联；失败不得提交。
-5. 只有 `FEAT-*` 在最低验收后把既有设计工作包和蓝图条目置为 `待Review`；`PATCH-*`、`FIX-*`、`MAINT-*` 不创建蓝图条目或工作包。只有 `Review-Policy: required` 的提交由元数据进入待审集合；`FIX-*` 默认以 `Review-Policy: exempt` 与 `Exemption-Rule: EX-FIX` 直接完成，只有用户对具体 FIX 明确要求 Review 时才改用 required + none；合法 exempt 的 `MAINT-*` 仍以客观豁免证据直接完成。
+5. 只有 `FEAT-*` 在最低验收后把既有设计工作包和蓝图条目置为 `待Review`；`PATCH-*`、`FIX-*`、`MAINT-*` 不创建蓝图条目或工作包。`current/all` 只从 `Review-Policy: required` 的提交发现待审集合；`FIX-*` 默认以 `Review-Policy: exempt` 与 `Exemption-Rule: EX-FIX` 直接完成，实现提交前用户明确要求 Review 时才改用 required + none。用户也可按编号显式 Review 已提交未归档的 EX-FIX，此时保留原实现元数据并在 PASS 后生成审计。合法 exempt 的 `MAINT-*` 仍以客观豁免证据直接完成，不能通过显式编号进入 Review。
 6. 默认不启动 Review。用户明确要求 Review 时才加载 `nova-review`；开发完成报告只写“未 Review / 待Review”或合法 `exempt`，不得把自检和测试称为 Review。Review 的 REJECT 修正不提交中间 commit，最终 PASS 的唯一 closure commit 由 `nova-review` 管理。
 7. 全局治理代表精确范围本地 Git commit 的持续授权；用户明确“不提交”只撤回当次授权。Git push、远程配置和 SVN commit 始终需要针对具体操作的独立授权。
 
@@ -75,7 +75,7 @@
 Plan mode 只由用户手动启用，并追加以下约束：
 
 - 走 Research → Create Plan → Obtain Approval → Execute → Verify，不得跳过；方案未经用户审批不得编码；
-- Research 先读相关代码、测试、配置，再读蓝图公共约束；开发待办还要读取设计依据引用的工作包；
+- Research 先读相关代码、测试、配置，再读蓝图公共约束；存在架构索引时必须读取索引、定向加载相关契约、记录路径/SHA-256/ARCH 依据并通过 `validate_architecture.py --ready`，开发待办还要读取设计依据引用的工作包；
 - Open Questions 至少确认一个会改变实现的决策点；
 - 计划包含“关联”章节并列出蓝图模块编号；
 - 验收逐条覆盖关键设计及异常/边界路径，多功能点存在数据依赖时列组合验收；
@@ -102,13 +102,13 @@ Plan mode 只由用户手动启用，并追加以下约束：
 
 需求和架构阶段分别由对应技能填写；本技能按工作项的 `Change-Class` 选择 `feature / patch / fix / maintenance`，不得复用 FEAT 报告冒充其他分类。各交付报告至少写明：规范工作项与分类；实际行为结果；关键文件的新增/修改/删除及作用；测试命令、工作目录、结果、覆盖验收、证据是否复用和未验证项；本地 commit hash 与中文主题或未提交原因；精确提交范围；远程/SVN 是否执行；Review 策略与“未 Review/待Review”或 `exempt`；临时基线是否清理。FEAT 另写蓝图、设计工作包和交付台账投影。
 
-`FIX` 的“缺陷证据与恢复结果”必须同时给出既有契约或可复现偏离证据、修复前表现和恢复后结果；拿不出偏离证据时应重新分类为 PATCH。默认免审 FIX 的 Review 状态必须写 `exempt`、`EX-FIX` 与轮次“不适用”；用户明确要求 Review 的 FIX 才写 required 和待 Review 状态。`PATCH` 必须说明主动调整边界及为何未新增能力或公共契约。`MAINT` 必须说明产品行为是否保持不变；exempt 时列客观 `EX-*` 规则和完整 diff 命中证据。
+`FIX` 的“缺陷证据与恢复结果”必须同时给出既有契约或可复现偏离证据、修复前表现和恢复后结果；拿不出偏离证据时应重新分类为 PATCH。默认免审且尚未显式 Review 的 FIX 状态必须写 `exempt`、`EX-FIX` 与轮次“不适用”；实现提交前用户明确要求 Review 的 FIX 才在开发报告写 required 和待 Review。已提交 EX-FIX 的后置显式 Review 使用 Review 完成报告记录真实轮次、修正、审计和 closure commit，不回写或伪造原开发报告状态。`PATCH` 必须说明主动调整边界及为何未新增能力或公共契约。`MAINT` 必须说明产品行为是否保持不变；exempt 时列客观 `EX-*` 规则和完整 diff 命中证据。
 
 发送报告前执行：
 
 ```bash
-python3 skills/nova-review/scripts/nova_review.py report-template --stage <stage>
-python3 skills/nova-review/scripts/nova_review.py validate-report --stage <stage> --report-file /project/outside/temp-report.md --emit-report
+python skills/nova-review/scripts/nova_review.py report-template --stage <stage>
+python skills/nova-review/scripts/nova_review.py validate-report --stage <stage> --report-file /project/outside/temp-report.md --emit-report
 ```
 
 候选报告文件必须位于项目外并以换行结束。`--emit-report` 校验成功后只向 stdout 原样输出候选报告；该输出是待发送的规范正文，不得重新概括、改写、删减章节或用项目符号摘要替代。单阶段完成时，最终回复必须完整、原样使用这份输出；同一轮完成多个阶段时，必须为每个阶段分别生成并校验候选报告，再按阶段实际发生顺序完整、原样拼接各份输出，不得以后一阶段报告覆盖前一阶段报告。校验失败不得发送；不得省略章节，无事实时写清“无”或“不适用”及原因。“遗留与下一步”必须明确下一步动作；`required` 项未启动 Review 时只写“未 Review / 待Review”，轮次为“不适用”，不得把自检、测试或豁免表述为 Review PASS。发送内容固定后清理项目外候选文件，并在对应报告中记录清理结果。

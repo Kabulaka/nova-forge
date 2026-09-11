@@ -26,7 +26,7 @@ REVIEW_SPEC.loader.exec_module(NOVA_REVIEW)
 
 class ArchitectureValidatorTests(unittest.TestCase):
     def run_validator(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["python3", str(VALIDATOR), *args], text=True, capture_output=True, check=False)
+        return subprocess.run([sys.executable, str(VALIDATOR), *args], text=True, capture_output=True, check=False)
 
     def record_designed_pass(
         self,
@@ -185,6 +185,15 @@ class ArchitectureValidatorTests(unittest.TestCase):
         path = EXAMPLE_NOVA / "architecture/ARCHITECTURE_CONTRACTS.md"
         result = self.run_validator(str(path))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_pending_review_transaction_fails_architecture_reads_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.audited_example(temporary)
+            repo = path.parents[2]
+            NOVA_REVIEW._transaction_state_directory(repo).mkdir()
+            result = self.run_validator(str(path))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unfinished Nova Review transaction", result.stdout)
 
     def test_pending_document_becomes_ready_from_immutable_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

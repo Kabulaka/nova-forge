@@ -9,7 +9,7 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 ## 自动路由与有限加载
 
-技能名称不决定用户意图。首次只读用户表达、`.nova/PRODUCT_REQUIREMENTS.md` 的需求索引、`.nova/PROJECT_BLUEPRINT.md` 的技术/模块摘要及活动工作索引；不得为了判断路由扫描需求块、设计正文、共享能力目录或代码树。
+技能名称不决定用户意图。首次只读用户表达、`.nova/PRODUCT_REQUIREMENTS.md` 的需求索引、`.nova/PROJECT_BLUEPRINT.md` 的技术/模块摘要及活动工作索引，以及存在时 `.nova/architecture/ARCHITECTURE_CONTRACTS.md` 的门禁与契约索引；不得为了判断路由扫描需求块、设计正文、全部架构契约、共享能力目录或代码树。
 
 - 无需求文档、无代码且无蓝图：转入 `nova-requirements`，需求确认后再进入 `nova-architecture`，不得直接生成开发设计。
 - 已有代码和蓝图但无需求文档：只询问是否补建需求层；用户拒绝时继续普通功能/PATCH/FIX，不把缺少需求文档当阻断。
@@ -36,11 +36,11 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 若检测到根目录 `PROJECT_BLUEPRINT.md`、`PRODUCT_REQUIREMENTS.md` 或 `docs/design/`、`docs/audit/`、`docs/requirements/`、`docs/architecture/` 等旧布局，完整读取“布局迁移”小节并先执行 `scripts/migrate_nova_layout.py --repo <根目录>` dry-run。展示精确移动、引用改写、冲突和 `Plan-SHA256` 后必须再次取得用户明确批准，才能执行 `--apply --plan-sha256 <已批准摘要>`；不得覆盖、保留重复实体或把布局迁移与内容模板升级混为同一步骤。
 
-会话内维护：目标根目录绝对路径、蓝图绝对路径、规范版本、蓝图 SHA-256、已加载的项目指令、访谈 SOP SHA-256，以及本路由已加载的项目文档和技能文档资源状态。资源状态按目标项目绝对路径、资源绝对路径和 SHA-256 隔离。用户无需管理这些状态。
+会话内维护：目标根目录绝对路径、蓝图绝对路径、规范版本、蓝图 SHA-256、架构索引路径与 SHA-256、已加载相关架构契约的路径/SHA-256/ARCH 依据、已加载的项目指令、访谈 SOP SHA-256，以及本路由已加载的项目文档和技能文档资源状态。资源状态按目标项目绝对路径、资源绝对路径和 SHA-256 隔离。用户无需管理这些状态。
 
 ### 实施请求前置路由
 
-用户明确要求实施某个编号时，此路由优先于下述首次进入和蓝图版本路由。先读取目标项目指令并检查精确蓝图路径，不得在确认交接资格前把蓝图全文展开到模型上下文。`FEAT-*` 或历史 `PEND-*` 以编号或稳定锚点从蓝图定向定位条目；条目具有已确认设计依据和可执行验收标准，且版本 `5` 设计具有与当前语义一致的收敛确认时，再定向读取所引工作包、直接依赖和本任务实际涉及的公共约束。`PATCH-*`、`FIX-*`、`MAINT-*` 不进入蓝图且没有工作包：当前会话内已固定的任务状态可直接恢复；尚未归档的可信 commit trailers 只能恢复编号、分类和验证摘要，commit 父节点与完整 diff 用于恢复任务差异基线，验收范围必须来自仍可信的会话状态、用户当前明确目标或其他既存记录，不得从 trailers 推断。不得要求或虚构蓝图条目、设计依据和工作包；无法从可信来源恢复身份或验收时，只澄清这一具体缺口。FEAT/历史 PEND 条目无法定位、仍为“待澄清”、设计依据缺失、验收不可执行、版本 `5` 收敛确认缺失或失配、或任一类别存在契约冲突时，退出实施路由并转入单问题澄清；只有无法通过定向读取判断阻断原因时，才按首次进入和版本路由补读必要范围。既有版本 `4` 设计保持交接兼容，但任何语义修改必须升级到版本 `5` 并重新确认整份设计。
+用户明确要求实施某个编号时，此路由优先于下述首次进入和蓝图版本路由。先读取目标项目指令并检查精确蓝图路径，不得在确认交接资格前把蓝图全文展开到模型上下文。存在 `.nova/architecture/ARCHITECTURE_CONTRACTS.md` 时，先从稳定快照完整读取门禁与契约索引，按当前工作项的设计、代码影响和直接依赖加载相关工程骨架、数据、API、事件与 Mock 契约并记录路径、SHA-256 和 ARCH 依据；无法可靠缩小范围时读取全部已索引契约，不得以不确定为由少读。随后运行 `validate_architecture.py --ready`，索引、相关契约、ARCH 归属、当前字节或 ready 任一失败时停止实施并返回 `nova-architecture`；架构目录存在但索引缺失同样失败封闭。`FEAT-*` 或历史 `PEND-*` 以编号或稳定锚点从蓝图定向定位条目；条目具有已确认设计依据和可执行验收标准，且版本 `5` 设计具有与当前语义一致的收敛确认时，再定向读取所引工作包、直接依赖和本任务实际涉及的公共约束。`PATCH-*`、`FIX-*`、`MAINT-*` 不进入蓝图且没有工作包：当前会话内已固定的任务状态可直接恢复；尚未归档的可信 commit trailers 只能恢复编号、分类和验证摘要，commit 父节点与完整 diff 用于恢复任务差异基线，验收范围必须来自仍可信的会话状态、用户当前明确目标或其他既存记录，不得从 trailers 推断。不得要求或虚构蓝图条目、设计依据和工作包；无法从可信来源恢复身份或验收时，只澄清这一具体缺口。FEAT/历史 PEND 条目无法定位、仍为“待澄清”、设计依据缺失、验收不可执行、版本 `5` 收敛确认缺失或失配、架构门禁失败、或任一类别存在契约冲突时，退出实施路由并转入单问题澄清；只有无法通过定向读取判断阻断原因时，才按首次进入和版本路由补读必要范围。既有版本 `4` 设计保持交接兼容，但任何语义修改必须升级到版本 `5` 并重新确认整份设计。
 
 ### 首次进入或状态失效
 
@@ -73,7 +73,7 @@ description: 通过单问题访谈把已确认需求或普通开发请求收敛�
 
 已有代码库时，围绕当前主题研究入口、模块边界、直接调用关系、权限、存储、失败恢复和测试；冲突标为待确认。
 
-开发阶段按统一 SOP 生成 `stageProjection`：`inheritedContracts` 只引用进入本阶段前已正式确认且与当前工作包相关的需求和已就绪架构契约，并保留其需求或架构来源阶段；`stageEvidence` 只保存本阶段从代码、配置、测试和运行契约查明的事实；`stageDecisions` 只保存本阶段新增且已披露的功能实现候选。不得把上游内容冒充开发澄清；代码证据与继承契约冲突时，暂停设计或实施，按 `inheritedContracts` 来源返回需求或架构阶段重新确认，无冲突项保持有效。
+开发阶段按统一 SOP 生成 `stageProjection`：`inheritedContracts` 只引用进入本阶段前已正式确认且与当前工作包相关的需求和已就绪架构契约，保留其需求或架构来源阶段，并为每项架构继承契约保存索引路径、契约路径、内容 SHA-256、ARCH 依据和 ready 结果；`stageEvidence` 只保存本阶段从代码、配置、测试和运行契约查明的事实；`stageDecisions` 只保存本阶段新增且已披露的功能实现候选。不得把上游内容冒充开发澄清；代码证据与继承契约冲突时，暂停设计或实施，按 `inheritedContracts` 来源返回需求或架构阶段重新确认，无冲突项保持有效。
 
 ### 共享能力发现与决定
 
@@ -97,7 +97,7 @@ AI 结合已确认上下文发现候选做法时，只有准备把它作为已�
 
 任何 `FEAT-*`、`PATCH-*`、`FIX-*` 或 `MAINT-*` 实施开始前，完整读取 [实施与交付 SOP](references/implementation-sop.md)。本节只定义与需求/设计状态衔接的增量规则，不替代其中的任务差异基线、编码契约、测试证据、提交、plan mode 或完成报告约束。
 
-用户明确要求实施 `FEAT-*` 或历史 `PEND-*`，且蓝图条目具有已确认设计依据和可执行验收标准，并满足目标设计版本对应的收敛确认门禁时，进入实施交接，不重新运行需求访谈；只读取该条目、所引工作包、直接依赖和本任务实际涉及的公共约束。显式 `PATCH-*`、`FIX-*`、`MAINT-*` 从当前会话状态恢复，或分别从可信 commit 的 trailers、父节点与完整 diff 恢复身份、验证摘要和任务差异基线；验收仍须由可信会话状态、用户当前目标或既存记录提供，具备完整验收后才直接进入交接，不读取不存在的蓝图条目或工作包。两类路径都复用当前可信的项目、路径和指纹状态，不重读完整蓝图、访谈 SOP 或已闭环关系。本技能负责固定最小上下文、快速实现、最低验收和待 Review 交接；用户明确启动 Review 时再转交 `nova-review`。
+用户明确要求实施 `FEAT-*` 或历史 `PEND-*`，且蓝图条目具有已确认设计依据和可执行验收标准，并满足目标设计版本对应的收敛确认门禁时，进入实施交接，不重新运行需求访谈；只读取该条目、所引工作包、直接依赖、本任务实际涉及的公共约束，以及架构索引定向得到的相关契约。显式 `PATCH-*`、`FIX-*`、`MAINT-*` 从当前会话状态恢复，或分别从可信 commit 的 trailers、父节点与完整 diff 恢复身份、验证摘要和任务差异基线；验收仍须由可信会话状态、用户当前目标或既存记录提供，具备完整验收且架构索引与 `validate_architecture.py --ready` 门禁通过后才直接进入交接，不读取不存在的蓝图条目或工作包。两类路径都复用当前可信的项目、路径和指纹状态，不重读完整蓝图、访谈 SOP 或已闭环关系；架构索引或相关契约指纹变化时必须失效并重建对应 `inheritedContracts`。本技能负责固定最小上下文、快速实现、最低验收和待 Review 交接；用户明确启动 Review 时再转交 `nova-review`。
 
 本轮从需求澄清新建正式 `FEAT-*` 时，只要用户未把任务限定为仅头脑风暴、澄清、规划、蓝图、设计或文档，当前不处于尚待方案批准的 Plan mode，且用户已明确确认整份最终摘要、工作包已确认、蓝图引用与可执行验收完整、版本 `5` 收敛确认有效、蓝图和设计校验通过，就自动进入同一实施交接；不要求用户在原始请求中再次说“实施”或报出新编号。不得以仅交付文档的回复结束当前执行周期，也不得再次询问是否开始编码；立即完整读取实施 SOP、固定任务差异基线并按默认实施流程推进。用户明确暂停或取消、上述范围限制、待确认差量、研究证据不足、收敛确认缺失或失配、文档校验失败、契约冲突或无法安全隔离既有工作副本变化时停止；Plan mode 继续服从其方案审批门禁。
 
@@ -114,9 +114,9 @@ AI 结合已确认上下文发现候选做法时，只有准备把它作为已�
 
 创建新工作项前先执行独立性检查：候选必须有完整可验收结果，并能独立排期、暂停、恢复、Review 或取消；若多个候选只有共同完成才有交付价值，或只是同一规模可控修改的流程阶段、实现步骤、文件、模块、技能、代理或提交批次，必须合并为一个工作项和内部里程碑。边界成立后再按提交契约确定分类，并调用 `skills/nova-review/scripts/nova_review.py new-id --class <分类>` 生成一次 UUIDv7 编号。编号一经进入蓝图或提交即固定，原范围开发、测试、里程碑推进和 Review 修复不得重新生成或替换；可信审计归档后编号永久封存。
 
-默认实施流程是编码、最低验收、记录有效测试证据和本地 Git commit。只有 `FEAT-*` 的设计工作包在最低验收后更新为 `待Review`；`PATCH-*`、`FIX-*`、`MAINT-*` 不创建蓝图条目或工作包。`Review-Policy: required` 的提交进入待审集合；`FIX-*` 默认以 `Review-Policy: exempt` 与 `Exemption-Rule: EX-FIX` 直接完成，只有用户对具体 FIX 明确要求 Review 时才改用 required + none；合法 exempt 的 `MAINT-*` 以客观豁免证据直接完成。全局治理中的持续授权使精确范围本地 commit 无需逐次询问，用户明确要求不提交时只撤回当次授权。不得自动启动 Review。正式 `FEAT-*` 在 Review PASS 前继续保留于蓝图，提交使用 `Change-Class: feature`、相同 `Work-Item` 和设计引用；用户测试后要求继续修改时，只有修正仍服务于原设计和验收才沿用同一编号。明确源于已归档 FEAT 或历史 PEND 的新 FIX 必须写 `Related-Work-Item` 并用仓库感知校验确认该来源可信；新 FEAT 以“演进来源”链接终态设计。push 和 SVN commit 必须另行授权。
+默认实施流程是编码、最低验收、记录有效测试证据和本地 Git commit。只有 `FEAT-*` 的设计工作包在最低验收后更新为 `待Review`；`PATCH-*`、`FIX-*`、`MAINT-*` 不创建蓝图条目或工作包。`Review-Policy: required` 的提交进入待审集合；`FIX-*` 默认以 `Review-Policy: exempt` 与 `Exemption-Rule: EX-FIX` 直接完成，实现提交前用户明确要求 Review 时才改用 required + none；已提交未归档的 EX-FIX 仍可按编号显式 Review，保留原实现元数据，且 PASS 后生成审计。合法 exempt 的 `MAINT-*` 以客观豁免证据直接完成。全局治理中的持续授权使精确范围本地 commit 无需逐次询问，用户明确要求不提交时只撤回当次授权。不得自动启动 Review。正式 `FEAT-*` 在 Review PASS 前继续保留于蓝图，提交使用 `Change-Class: feature`、相同 `Work-Item` 和设计引用；用户测试后要求继续修改时，只有修正仍服务于原设计和验收才沿用同一编号。明确源于已归档 FEAT 或历史 PEND 的新 FIX 必须写 `Related-Work-Item` 并用仓库感知校验确认该来源可信；新 FEAT 以“演进来源”链接终态设计。push 和 SVN commit 必须另行授权。
 
-用户明确要求 Review 时才加载 `nova-review`。Review 中断则保留 `待Review` 并返回调试；PASS 后由 `nova-review` 完成蓝图删除、设计终态和审计归档。Review-Defer、新增待办及无关蓝图变化不自动进入当前范围，也不得复用当前工作项；待审选择发现已归档编号承载新 commit 时必须在 Reviewer 启动前失败。
+用户明确要求 Review 时才加载 `nova-review`。Review 中断则保留 `待Review` 并返回调试；EX-FIX 保留既有免审实现状态。PASS 后由 `nova-review` 完成蓝图删除、设计终态和审计归档。Review-Defer、新增待办及无关蓝图变化不自动进入当前范围，也不得复用当前工作项；待审选择发现已归档编号承载新 commit 时必须在 Reviewer 启动前失败。
 
 ## 4. 形成文档
 
@@ -138,9 +138,10 @@ AI 结合已确认上下文发现候选做法时，只有准备把它作为已�
 以下操作完成后运行对应校验器：创建、修改或迁移蓝图/设计；新增、修改或删除共享能力目录；改变待办引用、工作包状态或文档生命周期；交付本轮已变更文档前。
 
 ```bash
-python3 scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
-python3 scripts/validate_blueprint.py --design /absolute/path/to/.nova/design/2026-08-26_example.md
-python3 ../nova-architecture/scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md
+python scripts/validate_blueprint.py /absolute/path/to/.nova/PROJECT_BLUEPRINT.md
+python scripts/validate_blueprint.py --design /absolute/path/to/.nova/design/2026-08-26_example.md
+python ../nova-architecture/scripts/validate_architecture.py --ready /absolute/path/to/.nova/architecture/ARCHITECTURE_CONTRACTS.md
+python ../nova-architecture/scripts/validate_shared_capabilities.py --if-present /absolute/path/to/.nova/SHARED_CAPABILITIES.md
 ```
 
 纯头脑风暴、继续提问、解释规则、读取项目和只读分析不运行校验器。校验不代替项目要求的测试、显式 Review 或提交门禁。
@@ -155,6 +156,7 @@ python3 ../nova-architecture/scripts/validate_shared_capabilities.py --if-presen
 | 创建或升级蓝图 | `references/blueprint-standard.md`；新建用模板；项目首次创建才读 `references/examples/equipment-borrowing/.nova/PROJECT_BLUEPRINT.md` |
 | 创建或更新设计 | `references/design-document-standard.md`；新建用模板；项目首次创建才读 `references/examples/equipment-borrowing/.nova/design/2026-08-25_设备借用闭环.md` |
 | 澄清或实施可能复用的能力 | 先读 `.nova/SHARED_CAPABILITIES.md`（存在时），随后无论目录命中与否都定向核对相关代码和测试；命中时验证入口与边界，未命中时继续发现 |
+| 规划、澄清或实施任一工作项 | 存在时先读 `.nova/architecture/ARCHITECTURE_CONTRACTS.md`，再按当前影响读取相关已索引契约并运行 `validate_architecture.py --ready`；无法缩小时读取全部已索引契约，架构目录无索引或门禁失败时返回 `nova-architecture` |
 | 实施 `FEAT-*`、`PATCH-*`、`FIX-*` 或 `MAINT-*` | `references/implementation-sop.md` |
 | 版本 3 项目出现旧式设计文件名 | `references/design-document-standard.md` 的“旧式文件名迁移” |
 | 确定设计演进来源 | 候选终态设计头部元数据；证据不足或冲突时定向读取相关契约与直接依赖 |

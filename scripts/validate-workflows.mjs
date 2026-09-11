@@ -19,11 +19,10 @@ function forbidPattern(text, pattern, message) {
 
 requirePattern(ci, /^\s{2}pull_request:\s*$/m, "CI must run for pull requests");
 requirePattern(ci, /^\s{2}push:\s*\n\s{4}branches:\s*\[main\]\s*$/m, "CI push must target main only");
-requirePattern(
-  ci,
-  /os:\s*\[ubuntu-latest,\s*macos-latest,\s*windows-latest\]/,
-  "CI must cover Ubuntu, macOS, and Windows",
-);
+const platformMatrix = /os:\s*\[ubuntu-latest,\s*macos-latest,\s*windows-latest\]/g;
+if ([...ci.matchAll(platformMatrix)].length < 2) {
+  errors.push("plugin and governance CI must both cover Ubuntu, macOS, and Windows");
+}
 for (const command of [
   "npm test",
   "npm run check:version",

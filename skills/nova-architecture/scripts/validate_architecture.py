@@ -230,6 +230,8 @@ def git_repo_for_nova(nova_root: Path) -> Path | None:
         ["git", "-C", str(nova_root), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="strict",
         check=False,
     )
     if result.returncode:
@@ -387,11 +389,14 @@ def trusted_file_owner(
 ) -> str | None:
     try:
         relative = path.resolve().relative_to(repo).as_posix()
-        current = path.read_bytes()
     except (ValueError, OSError):
         return None
     head = module.git_blob(repo, "HEAD", relative)
-    if head is None or current != head:
+    clean = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
+        check=False,
+    )
+    if head is None or clean.returncode != 0:
         return None
     result = subprocess.run(
         ["git", "-C", str(repo), "log", "-1", "--format=%H", "--", relative],
@@ -418,10 +423,14 @@ def trusted_contract_binding(
     try:
         index_relative = index_path.resolve().relative_to(repo).as_posix()
         target_relative = target.resolve().relative_to(repo).as_posix()
-        current = target.read_bytes()
     except (ValueError, OSError):
         return False
-    if module.git_blob(repo, "HEAD", target_relative) != current:
+    current = module.git_blob(repo, "HEAD", target_relative)
+    clean = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", target_relative],
+        check=False,
+    )
+    if current is None or clean.returncode != 0:
         return False
     commit_hash = blamed_commit(repo, index_relative, line_number)
     if commit_hash is None:
@@ -445,11 +454,14 @@ def trusted_index_history(
 ) -> bool:
     try:
         relative = path.resolve().relative_to(repo).as_posix()
-        current = path.read_bytes()
     except (ValueError, OSError):
         return False
-    head = module.git_blob(repo, "HEAD", relative)
-    if head is None or current != head:
+    current = module.git_blob(repo, "HEAD", relative)
+    clean = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
+        check=False,
+    )
+    if current is None or clean.returncode != 0:
         return False
     result = subprocess.run(
         ["git", "-C", str(repo), "log", "--follow", "--format=%H", "--", relative],
@@ -487,6 +499,16 @@ def validate(path: Path, ready: bool) -> list[str]:
     text, errors = read(path)
     if text is None:
         return errors
+    module = nova_review_module()
+    repo = git_repo_for_nova(path.parent.parent)
+    if module is not None and repo is not None:
+        transaction_guard = getattr(module, "assert_review_transaction_clean", None)
+        if transaction_guard is not None:
+            try:
+                transaction_guard(repo)
+            except (module.NovaError, OSError) as exc:
+                errors.append(f"unfinished Nova Review transaction: {exc}")
+                return errors
     if path.name != "ARCHITECTURE_CONTRACTS.md":
         errors.append("architecture index must be named ARCHITECTURE_CONTRACTS.md")
     if sections(text) != SECTIONS:
@@ -608,7 +630,10 @@ def validate(path: Path, ready: bool) -> list[str]:
             errors.append(f"empty architecture directory is forbidden: {directory}")
         for file in candidate.rglob("*") if candidate.is_dir() else ():
             if file.is_file() and file.resolve() not in referenced:
-                errors.append(f"architecture file is not indexed: {file.relative_to(path.parent)}")
+                errors.append(
+                    "architecture file is not indexed: "
+                    + file.relative_to(path.parent).as_posix()
+                )
     module = nova_review_module()
     repo = git_repo_for_nova(nova_root)
     review_cache: dict[str, tuple[dict[str, object], dict[str, object]] | None] = {}

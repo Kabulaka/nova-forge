@@ -69,7 +69,7 @@ def current_project(cwd: Path) -> tuple[Path | None, Result]:
 
 def is_inside_project(root: Path, candidate: Path) -> bool:
     try:
-        return candidate.resolve().is_relative_to(root)
+        return candidate.resolve().is_relative_to(root.resolve())
     except (OSError, RuntimeError):
         return False
 
@@ -313,7 +313,7 @@ def check_delivery_ledgers(root: Path, suite_root: Path) -> Result:
             value = json.loads(ledger.read_text(encoding="utf-8"))
             requirement_ref = value.get("requirement_ref") if isinstance(value, dict) else None
             canonical = module.delivery_relative_path(str(requirement_ref or ""))
-            if str(ledger.relative_to(root)) != canonical:
+            if ledger.relative_to(root).as_posix() != canonical:
                 failures.append(
                     f"{ledger.relative_to(root)}: non-canonical delivery ledger path; "
                     f"expected {canonical}"
@@ -525,10 +525,13 @@ def check_audit(root: Path, suite_root: Path) -> Result:
         return Result("FAIL", "audit", f"missing audit validator: {review_script}")
     try:
         module = load_review_module(review_script)
+        transaction_guard = getattr(module, "assert_review_transaction_clean", None)
+        if transaction_guard is not None:
+            transaction_guard(root)
 
         def reader(relative: str) -> bytes | None:
             candidate = (root / relative).resolve()
-            if not candidate.is_relative_to(root):
+            if not is_inside_project(root, candidate):
                 raise ValueError(f"audit reference escapes project root: {relative}")
             return candidate.read_bytes() if candidate.is_file() else None
 
@@ -721,7 +724,7 @@ def check_local_links(root: Path) -> Result:
             except OSError as exc:
                 broken.append(f"{document.relative_to(root)} -> {raw_target}: {exc}")
                 continue
-            if not resolved.is_relative_to(root) or not resolved.exists():
+            if not is_inside_project(root, resolved) or not resolved.exists():
                 broken.append(f"{document.relative_to(root)} -> {raw_target}")
     if broken:
         details = broken[:DETAIL_LIMIT]
