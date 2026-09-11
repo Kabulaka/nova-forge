@@ -64,16 +64,39 @@ function listJson(directory) {
     .map((entry) => path.join(directory, entry.name));
 }
 
+function rendezvousKey(record) {
+  if (typeof record?.host !== "string" || typeof record?.cwdHash !== "string") return null;
+  return `${record.host}\0${record.cwdHash}`;
+}
+
+function liveInstanceKeys(value) {
+  const keys = new Set();
+  for (const file of listJson(value.instances)) {
+    try {
+      const record = readJsonFile(file);
+      const key = rendezvousKey(record);
+      if (key && Number.isInteger(record.pid) && processIsAlive(record.pid)) keys.add(key);
+    } catch {
+      // The main prune pass removes malformed records.
+    }
+  }
+  return keys;
+}
+
 function prune(value, now) {
+  const liveInstances = liveInstanceKeys(value);
   for (const directory of [value.claims, value.instances, value.bindings, value.active]) {
     for (const file of listJson(directory)) {
       try {
         const record = readJsonFile(file);
+        const alive = Number.isInteger(record.pid) && processIsAlive(record.pid);
+        const claimedByLiveInstance =
+          directory === value.claims && liveInstances.has(rendezvousKey(record));
         const old =
           directory !== value.active &&
           (!Number.isFinite(record.createdAt) || now - record.createdAt > RENDEZVOUS_TTL_MS);
-        const dead = Number.isInteger(record.pid) && !processIsAlive(record.pid);
-        if (old || dead) {
+        const dead = Number.isInteger(record.pid) && !alive;
+        if ((old && !alive && !claimedByLiveInstance) || dead) {
           removeIfExists(file);
           if (record.instanceId) removeIfExists(path.join(value.instances, `${record.instanceId}.secret`));
         }
