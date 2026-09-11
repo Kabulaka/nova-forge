@@ -518,8 +518,6 @@ def check_audit(root: Path, suite_root: Path) -> Result:
     audit_root = root / ".nova" / "audit"
     if not is_inside_project(root, audit_root):
         return Result("FAIL", "audit", ".nova/audit escapes project root")
-    if not audit_root.is_dir():
-        return Result("PASS", "audit", "audit data is not present (optional)")
     review_script = suite_root / "nova-review" / "scripts" / "nova_review.py"
     if not review_script.is_file():
         return Result("FAIL", "audit", f"missing audit validator: {review_script}")
@@ -528,6 +526,8 @@ def check_audit(root: Path, suite_root: Path) -> Result:
         transaction_guard = getattr(module, "assert_review_transaction_clean", None)
         if transaction_guard is not None:
             transaction_guard(root)
+        if not audit_root.is_dir():
+            return Result("PASS", "audit", "audit data is not present (optional)")
 
         def reader(relative: str) -> bytes | None:
             candidate = (root / relative).resolve()

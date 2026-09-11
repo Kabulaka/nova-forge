@@ -223,7 +223,7 @@ class NovaDoctorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             subprocess.run(["git", "init", "-q", str(root)], check=True)
-            (root / ".nova/audit").mkdir(parents=True)
+            (root / ".nova").mkdir()
             (root / ".git/nova-review-transaction").mkdir()
             result = DOCTOR.check_audit(root, WORKSPACE)
             self.assertEqual(result.status, "FAIL")

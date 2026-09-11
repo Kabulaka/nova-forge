@@ -202,6 +202,7 @@ def validate_legacy_design_snapshot(path: Path, text_snapshot: str) -> list[str]
         return [f"cannot resolve legacy design snapshot in Git repository: {exc}"]
 
     head_result = None
+    head_candidate = ""
     try:
         for candidate in git_head_path_candidates(relative_path):
             result = subprocess.run(
@@ -211,17 +212,29 @@ def validate_legacy_design_snapshot(path: Path, text_snapshot: str) -> list[str]
             )
             if result.returncode == 0:
                 head_result = result
+                head_candidate = candidate
                 break
     except OSError as exc:
         return [f"cannot verify legacy design snapshot in Git HEAD: {exc}"]
     if head_result is None:
         return [f"legacy design snapshot is not present in Git HEAD: {path.name}"]
-    content = text_snapshot.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
-    actual = "sha256:" + hashlib.sha256(content).hexdigest()
+    content = text_snapshot.encode("utf-8")
+    canonical = head_result.stdout
+    actual = "sha256:" + hashlib.sha256(canonical).hexdigest()
     if actual != expected:
         return [f"legacy design snapshot content does not match manifest: {path.name}"]
-    if head_result.stdout != content:
-        return [f"legacy design snapshot differs from Git HEAD: {path.name}"]
+    if content != canonical and content != canonical.replace(b"\n", b"\r\n"):
+        return [
+            f"legacy design snapshot content does not match manifest or Git HEAD: {path.name}"
+        ]
+    if head_candidate == relative_path:
+        clean = subprocess.run(
+            ["git", "-C", str(repository_root), "diff", "--quiet", "HEAD", "--", relative_path],
+            check=False,
+            capture_output=True,
+        )
+        if clean.returncode != 0:
+            return [f"legacy design snapshot differs from Git HEAD: {path.name}"]
     return []
 
 

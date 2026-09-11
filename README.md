@@ -208,7 +208,7 @@ npm run check
 在仓库根目录执行：
 
 ```bash
-# Windows、macOS 与 Linux 都使用当前 Python 3 解释器的 python 命令；Windows 不要求 WSL
+# 示例使用 python；若环境只提供 python3，或 Windows 使用 py -3，请替换为对应 Python 3 启动器；Windows 不要求 WSL
 
 # 校验版本 3 项目蓝图
 python skills/nova-development/scripts/validate_blueprint.py .nova/PROJECT_BLUEPRINT.md
@@ -233,6 +233,23 @@ python skills/nova-doctor/scripts/nova_doctor.py
 # 校验技能与全局治理文件的发现链接
 python skills/nova-review/scripts/validate_discovery.py --workspace "$PWD" --codex-home ~/.codex --claude-home ~/.claude
 ```
+
+Windows 原生 Review 关闭可在 PowerShell 中按以下顺序执行（尖括号内容替换为本轮实际文件或编号）：
+
+```powershell
+$ReviewFixPaths = @("<review_fix_scope-path-1>", "<review_fix_scope-path-2>")
+git add -- $ReviewFixPaths
+py -3 skills/nova-review/scripts/nova_review.py check-manifest --repo . --manifest <review-manifest.json>
+py -3 skills/nova-review/scripts/nova_review.py record-pass --repo . --manifest <review-manifest.json>
+$ClosureOutputPaths = @("<record-pass-output-path-1>", "<record-pass-output-path-2>")
+git add -- $ClosureOutputPaths
+git diff --cached --binary --output=<closure.diff>
+py -3 skills/nova-review/scripts/nova_review.py validate-audit-message --repo . --message-file <closure-message.txt> --diff-file <closure.diff>
+git commit -F <closure-message.txt>
+py -3 skills/nova-review/scripts/nova_review.py query --repo . --work-item <FEAT-...>
+```
+
+`check-manifest` 前必须仅暂存 manifest 的 `review_fix_scope` 所列实际路径；`record-pass` 写出确定性审计与关闭投影后，再把它实际生成的每个精确路径加入暂存区，与 Review 修正形成同一暂存闭包。`record-pass` 只能在用户已授权的 Review PASS 闭环中执行。`check-manifest` 与 `query` 是只读检查；若读取检测到未完成事务会失败封闭，应使用相同 manifest 重新运行 `record-pass` 持锁恢复，成功后再读取。无法安全判定的事务仍保持失败封闭。Windows 支持基线限定为本机 NTFS；SMB 网络共享、ReFS、同步盘，以及突然断电后的物理落盘原子性或持久性不在承诺范围内。
 
 设计文档可单独校验：
 

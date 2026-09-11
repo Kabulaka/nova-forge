@@ -566,6 +566,43 @@ class ValidatorTests(unittest.TestCase):
             result = self.run_validator(path, design=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_legacy_snapshot_accepts_only_exact_or_clean_full_crlf_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".gitattributes").write_text(
+                ".nova/design/*.md text\n", encoding="utf-8"
+            )
+            path = self.write_registered_legacy_design(root)
+            canonical = path.read_bytes()
+            crlf = canonical.replace(b"\n", b"\r\n")
+            path.write_bytes(crlf)
+            clean = subprocess.run(
+                ["git", "-C", str(root), "diff", "--quiet", "HEAD", "--", path.relative_to(root).as_posix()],
+                check=False,
+            )
+            self.assertEqual(clean.returncode, 0)
+            self.assertEqual(
+                VALIDATOR_MODULE.validate_legacy_design_snapshot(
+                    path, crlf.decode("utf-8")
+                ),
+                [],
+            )
+
+            mixed = canonical.replace(b"\n", b"\r\n", 1)
+            path.write_bytes(mixed)
+            self.assertTrue(
+                VALIDATOR_MODULE.validate_legacy_design_snapshot(
+                    path, mixed.decode("utf-8")
+                )
+            )
+            bare_cr = canonical.replace(b"\n", b"\r", 1)
+            path.write_bytes(bare_cr)
+            self.assertTrue(
+                VALIDATOR_MODULE.validate_legacy_design_snapshot(
+                    path, bare_cr.decode("utf-8")
+                )
+            )
+
     def test_blueprint_requirement_must_match_referenced_design(self) -> None:
         requirement_a = "REQ-019a1234-5678-7abc-8def-0123456789ab@v1"
         requirement_b = "REQ-019a2234-5678-7abc-8def-0123456789ab@v1"

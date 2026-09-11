@@ -2322,7 +2322,7 @@ def load_completed_from_reader(
     feature_override: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
     index_relative = feature_index_path(repo, work_item).relative_to(repo).as_posix()
-    index_path = safe_repo_path(repo, index_relative, "feature index")
+    index_path = lexical_repo_path(repo, index_relative, "feature index")
     index_bytes = reader(index_relative)
     if index_bytes is None:
         return None
@@ -2339,7 +2339,7 @@ def load_completed_from_reader(
         raise NovaError(f"invalid feature index values for {work_item}")
 
     archive_relative = f".nova/audit/features/{index['feature_year']:04d}.jsonl"
-    archive = safe_repo_path(repo, archive_relative, "feature archive")
+    archive = lexical_repo_path(repo, archive_relative, "feature archive")
     if feature_override is None:
         feature_matches: list[dict[str, Any]] = []
         archive_bytes = reader(archive_relative)
@@ -2370,7 +2370,7 @@ def load_completed_from_reader(
         raise NovaError(f"feature index batch mismatch for {work_item}")
 
     normalized_review_path = normalize_nova_path(index["review_path"])
-    review_path = safe_repo_path(repo, normalized_review_path, "review_path")
+    review_path = lexical_repo_path(repo, normalized_review_path, "review_path")
     expected_review_path = review_path_for_values(repo, completed_at, index["review_batch"])
     if review_path != expected_review_path:
         raise NovaError(f"feature index Review path mismatch for {work_item}")
@@ -2714,7 +2714,7 @@ def validate_audit_snapshot(
     )
     if len(review_paths) != 1:
         raise NovaError("audit diff must contain exactly one matching Review record")
-    review_path = safe_repo_path(repo, review_paths[0], "Review record")
+    review_path = lexical_repo_path(repo, review_paths[0], "Review record")
     review_bytes = reader(review_paths[0])
     if review_bytes is None:
         raise NovaError("matching Review record is absent from the validated Git snapshot")
@@ -2841,7 +2841,7 @@ def validate_audit_snapshot(
             f"extra={sorted(changed - expected)}"
         )
     for path in changed:
-        safe_repo_path(repo, path, "audit diff path")
+        lexical_repo_path(repo, path, "audit diff path")
         if path == archive_relative or path in fix_paths:
             continue
         if reader(path) is None:
@@ -3112,13 +3112,19 @@ def reject_symlink_components(repo: Path, candidate: Path, field: str) -> None:
             raise NovaError(f"{field} parent is not a directory: {current}")
 
 
-def safe_repo_path(repo: Path, value: str, field: str) -> Path:
+def lexical_repo_path(repo: Path, value: str, field: str) -> Path:
     repo = _absolute_path(repo)
     candidate = _absolute_path(repo / value)
     try:
         candidate.relative_to(repo)
     except ValueError as exc:
         raise NovaError(f"{field} must stay inside repository") from exc
+    return candidate
+
+
+def safe_repo_path(repo: Path, value: str, field: str) -> Path:
+    repo = _absolute_path(repo)
+    candidate = lexical_repo_path(repo, value, field)
     reject_symlink_components(repo, candidate, field)
     return candidate
 
@@ -3641,7 +3647,13 @@ def validate_manifest(repo: Path, manifest: dict[str, Any]) -> dict[str, Any]:
                     )
                     if delivery_bytes is not None:
                         ledger = strict_json_object(delivery_bytes, "delivery ledger")
-                        if canonical_delivery_ledger(ledger) != delivery_bytes:
+                        delivery_relative = delivery_path.relative_to(repo).as_posix()
+                        if not worktree_bytes_are_canonical_projection(
+                            repo,
+                            delivery_relative,
+                            delivery_bytes,
+                            canonical_delivery_ledger(ledger),
+                        ):
                             raise NovaError("delivery ledger must use canonical UTF-8 JSON")
                         validate_delivery_ledger_data(
                             repo,
@@ -4761,7 +4773,8 @@ def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         + "\n"
     ).encode("utf-8")
-    temporary = path.with_name(f".{path.name}.{os.getpid()}-{secrets.token_hex(6)}")
+    temporary = path.with_name(f".{path.name}.tmp")
+    _remove_if_present(temporary)
     _write_fsynced(temporary, content)
     try:
         os.replace(temporary, path)
@@ -4930,7 +4943,11 @@ def _cleanup_transaction_state(
     marker_path: Path,
     entries: list[dict[str, Any]],
 ) -> None:
-    allowed = {journal_path.name, marker_path.name}
+    temporary_paths = {
+        journal_path.with_name(f".{journal_path.name}.tmp"),
+        marker_path.with_name(f".{marker_path.name}.tmp"),
+    }
+    allowed = {journal_path.name, marker_path.name, *(path.name for path in temporary_paths)}
     for entry in entries:
         allowed.add(entry["new_file"])
         if entry["backup_file"]:
@@ -4944,6 +4961,8 @@ def _cleanup_transaction_state(
             _remove_if_present(state / entry["backup_file"])
     _remove_if_present(marker_path)
     _remove_if_present(journal_path)
+    for temporary in temporary_paths:
+        _remove_if_present(temporary)
     try:
         state.rmdir()
     except FileNotFoundError:
@@ -4957,6 +4976,17 @@ def _recover_portable_transaction(repo: Path) -> bool:
     if journal is None:
         if not state.exists():
             return False
+        known_bootstrap = {
+            journal_path.with_name(f".{journal_path.name}.tmp"),
+            marker_path.with_name(f".{marker_path.name}.tmp"),
+        }
+        unexpected = [path for path in state.iterdir() if path not in known_bootstrap]
+        if unexpected:
+            raise NovaError(
+                f"Nova Review transaction state lacks a recoverable journal: {state}"
+            )
+        for temporary in known_bootstrap:
+            _remove_if_present(temporary)
         try:
             state.rmdir()
         except OSError as exc:
@@ -5074,45 +5104,48 @@ def _atomic_write_group_portable(
         if _path_bytes(target) != expected:
             raise NovaError(f"validated source changed before Review closure: {target}")
 
+    transaction_id = uuid.uuid4().hex
+    entries: list[dict[str, Any]] = []
+    for sequence, (target, relative, expected, content) in enumerate(targets):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _secure_relative_path(repo, target, "transaction output")
+        current = _path_bytes(target)
+        if current != expected:
+            raise NovaError(f"source changed during Review closure: {target}")
+        entries.append(
+            {
+                "path": relative.as_posix(),
+                "expected_sha256": (
+                    hashlib.sha256(expected).hexdigest() if expected is not None else None
+                ),
+                "content_sha256": hashlib.sha256(content).hexdigest(),
+                "existed": expected is not None,
+                "new_file": f"{transaction_id}-{sequence}.new",
+                "backup_file": (
+                    f"{transaction_id}-{sequence}.old" if expected is not None else None
+                ),
+            }
+        )
+    digest = _transaction_digest(transaction_id, entries)
+    journal = {
+        "schema": TRANSACTION_SCHEMA,
+        "transaction_id": transaction_id,
+        "phase": "PREPARED",
+        "digest": digest,
+        "entries": entries,
+    }
     state.mkdir(mode=0o700)
     if _is_reparse_point(state):
         raise NovaError(f"invalid Nova Review transaction state directory: {state}")
-    transaction_id = uuid.uuid4().hex
-    entries: list[dict[str, Any]] = []
     marker_written = False
     try:
-        for sequence, (target, relative, expected, content) in enumerate(targets):
-            target.parent.mkdir(parents=True, exist_ok=True)
-            _secure_relative_path(repo, target, "transaction output")
-            current = _path_bytes(target)
-            if current != expected:
-                raise NovaError(f"source changed during Review closure: {target}")
-            new_name = f"{transaction_id}-{sequence}.new"
-            backup_name = f"{transaction_id}-{sequence}.old" if expected is not None else None
-            _write_fsynced(state / new_name, content)
-            if backup_name:
-                _write_fsynced(state / backup_name, expected)
-            entries.append(
-                {
-                    "path": relative.as_posix(),
-                    "expected_sha256": (
-                        hashlib.sha256(expected).hexdigest() if expected is not None else None
-                    ),
-                    "content_sha256": hashlib.sha256(content).hexdigest(),
-                    "existed": expected is not None,
-                    "new_file": new_name,
-                    "backup_file": backup_name,
-                }
-            )
-        digest = _transaction_digest(transaction_id, entries)
-        journal = {
-            "schema": TRANSACTION_SCHEMA,
-            "transaction_id": transaction_id,
-            "phase": "PREPARED",
-            "digest": digest,
-            "entries": entries,
-        }
         _write_json_atomic(journal_path, journal)
+        for sequence, (_, _, expected, content) in enumerate(targets):
+            entry = entries[sequence]
+            _write_fsynced(state / entry["new_file"], content)
+            if entry["backup_file"]:
+                assert expected is not None
+                _write_fsynced(state / entry["backup_file"], expected)
         _transaction_fault("PREPARED")
         journal["phase"] = "APPLYING"
         _write_json_atomic(journal_path, journal)
@@ -5159,18 +5192,20 @@ def _atomic_write_group_portable(
                 journal["phase"] = "CLEANED"
                 _write_json_atomic(journal_path, journal)
                 _cleanup_transaction_state(state, journal_path, marker_path, entries)
-            except Exception:
-                pass
+            except Exception as cleanup_error:
+                raise NovaError(
+                    "Nova Review outputs were committed but transaction cleanup requires recovery: "
+                    f"{cleanup_error}"
+                ) from cleanup_error
             return
         if not journal_path.exists():
-            for entry in entries:
-                _remove_if_present(state / entry["new_file"])
-                if entry["backup_file"]:
-                    _remove_if_present(state / entry["backup_file"])
             try:
-                state.rmdir()
-            except OSError:
-                pass
+                _recover_portable_transaction(repo)
+            except Exception as recovery_error:
+                raise NovaError(
+                    "Nova Review closure failed before journal publication and cleanup "
+                    f"requires recovery: {recovery_error}"
+                ) from recovery_error
             raise
         try:
             _recover_portable_transaction(repo)

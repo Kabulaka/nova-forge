@@ -380,6 +380,28 @@ def trusted_line_owner(
     return trusted_commit_owner(module, repo, commit_hash, relative, cache, audit_cache)
 
 
+def worktree_matches_head_projection(
+    module: ModuleType, repo: Path, path: Path, relative: str
+) -> bytes | None:
+    """Return HEAD bytes only for an exact or clean full CRLF projection."""
+    try:
+        current = path.read_bytes()
+    except OSError:
+        return None
+    head = module.git_blob(repo, "HEAD", relative)
+    if head is None:
+        return None
+    if current == head:
+        return head
+    if current != head.replace(b"\n", b"\r\n"):
+        return None
+    clean = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
+        check=False,
+    )
+    return head if clean.returncode == 0 else None
+
+
 def trusted_file_owner(
     module: ModuleType,
     repo: Path,
@@ -391,12 +413,8 @@ def trusted_file_owner(
         relative = path.resolve().relative_to(repo).as_posix()
     except (ValueError, OSError):
         return None
-    head = module.git_blob(repo, "HEAD", relative)
-    clean = subprocess.run(
-        ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
-        check=False,
-    )
-    if head is None or clean.returncode != 0:
+    head = worktree_matches_head_projection(module, repo, path, relative)
+    if head is None:
         return None
     result = subprocess.run(
         ["git", "-C", str(repo), "log", "-1", "--format=%H", "--", relative],
@@ -425,12 +443,10 @@ def trusted_contract_binding(
         target_relative = target.resolve().relative_to(repo).as_posix()
     except (ValueError, OSError):
         return False
-    current = module.git_blob(repo, "HEAD", target_relative)
-    clean = subprocess.run(
-        ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", target_relative],
-        check=False,
+    current = worktree_matches_head_projection(
+        module, repo, target, target_relative
     )
-    if current is None or clean.returncode != 0:
+    if current is None:
         return False
     commit_hash = blamed_commit(repo, index_relative, line_number)
     if commit_hash is None:
@@ -456,12 +472,8 @@ def trusted_index_history(
         relative = path.resolve().relative_to(repo).as_posix()
     except (ValueError, OSError):
         return False
-    current = module.git_blob(repo, "HEAD", relative)
-    clean = subprocess.run(
-        ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", relative],
-        check=False,
-    )
-    if current is None or clean.returncode != 0:
+    current = worktree_matches_head_projection(module, repo, path, relative)
+    if current is None:
         return False
     result = subprocess.run(
         ["git", "-C", str(repo), "log", "--follow", "--format=%H", "--", relative],

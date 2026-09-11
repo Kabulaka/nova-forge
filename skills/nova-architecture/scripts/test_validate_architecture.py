@@ -15,6 +15,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = ROOT / "scripts/validate_architecture.py"
+VALIDATOR_SPEC = importlib.util.spec_from_file_location("nova_architecture_validator", VALIDATOR)
+assert VALIDATOR_SPEC is not None and VALIDATOR_SPEC.loader is not None
+VALIDATOR_MODULE = importlib.util.module_from_spec(VALIDATOR_SPEC)
+VALIDATOR_SPEC.loader.exec_module(VALIDATOR_MODULE)
 EXAMPLE_NOVA = ROOT / "references/examples/order-platform/.nova"
 REVIEW_TOOL = ROOT.parent / "nova-review/scripts/nova_review.py"
 REVIEW_SPEC = importlib.util.spec_from_file_location("nova_architecture_review_fixture", REVIEW_TOOL)
@@ -493,6 +497,20 @@ class ArchitectureValidatorTests(unittest.TestCase):
             result = self.run_validator("--ready", str(path))
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("parallel development gate is not ready", result.stdout)
+
+    def test_trusted_bytes_reject_non_crlf_projection_before_git_cleanliness(self) -> None:
+        class FakeReviewModule:
+            @staticmethod
+            def git_blob(repo: Path, revision: str, relative: str) -> bytes:
+                return b"canonical\n"
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "contract.md"
+            path.write_bytes(b"arbitrary clean-filter projection\n")
+            trusted = VALIDATOR_MODULE.worktree_matches_head_projection(
+                FakeReviewModule(), Path(temporary), path, "contract.md"
+            )
+            self.assertIsNone(trusted)
 
     def test_invalid_asyncapi_and_incomplete_foundation_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

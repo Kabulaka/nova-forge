@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateGovernanceCheckout } from "./workflow-policy.mjs";
+import { validateCiWorkflow, validateGovernanceCheckout } from "./workflow-policy.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ci = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
@@ -19,20 +19,7 @@ function forbidPattern(text, pattern, message) {
 
 requirePattern(ci, /^\s{2}pull_request:\s*$/m, "CI must run for pull requests");
 requirePattern(ci, /^\s{2}push:\s*\n\s{4}branches:\s*\[main\]\s*$/m, "CI push must target main only");
-const platformMatrix = /os:\s*\[ubuntu-latest,\s*macos-latest,\s*windows-latest\]/g;
-if ([...ci.matchAll(platformMatrix)].length < 2) {
-  errors.push("plugin and governance CI must both cover Ubuntu, macOS, and Windows");
-}
-for (const command of [
-  "npm test",
-  "npm run check:version",
-  "npm run check:plugin",
-  "npm run check:release-notes",
-  "npm run check:workflow",
-  "npm run check:package",
-]) {
-  requirePattern(ci, new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `CI missing ${command}`);
-}
+errors.push(...validateCiWorkflow(ci));
 forbidPattern(ci, /^\s{4}tags:/m, "CI workflow must not publish from tags");
 errors.push(...validateGovernanceCheckout(ci));
 

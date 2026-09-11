@@ -1,0 +1,77 @@
+{
+  "batch_id": "NR-20260911-windows-native",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "feature",
+      "commits": [
+        {
+          "commit": "793daf334344c7b7c7fb15b21bb331cbb7e25781",
+          "repository": "main"
+        }
+      ],
+      "design_ref": ".nova/design/2026-09-10_Windows原生审计关闭.md#wp-01-windows-native-closure",
+      "package_ids": [
+        "WP-01"
+      ],
+      "validation": "CI-equivalent: codex 21, requirements 13, architecture 34, development 131, doctor 18, review 121, npm check 78 (pass)",
+      "work_item": "FEAT-01a08b2d-e4d1-7a27-b2b6-edf275cef8e4"
+    }
+  ],
+  "manifest_sha256": "76decf22b6c01a8f78c55aad4c6870ece4f80f3bda79cd05d68d957f132ea2d6",
+  "review_content_sha256": "1790d1351737ca1a1d12069c71527847db0b29330b6242d15d3badaff8b41467",
+  "review_fix_scope": [
+    "main:.github/workflows/ci.yml",
+    "main:README.md",
+    "main:scripts/validate-workflows.mjs",
+    "main:scripts/workflow-policy.mjs",
+    "main:skills/nova-architecture/scripts/test_validate_architecture.py",
+    "main:skills/nova-architecture/scripts/validate_architecture.py",
+    "main:skills/nova-development/scripts/test_validate_blueprint.py",
+    "main:skills/nova-development/scripts/validate_blueprint.py",
+    "main:skills/nova-doctor/scripts/nova_doctor.py",
+    "main:skills/nova-doctor/scripts/test_nova_doctor.py",
+    "main:skills/nova-review/scripts/nova_review.py",
+    "main:skills/nova-review/scripts/test_nova_review.py",
+    "main:tests/workflow.test.mjs"
+  ],
+  "review_fix_sha256": "c8c6dc1ac3227822d61000520af4f2fd96ebe51dbc53f188adddaf511b99a7cf",
+  "review_heads": {
+    "main": "793daf334344c7b7c7fb15b21bb331cbb7e25781"
+  },
+  "review_round": 3,
+  "review_scope": [
+    "main:.github/workflows/ci.yml",
+    "main:.nova/PROJECT_BLUEPRINT.md",
+    "main:.nova/design/2026-09-10_Windows原生审计关闭.md",
+    "main:README.md",
+    "main:scripts/validate-workflows.mjs",
+    "main:skills/nova-architecture/SKILL.md",
+    "main:skills/nova-architecture/scripts/test_validate_architecture.py",
+    "main:skills/nova-architecture/scripts/test_validate_shared_capabilities.py",
+    "main:skills/nova-architecture/scripts/validate_architecture.py",
+    "main:skills/nova-architecture/scripts/validate_shared_capabilities.py",
+    "main:skills/nova-development/SKILL.md",
+    "main:skills/nova-development/references/implementation-sop.md",
+    "main:skills/nova-development/scripts/migrate_nova_layout.py",
+    "main:skills/nova-development/scripts/nova_delivery.py",
+    "main:skills/nova-development/scripts/test_migrate_nova_layout.py",
+    "main:skills/nova-development/scripts/test_validate_blueprint.py",
+    "main:skills/nova-development/scripts/validate_blueprint.py",
+    "main:skills/nova-doctor/SKILL.md",
+    "main:skills/nova-doctor/scripts/nova_doctor.py",
+    "main:skills/nova-doctor/scripts/test_nova_doctor.py",
+    "main:skills/nova-requirements/SKILL.md",
+    "main:skills/nova-requirements/scripts/test_validate_requirements.py",
+    "main:skills/nova-requirements/scripts/validate_requirements.py",
+    "main:skills/nova-review/SKILL.md",
+    "main:skills/nova-review/references/audit-contract.md",
+    "main:skills/nova-review/references/commit-contract.md",
+    "main:skills/nova-review/scripts/nova_review.py",
+    "main:skills/nova-review/scripts/test_nova_review.py",
+    "main:skills/nova-review/scripts/test_validate_discovery.py"
+  ],
+  "reviewed_at": "2026-09-11T10:12:30+08:00",
+  "reviewer": "codex-review-team",
+  "schema": 2
+}

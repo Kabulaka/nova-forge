@@ -1871,6 +1871,100 @@ class NovaReviewTests(unittest.TestCase):
                 json.loads(queried.stdout)["features"][0]["work_item"], work_item
             )
 
+    def test_schema_2_feature_closes_from_clean_crlf_delivery_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            work_item, commits, _, ledger_path, _ = self.prepare_multi_commit_feature(repo)
+            attributes = repo / ".git/info/attributes"
+            attributes.parent.mkdir(parents=True, exist_ok=True)
+            attributes.write_text(".nova/delivery/*.json text\n", encoding="utf-8")
+            canonical = ledger_path.read_bytes()
+            ledger_path.write_bytes(canonical.replace(b"\n", b"\r\n"))
+            clean = subprocess.run(
+                ["git", "-C", str(repo), "diff", "--quiet", "HEAD", "--", ledger_path.relative_to(repo).as_posix()],
+                check=False,
+            )
+            self.assertEqual(clean.returncode, 0)
+            manifest: dict[str, object] = {
+                "schema": 2,
+                "batch_id": "NR-20260904-multi-crlf",
+                "reviewed_at": "2026-09-04T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [
+                    {
+                        "work_item": work_item,
+                        "change_class": "feature",
+                        "commits": commits,
+                        "validation": "clean CRLF delivery fixture (pass)",
+                        "design_ref": ".nova/design/2026-09-04_multi.md#wp-01-multi",
+                        "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                        "design_file": ".nova/design/2026-09-04_multi.md",
+                        "package_ids": ["WP-01"],
+                    }
+                ],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review-multi-crlf.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            checked = self.run_tool(
+                "check-manifest", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            subprocess.run(["git", "-C", str(repo), "add", str(ledger_path)], check=True)
+            self.commit_audit(repo, manifest)
+            queried = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertEqual(queried.returncode, 0, queried.stdout + queried.stderr)
+
+    def test_historical_query_ignores_current_worktree_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            work_item, commits, _, ledger_path, _ = self.prepare_multi_commit_feature(repo)
+            manifest: dict[str, object] = {
+                "schema": 2,
+                "batch_id": "NR-20260904-history-symlink",
+                "reviewed_at": "2026-09-04T12:00:00+08:00",
+                "reviewer": "review-agent",
+                "conclusion": "PASS",
+                "items": [{
+                    "work_item": work_item,
+                    "change_class": "feature",
+                    "commits": commits,
+                    "validation": "historical symlink fixture (pass)",
+                    "design_ref": ".nova/design/2026-09-04_multi.md#wp-01-multi",
+                    "blueprint": ".nova/PROJECT_BLUEPRINT.md",
+                    "design_file": ".nova/design/2026-09-04_multi.md",
+                    "package_ids": ["WP-01"],
+                }],
+            }
+            self.add_review_evidence(repo, manifest)
+            manifest_path = repo / "review-history-symlink.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            recorded = self.run_tool(
+                "record-pass", "--repo", str(repo), "--manifest", str(manifest_path)
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+            subprocess.run(["git", "-C", str(repo), "add", str(ledger_path)], check=True)
+            self.commit_audit(repo, manifest)
+            index_path = NOVA_TOOL.feature_index_path(repo, work_item)
+            outside = repo / "outside-index.json"
+            outside.write_text("{}\n", encoding="utf-8")
+            index_path.unlink()
+            try:
+                index_path.symlink_to(outside)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
+            queried = self.run_tool(
+                "query", "--repo", str(repo), "--work-item", work_item
+            )
+            self.assertEqual(queried.returncode, 0, queried.stdout + queried.stderr)
+
     def test_new_architecture_id_is_uuid7_and_never_a_work_item(self) -> None:
         architecture_ref = NOVA_TOOL.new_architecture_id()
         self.assertRegex(architecture_ref, NOVA_TOOL.ARCHITECTURE_REF_RE)
@@ -4078,6 +4172,119 @@ class NovaReviewTests(unittest.TestCase):
                     )
             self.assertEqual(first.read_bytes(), b"a-old\n")
             self.assertEqual(second.read_bytes(), b"b-old\n")
+            self.assertFalse(NOVA_TOOL.review_transaction_pending(repo))
+
+    def test_portable_transaction_cleans_payload_and_journal_write_failures(self) -> None:
+        for failure in ("create", "write", "fsync", "journal-replace"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                repo = Path(directory)
+                target = repo / "audit.json"
+                target.write_bytes(b"old\n")
+                original_open = NOVA_TOOL.os.open
+                original_write = NOVA_TOOL.os.write
+                original_fsync = NOVA_TOOL.os.fsync
+                original_replace = NOVA_TOOL.os.replace
+                payload_descriptor: int | None = None
+
+                def fail_open(path: Path, flags: int, mode: int) -> int:
+                    nonlocal payload_descriptor
+                    if failure == "create" and Path(path).name.endswith(".new"):
+                        raise OSError("forced payload create failure")
+                    descriptor = original_open(path, flags, mode)
+                    if Path(path).name.endswith(".new"):
+                        payload_descriptor = descriptor
+                    return descriptor
+
+                def fail_write(descriptor: int, content: bytes) -> int:
+                    if failure == "write" and descriptor == payload_descriptor:
+                        raise OSError("forced payload write failure")
+                    return original_write(descriptor, content)
+
+                def fail_fsync(descriptor: int) -> None:
+                    if failure == "fsync" and descriptor == payload_descriptor:
+                        raise OSError("forced payload fsync failure")
+                    original_fsync(descriptor)
+
+                def fail_replace(source: Path, destination: Path) -> None:
+                    if failure == "journal-replace" and Path(destination).name == "journal.json":
+                        raise OSError("forced journal replace failure")
+                    original_replace(source, destination)
+
+                with mock.patch.object(NOVA_TOOL.os, "open", side_effect=fail_open), mock.patch.object(
+                    NOVA_TOOL.os, "write", side_effect=fail_write
+                ), mock.patch.object(NOVA_TOOL.os, "fsync", side_effect=fail_fsync), mock.patch.object(
+                    NOVA_TOOL.os, "replace", side_effect=fail_replace
+                ):
+                    with self.assertRaises(OSError):
+                        NOVA_TOOL._atomic_write_group_portable(
+                            repo, {target: (b"old\n", b"new\n")}
+                        )
+                self.assertEqual(target.read_bytes(), b"old\n")
+                self.assertFalse(NOVA_TOOL.review_transaction_pending(repo))
+
+    def test_portable_transaction_recovers_pre_journal_and_payload_process_kills(self) -> None:
+        for failure in ("journal", "payload"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                repo = Path(directory)
+                target = repo / "audit.json"
+                target.write_bytes(b"old\n")
+                code = textwrap.dedent(
+                    """
+                    import importlib.util
+                    import os
+                    import pathlib
+                    import sys
+
+                    spec = importlib.util.spec_from_file_location("nova_review_prepared_kill", sys.argv[1])
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    repo = pathlib.Path(sys.argv[2])
+                    failure = sys.argv[3]
+                    original = module._write_fsynced
+                    def kill_during_write(path, content, *, exclusive=True):
+                        selected = path.name == ".journal.json.tmp" if failure == "journal" else path.name.endswith(".new")
+                        if selected:
+                            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+                            descriptor = os.open(path, flags, 0o600)
+                            os.write(descriptor, content[:max(1, len(content) // 2)])
+                            os.fsync(descriptor)
+                            os._exit(92)
+                        original(path, content, exclusive=exclusive)
+                    module._write_fsynced = kill_during_write
+                    target = repo / "audit.json"
+                    module._atomic_write_group_portable(repo, {target: (b"old\\n", b"new\\n")})
+                    """
+                )
+                killed = subprocess.run(
+                    [sys.executable, "-c", code, str(TOOL), str(repo), failure],
+                    check=False,
+                )
+                self.assertEqual(killed.returncode, 92)
+                self.assertTrue(NOVA_TOOL.review_transaction_pending(repo))
+                self.assertTrue(NOVA_TOOL._recover_portable_transaction(repo))
+                self.assertEqual(target.read_bytes(), b"old\n")
+                self.assertFalse(NOVA_TOOL.review_transaction_pending(repo))
+
+    def test_portable_committed_cleanup_failure_returns_nonzero_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            target = repo / "audit.json"
+            target.write_bytes(b"old\n")
+
+            def fail_after_commit(phase: str, step: int | None = None) -> None:
+                if phase == "COMMITTED":
+                    raise OSError("forced post-commit failure")
+
+            with mock.patch.object(NOVA_TOOL, "_transaction_fault", side_effect=fail_after_commit), mock.patch.object(
+                NOVA_TOOL, "_cleanup_transaction_state", side_effect=OSError("persistent cleanup failure")
+            ):
+                with self.assertRaisesRegex(NOVA_TOOL.NovaError, "committed.*requires recovery"):
+                    NOVA_TOOL._atomic_write_group_portable(
+                        repo, {target: (b"old\n", b"new\n")}
+                    )
+            self.assertEqual(target.read_bytes(), b"new\n")
+            self.assertTrue(NOVA_TOOL.review_transaction_pending(repo))
+            self.assertTrue(NOVA_TOOL._recover_portable_transaction(repo))
             self.assertFalse(NOVA_TOOL.review_transaction_pending(repo))
 
     def test_portable_transaction_preserves_unknown_concurrent_content(self) -> None:
