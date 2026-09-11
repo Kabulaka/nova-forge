@@ -3,14 +3,12 @@
     "nova-checkpoint": {
       "command": "node",
       "args": [
-        "${PLUGIN_ROOT}/runtime/mcp/server.mjs",
+        "./runtime/mcp/server.mjs",
         "--host",
         "codex"
       ],
-      "env": {
-        "NOVA_LEGACY_PLUGIN_DATA": "${PLUGIN_DATA}",
-        "NOVA_PLUGIN_ROOT": "${PLUGIN_ROOT}"
-      }
+      "cwd": ".",
+      "default_tools_approval_mode": "approve"
     }
   }
 }

@@ -51,9 +51,18 @@ const codexServer = codexMcp.mcpServers?.["nova-checkpoint"];
 requireValue(codexServer?.command === "node", "Codex MCP command must use node", errors);
 requireValue(codexServer?.args?.includes("codex"), "Codex MCP host binding mismatch", errors);
 requireValue(
-  codexServer?.env?.NOVA_LEGACY_PLUGIN_DATA === "${PLUGIN_DATA}" &&
-    !Object.hasOwn(codexServer?.env || {}, "NOVA_PLUGIN_DATA"),
-  "Codex plugin data must be migration-only",
+  codexServer?.args?.[0] === "./runtime/mcp/server.mjs" && codexServer?.cwd === ".",
+  "Codex MCP must resolve its executable from the plugin-root cwd",
+  errors,
+);
+requireValue(
+  !Object.hasOwn(codexServer, "env"),
+  "Codex MCP must not pass unsupported plugin path placeholders through env",
+  errors,
+);
+requireValue(
+  codexServer?.default_tools_approval_mode === "approve",
+  "Codex checkpoint tools must be approved for noninteractive lifecycle use",
   errors,
 );
 const claudeServer = claude.mcpServers?.["nova-checkpoint"];

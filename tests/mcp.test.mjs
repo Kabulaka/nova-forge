@@ -1,10 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { McpRuntime, handleRpc } from "../runtime/mcp/server.mjs";
+import {
+  McpRuntime,
+  handleRpc,
+  resolveMcpPluginRoot,
+} from "../runtime/mcp/server.mjs";
 import { claimSession } from "../runtime/core/rendezvous.mjs";
 import { markEvent, startSession } from "../runtime/core/state-machine.mjs";
 import { cwdKey, scopeKey } from "../runtime/core/util.mjs";
 import { pluginRoot, saveInput, temporaryDirectory } from "./helpers.mjs";
+
+test("Codex MCP resolves plugin root from its configured cwd without placeholder env", () => {
+  assert.equal(resolveMcpPluginRoot("codex", {}, pluginRoot), pluginRoot);
+  assert.equal(
+    resolveMcpPluginRoot("codex", { NOVA_PLUGIN_ROOT: pluginRoot }, "/ignored"),
+    pluginRoot,
+  );
+  assert.throws(
+    () => resolveMcpPluginRoot("codex", {}, "relative"),
+    /absolute plugin root is unavailable/,
+  );
+  assert.throws(
+    () => resolveMcpPluginRoot("claude-code", {}, pluginRoot),
+    /absolute plugin root is unavailable/,
+  );
+});
 
 test("MCP tools expose no host or session selector and use the bound scope", () => {
   const temp = temporaryDirectory();

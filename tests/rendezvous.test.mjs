@@ -42,6 +42,64 @@ test("one hook claim binds exactly one MCP instance without exposing session id"
   }
 });
 
+test("Codex binds one plugin-root MCP instance to one project-root hook claim", () => {
+  const temp = temporaryDirectory();
+  try {
+    const projectRoot = path.join(temp.directory, "project");
+    const sessionKey = scopeKey("codex", "portable-plugin-session");
+    const registration = registerMcpInstance(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      allowCwdMismatch: true,
+      pid: process.pid,
+      now: 1_000,
+    });
+    const claim = claimSession(temp.directory, {
+      host: "codex",
+      cwd: projectRoot,
+      sessionKey,
+      now: 1_001,
+    });
+    assert.equal(registration.outcome.status, "pending");
+    assert.equal(claim.status, "pending");
+
+    const binding = consumeBinding(temp.directory, registration, { now: 1_200 });
+    assert.equal(binding.sessionKey, sessionKey);
+    assert.notEqual(binding.cwdHash, registration.cwdHash);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("Codex cwd-agnostic rendezvous fails closed with multiple project claims", () => {
+  const temp = temporaryDirectory();
+  try {
+    const registration = registerMcpInstance(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      allowCwdMismatch: true,
+      pid: process.pid,
+      now: 1_000,
+    });
+    claimSession(temp.directory, {
+      host: "codex",
+      cwd: path.join(temp.directory, "project-a"),
+      sessionKey: scopeKey("codex", "portable-a"),
+      now: 1_010,
+    });
+    const second = claimSession(temp.directory, {
+      host: "codex",
+      cwd: path.join(temp.directory, "project-b"),
+      sessionKey: scopeKey("codex", "portable-b"),
+      now: 1_020,
+    });
+    assert.equal(second.status, "ambiguous");
+    assert.equal(consumeBinding(temp.directory, registration, { now: 1_200 }), null);
+  } finally {
+    temp.cleanup();
+  }
+});
+
 for (const host of ["codex", "claude-code"]) {
   test(`${host} keeps a live pending rendezvous after the fixed TTL`, () => {
     const temp = temporaryDirectory();

@@ -19,6 +19,21 @@ function parseHost(argv) {
   return host;
 }
 
+export function resolveMcpPluginRoot(
+  host,
+  environment = process.env,
+  cwd = process.cwd(),
+) {
+  const configured =
+    environment.NOVA_PLUGIN_ROOT ||
+    (host === "codex" ? environment.PLUGIN_ROOT : environment.CLAUDE_PLUGIN_ROOT);
+  const pluginRoot = configured || (host === "codex" ? cwd : undefined);
+  if (!pluginRoot || !path.isAbsolute(pluginRoot)) {
+    throw new NovaError("PLUGIN_ROOT_UNAVAILABLE", "absolute plugin root is unavailable");
+  }
+  return path.normalize(pluginRoot);
+}
+
 const AUTHORITY_VALUE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -156,7 +171,12 @@ export class McpRuntime {
     bootstrapStateRoot({ environment, host, dataRoot, legacyRoots });
     this.dataRoot = dataRoot;
     this.pluginVersion = readPluginVersion(pluginRoot);
-    this.registration = registerMcpInstance(dataRoot, { host, cwd, pid });
+    this.registration = registerMcpInstance(dataRoot, {
+      host,
+      cwd,
+      pid,
+      allowCwdMismatch: host === "codex",
+    });
     this.binding = null;
   }
 
@@ -305,12 +325,7 @@ export function handleRpc(runtime, request) {
 
 async function main() {
   const host = parseHost(process.argv.slice(2));
-  const pluginRoot =
-    process.env.NOVA_PLUGIN_ROOT ||
-    (host === "codex" ? process.env.PLUGIN_ROOT : process.env.CLAUDE_PLUGIN_ROOT);
-  if (!pluginRoot || !path.isAbsolute(pluginRoot)) {
-    throw new NovaError("PLUGIN_ROOT_UNAVAILABLE", "absolute plugin root is unavailable");
-  }
+  const pluginRoot = resolveMcpPluginRoot(host);
   const dataRoot = resolveNovaHome(process.env);
   const runtime = new McpRuntime({
     dataRoot,
