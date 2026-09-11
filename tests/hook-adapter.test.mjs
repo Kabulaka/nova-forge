@@ -92,6 +92,25 @@ test("startup injects static rules without inventing a checkpoint", () => {
   }
 });
 
+test("SessionStart keeps static rules and allows startup when the state root cannot initialize", () => {
+  const temp = temporaryDirectory();
+  try {
+    const unavailableRoot = path.join(temp.directory, "not-a-directory");
+    fs.writeFileSync(unavailableRoot, "occupied");
+    const output = handleHook(
+      input("SessionStart", { source: "startup" }),
+      environment(unavailableRoot),
+    );
+    assert.match(output.hookSpecificOutput.additionalContext, /全局工作约定/);
+    assert.match(output.hookSpecificOutput.additionalContext, /nova-checkpoint-degraded/);
+    assert.match(output.systemMessage, /NOVA_HOME|not-a-directory/);
+    assert.equal(Object.hasOwn(output, "decision"), false);
+    assert.equal(Object.hasOwn(output, "continue"), false);
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("prompt and tool hooks mark dirty while the checkpoint MCP tool is excluded", () => {
   const temp = temporaryDirectory();
   try {
@@ -122,8 +141,15 @@ test("prompt and tool hooks mark dirty while the checkpoint MCP tool is excluded
     assert.equal(state.eventWatermark, 3);
     assert.equal(state.dirty, true);
     const stop = handleHook(input("Stop", { stop_hook_active: false }), env);
-    assert.equal(stop.continue, false);
+    assert.match(stop.systemMessage, /CHECKPOINT_NOT_COVERED/);
+    assert.match(stop.systemMessage, /host operation was allowed to continue/);
     assert.equal(Object.hasOwn(stop, "decision"), false);
+    assert.equal(Object.hasOwn(stop, "continue"), false);
+
+    const repeatedStop = handleHook(input("Stop", { stop_hook_active: true }), env);
+    assert.match(repeatedStop.systemMessage, /CHECKPOINT_NOT_COVERED/);
+    assert.equal(Object.hasOwn(repeatedStop, "decision"), false);
+    assert.equal(Object.hasOwn(repeatedStop, "continue"), false);
   } finally {
     temp.cleanup();
   }
@@ -159,42 +185,161 @@ test("covered checkpoint passes Stop and completes the compact handshake", () =>
   }
 });
 
-test("resume without a valid checkpoint stops instead of injecting defaults", () => {
+test("Claude Code early compact SessionStart degrades while a later PostCompact completes", () => {
   const temp = temporaryDirectory();
   try {
-    const output = handleHook(
-      input("SessionStart", { source: "resume" }),
-      environment(temp.directory),
+    const env = environment(temp.directory, "claude-code");
+    handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+    handleHook(input("UserPromptSubmit", { turn_id: undefined }), env, { now: 2_000 });
+    saveCheckpoint(temp.directory, currentBinding("claude-code"), "0.1.0", saveInput(1), {
+      now: 3_000,
+    });
+    assert.deepEqual(
+      handleHook(input("PreCompact", { trigger: "manual" }), env, { now: 4_000 }),
+      {},
     );
-    assert.equal(output.continue, false);
-    assert.match(output.stopReason, /CHECKPOINT_NOT_COVERED/);
+
+    const earlyResume = handleHook(
+      input("SessionStart", { source: "compact", turn_id: "turn-compact" }),
+      env,
+      { now: 5_000 },
+    );
+    assert.match(earlyResume.hookSpecificOutput.additionalContext, /nova-checkpoint-degraded/);
+    assert.doesNotMatch(earlyResume.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
+    assert.match(earlyResume.systemMessage, /COMPACTION_HANDSHAKE_MISMATCH/);
+    assert.equal(Object.hasOwn(earlyResume, "decision"), false);
+    assert.equal(Object.hasOwn(earlyResume, "continue"), false);
+
+    assert.deepEqual(
+      handleHook(input("PostCompact", { trigger: "manual" }), env, { now: 6_000 }),
+      {},
+    );
+    const state = getCheckpoint(temp.directory, currentBinding("claude-code"), { now: 7_000 }).envelope;
+    assert.equal(state.compactionHandshake.status, "completed");
+    assert.equal(state.compactionHandshake.completedWatermark, 1);
   } finally {
     temp.cleanup();
   }
 });
 
-test("Codex UserPromptSubmit failures use the supported continue false gate", () => {
+test("resume without a covered checkpoint enters explicit recovery without injecting defaults", () => {
+  const temp = temporaryDirectory();
+  try {
+    const env = environment(temp.directory);
+    const output = handleHook(
+      input("SessionStart", { source: "resume" }),
+      env,
+    );
+    assert.match(output.hookSpecificOutput.additionalContext, /全局工作约定/);
+    assert.match(output.hookSpecificOutput.additionalContext, /nova-checkpoint-recovery-required/);
+    assert.match(output.hookSpecificOutput.additionalContext, /"eventWatermark":0/);
+    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
+    assert.match(output.systemMessage, /without injecting an authoritative checkpoint/);
+
+    handleHook(input("UserPromptSubmit"), env, { now: 2_000 });
+    saveCheckpoint(temp.directory, currentBinding(), "0.1.0", saveInput(1), { now: 3_000 });
+    assert.deepEqual(handleHook(input("Stop"), env, { now: 4_000 }), {});
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("dirty resume never injects the stale task capsule as authority", () => {
+  const temp = temporaryDirectory();
+  try {
+    const env = environment(temp.directory);
+    handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+    handleHook(input("UserPromptSubmit"), env, { now: 2_000 });
+    const saved = saveInput(1);
+    saved.taskCapsule.objective.value = "STALE_CAPSULE_SENTINEL";
+    saveCheckpoint(temp.directory, currentBinding(), "0.1.0", saved, { now: 3_000 });
+    handleHook(input("UserPromptSubmit", { turn_id: "turn-2" }), env, { now: 4_000 });
+
+    const output = handleHook(
+      input("SessionStart", { source: "resume", turn_id: "turn-3" }),
+      env,
+      { now: 5_000 },
+    );
+    assert.match(output.hookSpecificOutput.additionalContext, /"eventWatermark":2/);
+    assert.match(output.hookSpecificOutput.additionalContext, /"coveredEventWatermark":1/);
+    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /STALE_CAPSULE_SENTINEL/);
+    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("compact without a covered checkpoint degrades without blocking or injecting authority", () => {
+  const temp = temporaryDirectory();
+  try {
+    const output = handleHook(
+      input("SessionStart", { source: "compact" }),
+      environment(temp.directory),
+    );
+    assert.match(output.hookSpecificOutput.additionalContext, /全局工作约定/);
+    assert.match(output.hookSpecificOutput.additionalContext, /nova-checkpoint-degraded/);
+    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
+    assert.match(output.systemMessage, /CHECKPOINT_NOT_COVERED/);
+    assert.equal(Object.hasOwn(output, "decision"), false);
+    assert.equal(Object.hasOwn(output, "continue"), false);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("Codex UserPromptSubmit failures report degradation without blocking conversation", () => {
   const temp = temporaryDirectory();
   try {
     const output = handleHook(
       input("UserPromptSubmit", { turn_id: "" }),
       environment(temp.directory),
     );
-    assert.equal(output.continue, false);
-    assert.match(output.stopReason, /EVENT_ID_UNAVAILABLE/);
+    assert.match(output.systemMessage, /EVENT_ID_UNAVAILABLE/);
+    assert.match(output.systemMessage, /host operation was allowed to continue/);
+    assert.equal(Object.hasOwn(output, "continue"), false);
     assert.equal(Object.hasOwn(output, "decision"), false);
   } finally {
     temp.cleanup();
   }
 });
 
-test("Claude Code records a PostCompact mismatch even though the event cannot block", () => {
+test("corrupt checkpoint state cannot block Stop or become recovery authority", () => {
+  const temp = temporaryDirectory();
+  try {
+    const env = environment(temp.directory);
+    handleHook(input("SessionStart", { source: "startup" }), env);
+    const currentFile = path.join(
+      temp.directory,
+      "state",
+      "codex",
+      currentBinding().sessionKey,
+      "current.json",
+    );
+    fs.writeFileSync(currentFile, "{not-json");
+
+    const stop = handleHook(input("Stop"), env);
+    assert.match(stop.systemMessage, /CHECKPOINT|JSON|parse|corrupt|invalid/i);
+    assert.match(stop.systemMessage, /host operation was allowed to continue/);
+    assert.equal(Object.hasOwn(stop, "decision"), false);
+    assert.equal(Object.hasOwn(stop, "continue"), false);
+
+    const resumed = handleHook(input("SessionStart", { source: "resume" }), env);
+    assert.match(resumed.hookSpecificOutput.additionalContext, /nova-checkpoint-degraded/);
+    assert.doesNotMatch(resumed.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("Claude Code records a PostCompact mismatch and reports it without blocking", () => {
   const temp = temporaryDirectory();
   try {
     const env = environment(temp.directory, "claude-code");
     handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
     const output = handleHook(input("PostCompact", { trigger: "manual" }), env, { now: 2_000 });
-    assert.deepEqual(output, {});
+    assert.match(output.systemMessage, /COMPACTION_HANDSHAKE_MISMATCH/);
+    assert.equal(Object.hasOwn(output, "decision"), false);
+    assert.equal(Object.hasOwn(output, "continue"), false);
     const state = getCheckpoint(temp.directory, currentBinding("claude-code"), { now: 3_000 }).envelope;
     assert.equal(state.compactionHandshake.status, "failed");
   } finally {
@@ -233,39 +378,42 @@ test("Claude Code UserPromptSubmit does not require Codex turn ids", () => {
   }
 });
 
-test("Claude Code PreCompact setup failures use its native block decision", () => {
+test("Claude Code PreCompact setup failures report degradation without blocking", () => {
   const temp = temporaryDirectory();
   try {
     const output = handleHook(
       input("PreCompact", { trigger: "auto", session_id: "" }),
       environment(temp.directory, "claude-code"),
     );
-    assert.equal(output.decision, "block");
-    assert.match(output.reason, /SESSION_ID_UNAVAILABLE/);
+    assert.match(output.systemMessage, /SESSION_ID_UNAVAILABLE/);
+    assert.equal(Object.hasOwn(output, "decision"), false);
+    assert.equal(Object.hasOwn(output, "continue"), false);
   } finally {
     temp.cleanup();
   }
 });
 
-test("malformed Claude hook input exits 2 so PreCompact cannot fail open", () => {
-  const temp = temporaryDirectory();
-  try {
-    const result = spawnSync(process.execPath, [path.join(pluginRoot, "hooks", "run.mjs")], {
-      cwd: pluginRoot,
-      input: "{not-json",
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        NOVA_HOST: "claude-code",
-        NOVA_PLUGIN_ROOT: pluginRoot,
-        NOVA_HOME: temp.directory,
-      },
-    });
-    assert.equal(result.status, 2);
-    assert.match(result.stderr, /Nova hook failed/);
-    assert.equal(result.stdout, "");
-  } finally {
-    temp.cleanup();
+test("malformed hook input reports diagnostics but exits successfully for both hosts", () => {
+  for (const host of ["codex", "claude-code"]) {
+    const temp = temporaryDirectory();
+    try {
+      const result = spawnSync(process.execPath, [path.join(pluginRoot, "hooks", "run.mjs")], {
+        cwd: pluginRoot,
+        input: "{not-json",
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          NOVA_HOST: host,
+          NOVA_PLUGIN_ROOT: pluginRoot,
+          NOVA_HOME: temp.directory,
+        },
+      });
+      assert.equal(result.status, 0);
+      assert.match(result.stderr, /host operation was allowed to continue/);
+      assert.equal(result.stdout, "");
+    } finally {
+      temp.cleanup();
+    }
   }
 });
 
@@ -276,30 +424,23 @@ test("hook input accepts the exact byte boundary and keeps 1M-context headroom",
   assert.deepEqual(await readHookInput(Readable.from([json]), 24), { padding: "0123456789" });
 });
 
-test("oversized hook input fails closed for both hosts before state advances", () => {
+test("oversized hook input does not advance state or block either host", () => {
   for (const host of ["codex", "claude-code"]) {
     const temp = temporaryDirectory();
     try {
       const result = runHookProcessWithLimit(temp.directory, host, 'x'.repeat(65), 64);
       assert.deepEqual(fs.readdirSync(temp.directory), []);
-      if (host === "claude-code") {
-        assert.equal(result.status, 2);
-        assert.equal(result.stdout, "");
-        assert.match(result.stderr, /hook input exceeds the 64-byte safety limit/);
-      } else {
-        assert.equal(result.status, 0);
-        const output = JSON.parse(result.stdout);
-        assert.equal(output.continue, false);
-        assert.match(output.stopReason, /hook input exceeds the 64-byte safety limit/);
-        assert.equal(result.stderr, "");
-      }
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout, "");
+      assert.match(result.stderr, /hook input exceeds the 64-byte safety limit/);
+      assert.match(result.stderr, /host operation was allowed to continue/);
     } finally {
       temp.cleanup();
     }
   }
 });
 
-test("hook entrypoint runs from installation paths requiring URL escaping", () => {
+test("hook entrypoint degrades safely from installation paths requiring URL escaping", () => {
   const temp = temporaryDirectory("nova 插件 ");
   try {
     const copiedRoot = path.join(temp.directory, "Plugin With 空格");
@@ -317,15 +458,17 @@ test("hook entrypoint runs from installation paths requiring URL escaping", () =
         NOVA_HOME: path.join(temp.directory, "data"),
       },
     });
-    assert.equal(result.status, 2);
+    assert.equal(result.status, 0);
     assert.match(result.stderr, /Nova hook failed/);
+    assert.match(result.stderr, /host operation was allowed to continue/);
+    assert.equal(result.stdout, "");
   } finally {
     temp.cleanup();
   }
 });
 
 test(
-  "hook entrypoint runs when the invoked path resolves through a filesystem alias",
+  "hook entrypoint degrades safely when the invoked path resolves through a filesystem alias",
   { skip: process.platform === "win32" },
   () => {
     const temp = temporaryDirectory("nova-alias-");
@@ -347,8 +490,10 @@ test(
           NOVA_HOME: path.join(temp.directory, "data"),
         },
       });
-      assert.equal(result.status, 2);
+      assert.equal(result.status, 0);
       assert.match(result.stderr, /Nova hook failed/);
+      assert.match(result.stderr, /host operation was allowed to continue/);
+      assert.equal(result.stdout, "");
     } finally {
       temp.cleanup();
     }

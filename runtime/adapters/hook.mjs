@@ -48,12 +48,17 @@ export function detectHost(environment = process.env) {
   throw new NovaError("HOST_UNAVAILABLE", "trusted plugin host environment is unavailable");
 }
 
-export function resolvePluginPaths(environment = process.env, host = detectHost(environment)) {
+function resolvePluginRoot(environment = process.env) {
   const pluginRoot =
     environment.NOVA_PLUGIN_ROOT || environment.PLUGIN_ROOT || environment.CLAUDE_PLUGIN_ROOT;
   if (!pluginRoot || !path.isAbsolute(pluginRoot)) {
     throw new NovaError("PLUGIN_ROOT_UNAVAILABLE", "absolute plugin root is unavailable");
   }
+  return pluginRoot;
+}
+
+export function resolvePluginPaths(environment = process.env, host = detectHost(environment)) {
+  const pluginRoot = resolvePluginRoot(environment);
   return {
     pluginRoot,
     dataRoot: resolveNovaHome(environment),
@@ -99,14 +104,41 @@ function contextOutput(event, context, systemMessage) {
   return output;
 }
 
-function blockingOutput(host, event, reason) {
-  if (
-    host === "claude-code" &&
-    (event === "Stop" || event === "PreCompact" || event === "UserPromptSubmit")
-  ) {
-    return { decision: "block", reason };
+function uncoveredResumeContext(rules, envelope) {
+  const recoveryState = JSON.stringify({
+    eventWatermark: envelope.eventWatermark,
+    coveredEventWatermark: envelope.coveredEventWatermark,
+    dirty: envelope.dirty,
+  });
+  return (
+    `${buildRecoveryContext(rules, { taskCapsule: null })}\n\n` +
+    "<nova-checkpoint-recovery-required>\n" +
+    `${recoveryState}\n` +
+    "The resumed session has no checkpoint covering its current event watermark. " +
+    "No prior taskCapsule was injected as authoritative state. Reconstruct only from the " +
+    "visible conversation and verified workspace facts; preserve unknowns as pending. Before " +
+    "ending, call nova_checkpoint_get, then nova_checkpoint_save for the latest eventWatermark, " +
+    "and confirm dirty=false.\n" +
+    "</nova-checkpoint-recovery-required>"
+  );
+}
+
+function degradedOutput(event, reason, rules) {
+  const warning =
+    `${reason}. Nova checkpoint continuity is degraded, but the host operation was allowed ` +
+    "to continue. No missing, stale, or invalid checkpoint was promoted to authoritative state.";
+  if (event === "SessionStart" && typeof rules === "string") {
+    const context =
+      `${buildRecoveryContext(rules, { taskCapsule: null })}\n\n` +
+      "<nova-checkpoint-degraded>\n" +
+      `${warning}\n` +
+      "Reconstruct only from visible conversation and verified workspace facts. Treat unknowns " +
+      "as pending. If the Nova checkpoint MCP is available, a later turn may create a fresh " +
+      "checkpoint; inability to do so must not block conversation or native compaction.\n" +
+      "</nova-checkpoint-degraded>";
+    return contextOutput(event, context, warning);
   }
-  return { continue: false, stopReason: reason, systemMessage: reason };
+  return { systemMessage: warning };
 }
 
 function isOwnCheckpointTool(host, toolName) {
@@ -115,15 +147,17 @@ function isOwnCheckpointTool(host, toolName) {
 
 export function handleHook(input, environment = process.env, options = {}) {
   const event = input?.hook_event_name;
-  let host;
+  let rules;
   try {
     if (input === null || typeof input !== "object" || Array.isArray(input)) {
       throw new NovaError("INVALID_HOOK_INPUT", "hook input must be a JSON object");
     }
-    host = detectHost(environment);
-    const { pluginRoot, dataRoot, legacyRoots } = resolvePluginPaths(environment, host);
-    bootstrapStateRoot({ environment, host, dataRoot, legacyRoots, now: options.now ?? Date.now() });
+    const host = detectHost(environment);
+    const pluginRoot = resolvePluginRoot(environment);
     const pluginVersion = readPluginVersion(pluginRoot);
+    rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
+    const { dataRoot, legacyRoots } = resolvePluginPaths(environment, host);
+    bootstrapStateRoot({ environment, host, dataRoot, legacyRoots, now: options.now ?? Date.now() });
     const binding = trustedBinding(host, input);
     const now = options.now ?? Date.now();
     if (event === "SessionStart") {
@@ -138,24 +172,37 @@ export function handleHook(input, environment = process.env, options = {}) {
         now,
       });
       startSession(dataRoot, binding, pluginVersion, source, { now });
-      const rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
       let context;
+      let recoveryWarning;
       if (source === "resume" || source === "compact") {
         const loaded = getCheckpoint(dataRoot, binding, { now });
-        assertCovered(loaded.envelope);
-        context = buildRecoveryContext(rules, loaded.envelope);
-        if (source === "compact") {
-          recordInjectedCompaction(dataRoot, binding, pluginVersion, { now });
-        } else {
-          recordResumeInjection(dataRoot, binding, pluginVersion, { now });
+        try {
+          assertCovered(loaded.envelope);
+          context = buildRecoveryContext(rules, loaded.envelope);
+          if (source === "compact") {
+            recordInjectedCompaction(dataRoot, binding, pluginVersion, { now });
+          } else {
+            recordResumeInjection(dataRoot, binding, pluginVersion, { now });
+          }
+        } catch (error) {
+          if (source !== "resume" || error?.code !== "CHECKPOINT_NOT_COVERED") throw error;
+          context = uncoveredResumeContext(rules, loaded.envelope);
+          recoveryWarning =
+            "Nova resumed without injecting an authoritative checkpoint because the saved " +
+            "checkpoint does not cover the current event watermark. Repair it with the Nova " +
+            "checkpoint MCP before ending this turn.";
         }
       } else {
         context = buildRecoveryContext(rules, { taskCapsule: null });
       }
-      const warning =
+      const warning = [
+        recoveryWarning,
         rendezvous.status === "ambiguous"
           ? "Nova checkpoint MCP binding is ambiguous and remains disabled for this session."
-          : undefined;
+          : undefined,
+      ]
+        .filter(Boolean)
+        .join(" ");
       return contextOutput(event, context, warning);
     }
 
@@ -185,7 +232,6 @@ export function handleHook(input, environment = process.env, options = {}) {
     throw new NovaError("UNSUPPORTED_HOOK_EVENT", `unsupported hook event ${event}`);
   } catch (error) {
     const reason = `Nova checkpoint safety gate: ${redactError(error)}`;
-    if (event === "PostCompact" && host === "claude-code") return {};
-    return blockingOutput(host, event, reason);
+    return degradedOutput(event, reason, rules);
   }
 }

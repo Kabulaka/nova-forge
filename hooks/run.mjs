@@ -36,21 +36,9 @@ export async function main({
     if (Object.keys(output).length > 0) outputStream.write(`${JSON.stringify(output)}\n`);
   } catch (error) {
     const reason = `Nova hook failed: ${redactError(error)}`;
-    const claude =
-      environment.NOVA_HOST === "claude-code" ||
-      Boolean(environment.CLAUDE_PLUGIN_ROOT || environment.CLAUDE_PLUGIN_DATA);
-    if (claude) {
-      errorStream.write(`${reason}\n`);
-      process.exitCode = 2;
-    } else {
-      outputStream.write(
-        `${JSON.stringify({
-          continue: false,
-          stopReason: reason,
-          systemMessage: "Nova hook failed before lifecycle state could be verified.",
-        })}\n`,
-      );
-    }
+    errorStream.write(
+      `${reason}. Nova checkpoint continuity is degraded; the host operation was allowed to continue.\n`,
+    );
   }
 }
 

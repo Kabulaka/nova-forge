@@ -1,7 +1,7 @@
 {
   "name": "nova-forge",
   "version": "0.2.0",
-  "description": "Nova workflow skills and fail-closed same-session compaction recovery for Claude Code.",
+  "description": "Nova workflow skills and authority-safe degraded checkpoint recovery for Claude Code.",
   "author": {
     "name": "Nova Forge contributors",
     "url": "https://github.com/Kabulaka/nova-forge"
