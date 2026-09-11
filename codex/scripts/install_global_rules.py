@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -207,6 +208,36 @@ def install(workspace: Path, codex_home: Path, claude_home: Path) -> list[LinkSp
     return specs
 
 
+def prepare_state_root(
+    workspace: Path, nova_home: Path | None = None
+) -> tuple[bool, str]:
+    """Best-effort prebuild; Hook and MCP repeat this gate before first use."""
+    command = [
+        "node",
+        str(workspace.resolve() / "runtime" / "bootstrap.mjs"),
+        "--host",
+        "codex",
+        "--host",
+        "claude-code",
+    ]
+    environment = os.environ.copy()
+    if nova_home is not None:
+        environment["NOVA_HOME"] = str(nova_home)
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+    except OSError as exc:
+        return False, str(exc)
+    if result.returncode != 0:
+        return False, (result.stderr or result.stdout).strip()
+    return True, result.stdout.strip()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -227,6 +258,12 @@ def parse_args() -> argparse.Namespace:
         default=Path.home() / ".claude",
         help="Claude Code user directory (default: ~/.claude)",
     )
+    parser.add_argument(
+        "--nova-home",
+        type=Path,
+        default=None,
+        help="Nova private state root (default: NOVA_HOME or ~/.nova)",
+    )
     return parser.parse_args()
 
 
@@ -242,6 +279,15 @@ def main() -> int:
 
     for spec in specs:
         print(f"LINK: {spec.target} -> {spec.source.resolve()}")
+    prepared, detail = prepare_state_root(args.workspace, args.nova_home)
+    if prepared:
+        print(f"STATE: {detail}")
+    else:
+        print(
+            "WARN: Nova state root was not prebuilt; the first Hook/MCP start will retry: "
+            f"{detail}",
+            file=sys.stderr,
+        )
     print("PASS")
     return 0
 

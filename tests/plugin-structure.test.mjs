@@ -17,4 +17,12 @@ test("Codex manifest points to the packaged MCP companion instead of an inline m
     mcp.mcpServers["nova-checkpoint"].args.slice(-2),
     ["--host", "codex"],
   );
+  assert.equal(
+    mcp.mcpServers["nova-checkpoint"].env.NOVA_LEGACY_PLUGIN_DATA,
+    "${PLUGIN_DATA}",
+  );
+  assert.equal(
+    Object.hasOwn(mcp.mcpServers["nova-checkpoint"].env, "NOVA_PLUGIN_DATA"),
+    false,
+  );
 });

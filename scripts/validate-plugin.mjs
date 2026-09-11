@@ -50,11 +50,23 @@ requireValue(codex.mcpServers === "./.mcp.json", "Codex MCP config must use ./.m
 const codexServer = codexMcp.mcpServers?.["nova-checkpoint"];
 requireValue(codexServer?.command === "node", "Codex MCP command must use node", errors);
 requireValue(codexServer?.args?.includes("codex"), "Codex MCP host binding mismatch", errors);
+requireValue(
+  codexServer?.env?.NOVA_LEGACY_PLUGIN_DATA === "${PLUGIN_DATA}" &&
+    !Object.hasOwn(codexServer?.env || {}, "NOVA_PLUGIN_DATA"),
+  "Codex plugin data must be migration-only",
+  errors,
+);
 const claudeServer = claude.mcpServers?.["nova-checkpoint"];
 requireValue(claudeServer?.command === "node", "Claude Code MCP command must use node", errors);
 requireValue(
   claudeServer?.args?.includes("claude-code"),
   "Claude Code MCP host binding mismatch",
+  errors,
+);
+requireValue(
+  claudeServer?.env?.NOVA_LEGACY_PLUGIN_DATA === "${CLAUDE_PLUGIN_DATA}" &&
+    !Object.hasOwn(claudeServer?.env || {}, "NOVA_PLUGIN_DATA"),
+  "Claude Code plugin data must be migration-only",
   errors,
 );
 
@@ -101,6 +113,8 @@ for (const relative of [
   "runtime/core/schema.mjs",
   "runtime/core/storage.mjs",
   "runtime/core/rendezvous.mjs",
+  "runtime/core/state-root.mjs",
+  "runtime/bootstrap.mjs",
   "runtime/mcp/server.mjs",
 ]) {
   requireValue(fs.existsSync(path.join(root, relative)), `missing plugin component ${relative}`, errors);

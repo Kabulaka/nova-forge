@@ -23,6 +23,8 @@ const required = [
   ".claude-plugin/plugin.json",
   "hooks/hooks.json",
   "hooks/run.mjs",
+  "runtime/bootstrap.mjs",
+  "runtime/core/state-root.mjs",
   "runtime/mcp/server.mjs",
   "skills/nova-requirements/SKILL.md",
   "skills/nova-architecture/SKILL.md",

@@ -17,7 +17,7 @@ function environment(dataRoot, host = "codex") {
   return {
     NOVA_HOST: host,
     NOVA_PLUGIN_ROOT: pluginRoot,
-    NOVA_PLUGIN_DATA: dataRoot,
+    NOVA_HOME: dataRoot,
   };
 }
 
@@ -50,18 +50,20 @@ function runHookProcessWithLimit(dataRoot, host, inputValue, inputLimit) {
       ...process.env,
       NOVA_HOST: host,
       NOVA_PLUGIN_ROOT: pluginRoot,
-      NOVA_PLUGIN_DATA: dataRoot,
+      NOVA_HOME: dataRoot,
     },
   });
 }
 
-test("host-native plugin variables resolve to the same shared runtime paths", () => {
+test("host-native plugin variables are legacy sources while NOVA_HOME is authoritative", () => {
   const codexData = path.join(pluginRoot, ".codex-data");
   const claudeData = path.join(pluginRoot, ".claude-data");
+  const codexHome = path.join(pluginRoot, ".nova-codex");
+  const claudeHome = path.join(pluginRoot, ".nova-claude");
   assert.equal(detectHost({ PLUGIN_ROOT: pluginRoot, PLUGIN_DATA: codexData }), "codex");
   assert.deepEqual(
-    resolvePluginPaths({ PLUGIN_ROOT: pluginRoot, PLUGIN_DATA: codexData }),
-    { pluginRoot, dataRoot: codexData },
+    resolvePluginPaths({ PLUGIN_ROOT: pluginRoot, PLUGIN_DATA: codexData, NOVA_HOME: codexHome }),
+    { pluginRoot, dataRoot: codexHome, legacyRoots: [codexData] },
   );
   assert.equal(
     detectHost({ CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PLUGIN_DATA: claudeData }),
@@ -71,8 +73,9 @@ test("host-native plugin variables resolve to the same shared runtime paths", ()
     resolvePluginPaths({
       CLAUDE_PLUGIN_ROOT: pluginRoot,
       CLAUDE_PLUGIN_DATA: claudeData,
+      NOVA_HOME: claudeHome,
     }),
-    { pluginRoot, dataRoot: claudeData },
+    { pluginRoot, dataRoot: claudeHome, legacyRoots: [claudeData] },
   );
 });
 
@@ -255,7 +258,7 @@ test("malformed Claude hook input exits 2 so PreCompact cannot fail open", () =>
         ...process.env,
         NOVA_HOST: "claude-code",
         NOVA_PLUGIN_ROOT: pluginRoot,
-        NOVA_PLUGIN_DATA: temp.directory,
+        NOVA_HOME: temp.directory,
       },
     });
     assert.equal(result.status, 2);
@@ -311,7 +314,7 @@ test("hook entrypoint runs from installation paths requiring URL escaping", () =
         ...process.env,
         NOVA_HOST: "claude-code",
         NOVA_PLUGIN_ROOT: copiedRoot,
-        NOVA_PLUGIN_DATA: path.join(temp.directory, "data"),
+        NOVA_HOME: path.join(temp.directory, "data"),
       },
     });
     assert.equal(result.status, 2);
@@ -341,7 +344,7 @@ test(
           ...process.env,
           NOVA_HOST: "claude-code",
           NOVA_PLUGIN_ROOT: aliasRoot,
-          NOVA_PLUGIN_DATA: path.join(temp.directory, "data"),
+          NOVA_HOME: path.join(temp.directory, "data"),
         },
       });
       assert.equal(result.status, 2);

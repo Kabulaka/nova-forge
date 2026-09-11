@@ -19,8 +19,8 @@ import {
   writePrivateFile,
 } from "./util.mjs";
 
-function roots(dataRoot) {
-  const root = path.join(dataRoot, "rendezvous");
+function roots(dataRoot, host) {
+  const root = path.join(dataRoot, "rendezvous", host);
   return {
     root,
     claims: path.join(root, "claims"),
@@ -31,8 +31,8 @@ function roots(dataRoot) {
   };
 }
 
-function initialize(dataRoot) {
-  const value = roots(dataRoot);
+function initialize(dataRoot, host) {
+  const value = roots(dataRoot, host);
   ensurePrivateDirectory(value.root);
   for (const directory of [value.claims, value.instances, value.bindings, value.active]) {
     ensurePrivateDirectory(directory);
@@ -48,8 +48,8 @@ function removeIfExists(file) {
   }
 }
 
-function withLock(dataRoot, callback) {
-  const value = initialize(dataRoot);
+function withLock(dataRoot, host, callback) {
+  const value = initialize(dataRoot, host);
   return withOwnerLock(value.lock, () => callback(value), {
     timeoutMs: LOCK_TIMEOUT_MS,
     timeoutCode: "RENDEZVOUS_LOCK_TIMEOUT",
@@ -131,7 +131,7 @@ function pair(value, host, cwdHash, now) {
 
 export function claimSession(dataRoot, { host, cwd, sessionKey, now = Date.now() }) {
   const cwdHash = cwdKey(cwd);
-  return withLock(dataRoot, (value) => {
+  return withLock(dataRoot, host, (value) => {
     prune(value, now);
     const active = listJson(value.active)
       .map((file) => readJsonFile(file))
@@ -169,7 +169,7 @@ export function registerMcpInstance(
   { host, cwd, instanceId = randomId(16), capability = randomId(32), pid = process.pid, now = Date.now() },
 ) {
   const cwdHash = cwdKey(cwd);
-  const outcome = withLock(dataRoot, (value) => {
+  const outcome = withLock(dataRoot, host, (value) => {
     prune(value, now);
     writeJsonExclusive(path.join(value.instances, `${instanceId}.json`), {
       instanceId,
@@ -189,7 +189,7 @@ export function consumeBinding(
   registration,
   { now = Date.now() } = {},
 ) {
-  return withLock(dataRoot, (value) => {
+  return withLock(dataRoot, registration.host, (value) => {
     const file = path.join(value.bindings, `${registration.instanceId}.json`);
     if (!fs.existsSync(file)) pair(value, registration.host, registration.cwdHash, now);
     if (!fs.existsSync(file)) return null;

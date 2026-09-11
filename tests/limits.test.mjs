@@ -82,7 +82,7 @@ test("stdio server discards the remainder of an oversized frame before parsing t
       cwd: pluginRoot,
       env: {
         ...process.env,
-        NOVA_PLUGIN_DATA: temp.directory,
+        NOVA_HOME: temp.directory,
         NOVA_PLUGIN_ROOT: pluginRoot,
       },
       stdio: ["pipe", "pipe", "pipe"],

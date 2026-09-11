@@ -74,6 +74,24 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assert_installed(workspace, codex_home, claude_home)
 
+    def test_installer_prebuilds_the_shared_nova_state_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            nova_home = Path(directory) / ".nova"
+            prepared, detail = INSTALLER.prepare_state_root(
+                TOOL.parents[2], nova_home
+            )
+            self.assertTrue(prepared, detail)
+            self.assertEqual(detail, str(nova_home))
+            for relative in (
+                "state/codex",
+                "state/claude-code",
+                "rendezvous/codex",
+                "rendezvous/claude-code",
+                "migrations/codex",
+                "migrations/claude-code",
+            ):
+                self.assertTrue((nova_home / relative).is_dir(), relative)
+
     def test_reinstall_replaces_normal_and_broken_links_without_deleting_sources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

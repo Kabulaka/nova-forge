@@ -2,6 +2,11 @@
 import path from "node:path";
 import { JSON_RPC_FRAME_LIMIT, MCP_PROTOCOL_VERSION } from "../core/constants.mjs";
 import { registerMcpInstance, waitForBinding } from "../core/rendezvous.mjs";
+import {
+  bootstrapStateRoot,
+  legacyDataRoots,
+  resolveNovaHome,
+} from "../core/state-root.mjs";
 import { getCheckpoint, saveCheckpoint } from "../core/state-machine.mjs";
 import { isMainModule, NovaError, readPluginVersion, redactError } from "../core/util.mjs";
 
@@ -136,10 +141,19 @@ const SAVE_SCHEMA = {
 };
 
 export class McpRuntime {
-  constructor({ dataRoot, pluginRoot, host, cwd = process.cwd(), pid = process.pid }) {
+  constructor({
+    dataRoot,
+    pluginRoot,
+    host,
+    cwd = process.cwd(),
+    pid = process.pid,
+    environment = process.env,
+    legacyRoots = [],
+  }) {
     if (!path.isAbsolute(dataRoot) || !path.isAbsolute(pluginRoot)) {
       throw new NovaError("INVALID_RUNTIME_PATH", "plugin root and data root must be absolute");
     }
+    bootstrapStateRoot({ environment, host, dataRoot, legacyRoots });
     this.dataRoot = dataRoot;
     this.pluginVersion = readPluginVersion(pluginRoot);
     this.registration = registerMcpInstance(dataRoot, { host, cwd, pid });
@@ -291,12 +305,19 @@ export function handleRpc(runtime, request) {
 
 async function main() {
   const host = parseHost(process.argv.slice(2));
-  const dataRoot = process.env.NOVA_PLUGIN_DATA;
-  const pluginRoot = process.env.NOVA_PLUGIN_ROOT;
-  if (!dataRoot || !pluginRoot) {
-    throw new NovaError("PLUGIN_ENV_UNAVAILABLE", "NOVA_PLUGIN_DATA and NOVA_PLUGIN_ROOT are required");
+  const pluginRoot =
+    process.env.NOVA_PLUGIN_ROOT ||
+    (host === "codex" ? process.env.PLUGIN_ROOT : process.env.CLAUDE_PLUGIN_ROOT);
+  if (!pluginRoot || !path.isAbsolute(pluginRoot)) {
+    throw new NovaError("PLUGIN_ROOT_UNAVAILABLE", "absolute plugin root is unavailable");
   }
-  const runtime = new McpRuntime({ dataRoot, pluginRoot, host });
+  const dataRoot = resolveNovaHome(process.env);
+  const runtime = new McpRuntime({
+    dataRoot,
+    pluginRoot,
+    host,
+    legacyRoots: legacyDataRoots(process.env, host),
+  });
   let buffer = Buffer.alloc(0);
   let discardingOversizedFrame = false;
   for await (const chunk of process.stdin) {

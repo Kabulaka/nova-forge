@@ -8,7 +8,7 @@
         "codex"
       ],
       "env": {
-        "NOVA_PLUGIN_DATA": "${PLUGIN_DATA}",
+        "NOVA_LEGACY_PLUGIN_DATA": "${PLUGIN_DATA}",
         "NOVA_PLUGIN_ROOT": "${PLUGIN_ROOT}"
       }
     }

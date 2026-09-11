@@ -3,6 +3,11 @@ import path from "node:path";
 import { buildRecoveryContext } from "../core/capsule.mjs";
 import { claimSession } from "../core/rendezvous.mjs";
 import {
+  bootstrapStateRoot,
+  legacyDataRoots,
+  resolveNovaHome,
+} from "../core/state-root.mjs";
+import {
   assertCovered,
   completeCompaction,
   freezeCompaction,
@@ -43,18 +48,17 @@ export function detectHost(environment = process.env) {
   throw new NovaError("HOST_UNAVAILABLE", "trusted plugin host environment is unavailable");
 }
 
-export function resolvePluginPaths(environment = process.env) {
+export function resolvePluginPaths(environment = process.env, host = detectHost(environment)) {
   const pluginRoot =
     environment.NOVA_PLUGIN_ROOT || environment.PLUGIN_ROOT || environment.CLAUDE_PLUGIN_ROOT;
-  const dataRoot =
-    environment.NOVA_PLUGIN_DATA || environment.PLUGIN_DATA || environment.CLAUDE_PLUGIN_DATA;
   if (!pluginRoot || !path.isAbsolute(pluginRoot)) {
     throw new NovaError("PLUGIN_ROOT_UNAVAILABLE", "absolute plugin root is unavailable");
   }
-  if (!dataRoot || !path.isAbsolute(dataRoot)) {
-    throw new NovaError("PLUGIN_DATA_UNAVAILABLE", "absolute writable plugin data root is unavailable");
-  }
-  return { pluginRoot, dataRoot };
+  return {
+    pluginRoot,
+    dataRoot: resolveNovaHome(environment),
+    legacyRoots: legacyDataRoots(environment, host),
+  };
 }
 
 function trustedBinding(host, input) {
@@ -117,7 +121,8 @@ export function handleHook(input, environment = process.env, options = {}) {
       throw new NovaError("INVALID_HOOK_INPUT", "hook input must be a JSON object");
     }
     host = detectHost(environment);
-    const { pluginRoot, dataRoot } = resolvePluginPaths(environment);
+    const { pluginRoot, dataRoot, legacyRoots } = resolvePluginPaths(environment, host);
+    bootstrapStateRoot({ environment, host, dataRoot, legacyRoots, now: options.now ?? Date.now() });
     const pluginVersion = readPluginVersion(pluginRoot);
     const binding = trustedBinding(host, input);
     const now = options.now ?? Date.now();
