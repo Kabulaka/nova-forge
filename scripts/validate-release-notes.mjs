@@ -72,6 +72,7 @@ export function validateReleaseNotes({ root = scriptRoot, tag } = {}) {
   const expectedTag = `v${packageJson.version}`;
   const releaseTag = tag ?? expectedTag;
   const notesPath = path.join(root, "docs", "release-notes", `${releaseTag}.md`);
+  const readmePath = path.join(root, "README.md");
   const errors = [];
 
   if (!/^v\d+\.\d+\.\d+$/.test(releaseTag)) {
@@ -123,6 +124,11 @@ export function validateReleaseNotes({ root = scriptRoot, tag } = {}) {
       if (!installation.includes(command)) {
         errors.push(`release notes are missing Claude Code install command: ${command}`);
       }
+    }
+    if (!fs.existsSync(readmePath)) {
+      errors.push("README.md is missing");
+    } else if (!stripHtmlComments(fs.readFileSync(readmePath, "utf8")).includes(codexCommand)) {
+      errors.push(`README.md is missing current pinned Codex install command: ${codexCommand}`);
     }
   }
   if (/(?:\bTODO\b|\bTBD\b|<CHANGE_ME>)/i.test(notes)) {

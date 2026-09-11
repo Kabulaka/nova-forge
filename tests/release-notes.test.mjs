@@ -17,6 +17,10 @@ function fixture() {
       repository: { url: "https://github.com/Kabulaka/nova-forge.git" },
     }),
   );
+  fs.writeFileSync(
+    path.join(root, "README.md"),
+    "codex plugin marketplace add Kabulaka/nova-forge --ref v1.2.3\n",
+  );
   const notes = `# Nova Forge v1.2.3
 
 > Baseline
@@ -89,6 +93,19 @@ test("rejects a missing release note", () => {
   try {
     fs.rmSync(path.join(root, "docs", "release-notes", "v1.2.3.md"));
     assert.match(validateReleaseNotes({ root, tag: "v1.2.3" }).errors.join("\n"), /release notes are missing/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a README pinned to a different release", () => {
+  const { root } = fixture();
+  try {
+    fs.writeFileSync(
+      path.join(root, "README.md"),
+      "codex plugin marketplace add Kabulaka/nova-forge --ref v1.2.2\n",
+    );
+    assert.match(validateReleaseNotes({ root, tag: "v1.2.3" }).errors.join("\n"), /README\.md.*v1\.2\.3/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

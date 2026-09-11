@@ -1,0 +1,42 @@
+{
+  "batch_id": "NR-20260911-release-v020",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "maintenance",
+      "commits": [
+        {
+          "commit": "f26f95719acac010d8aa1f90b6c64a5ddee25c35",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "npm run check baseline 78/78; affected release-notes 22/22; release notes and package 106 files (pass)",
+      "work_item": "MAINT-01a08e56-b139-73ad-9366-7bdd4beb1184"
+    }
+  ],
+  "manifest_sha256": "0e12af9266b86f737b9d4759a79ab16393df29f99b0699639ae069147f706fd9",
+  "review_content_sha256": "5888c296cf54dce8191a5c409815aff1cb8014dfa648bee134d25118ebef2c4e",
+  "review_fix_scope": [
+    "main:README.md",
+    "main:scripts/validate-release-notes.mjs",
+    "main:tests/release-notes.test.mjs"
+  ],
+  "review_fix_sha256": "1d430eaf81210cc243840262c228ea005bab242ad5f0453246168ee473ce49cd",
+  "review_heads": {
+    "main": "f26f95719acac010d8aa1f90b6c64a5ddee25c35"
+  },
+  "review_round": 2,
+  "review_scope": [
+    "main:.agents/plugins/marketplace.json",
+    "main:.claude-plugin/marketplace.json",
+    "main:.claude-plugin/plugin.json",
+    "main:.codex-plugin/plugin.json",
+    "main:docs/release-notes/v0.2.0.md",
+    "main:package.json"
+  ],
+  "reviewed_at": "2026-09-11T11:22:51+08:00",
+  "reviewer": "/root/review_release_v020",
+  "schema": 2
+}
