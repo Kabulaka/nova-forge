@@ -23,3 +23,19 @@ test("Codex manifest uses the packaged MCP companion and default hook discovery"
   assert.equal(mcp.mcpServers["nova-checkpoint"].default_tools_approval_mode, "approve");
   assert.equal(Object.hasOwn(mcp.mcpServers["nova-checkpoint"], "env"), false);
 });
+
+test("checkpoint tools have a narrow PreToolUse proof injector", () => {
+  const hooks = readJson("hooks/hooks.json");
+  const entries = hooks.hooks.PreToolUse;
+  assert.equal(entries.length, 1);
+  const matcher = new RegExp(entries[0].matcher);
+  for (const name of [
+    "mcp__nova-checkpoint__nova_checkpoint_get",
+    "mcp__nova_checkpoint__nova_checkpoint_save",
+    "mcp__plugin_nova-forge_nova-checkpoint__nova_checkpoint_get",
+  ]) {
+    assert.equal(matcher.test(name), true);
+  }
+  assert.equal(matcher.test("mcp__other__nova_checkpoint_get"), false);
+  assert.equal(matcher.test("Bash"), false);
+});

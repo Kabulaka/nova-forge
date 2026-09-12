@@ -24,6 +24,18 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "^(mcp__(nova-checkpoint|nova_checkpoint)__nova_checkpoint_(get|save)|mcp__plugin_nova-forge_nova-checkpoint__nova_checkpoint_(get|save))$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/run.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": ".*",

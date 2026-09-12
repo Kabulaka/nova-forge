@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildRecoveryContext } from "../core/capsule.mjs";
-import { claimSession } from "../core/rendezvous.mjs";
+import { issueScopeProof } from "../core/scope-proof.mjs";
 import {
   bootstrapStateRoot,
   legacyDataRoots,
@@ -150,6 +150,28 @@ function isOwnCheckpointTool(host, toolName) {
   return typeof toolName === "string" && OWN_CHECKPOINT_TOOLS[host].has(toolName);
 }
 
+function checkpointToolName(host, toolName) {
+  if (!isOwnCheckpointTool(host, toolName)) return null;
+  return toolName.endsWith("_get") ? "nova_checkpoint_get" : "nova_checkpoint_save";
+}
+
+function proofOutput(input, scopeProof) {
+  const toolInput = input.tool_input ?? {};
+  if (toolInput === null || typeof toolInput !== "object" || Array.isArray(toolInput)) {
+    throw new NovaError("INVALID_TOOL_INPUT", "checkpoint tool input must be a JSON object");
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      updatedInput: {
+        ...toolInput,
+        scopeProof,
+      },
+    },
+  };
+}
+
 export function handleHook(input, environment = process.env, options = {}) {
   const event = input?.hook_event_name;
   let rules;
@@ -174,13 +196,6 @@ export function handleHook(input, environment = process.env, options = {}) {
       if (!["startup", "resume", "clear", "compact"].includes(source)) {
         throw new NovaError("UNSUPPORTED_SESSION_SOURCE", `unsupported SessionStart source ${source}`);
       }
-      const rendezvous = claimSession(dataRoot, {
-        host,
-        cwd: input.cwd,
-        sessionKey: binding.sessionKey,
-        hostPid: options.hostPid ?? process.ppid,
-        now,
-      });
       startSession(dataRoot, binding, pluginVersion, source, { now });
       let context;
       let recoveryWarning;
@@ -205,17 +220,23 @@ export function handleHook(input, environment = process.env, options = {}) {
       } else {
         context = buildRecoveryContext(rules, { taskCapsule: null });
       }
-      const warning = [
-        recoveryWarning,
-        ["ambiguous", "revoked"].includes(rendezvous.status)
-          ? "Nova checkpoint MCP binding is ambiguous and remains disabled for this session."
-          : undefined,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      return contextOutput(event, context, warning);
+      return contextOutput(event, context, recoveryWarning);
     }
 
+    if (event === "PreToolUse") {
+      const toolName = checkpointToolName(host, input.tool_name);
+      if (toolName === null) return {};
+      const scopeProof = issueScopeProof(
+        dataRoot,
+        {
+          ...binding,
+          toolName,
+          toolUseId: input.tool_use_id,
+        },
+        { now },
+      );
+      return proofOutput(input, scopeProof);
+    }
     if (event === "UserPromptSubmit") {
       markEvent(dataRoot, binding, undefined, eventId(host, input), { now });
       return {};

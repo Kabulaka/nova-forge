@@ -95,6 +95,7 @@ requireValue(
 const expectedEvents = [
   "SessionStart",
   "UserPromptSubmit",
+  "PreToolUse",
   "PostToolUse",
   "Stop",
   "PreCompact",
@@ -126,6 +127,7 @@ for (const relative of [
   "hooks/run.mjs",
   "runtime/adapters/hook.mjs",
   "runtime/core/schema.mjs",
+  "runtime/core/scope-proof.mjs",
   "runtime/core/storage.mjs",
   "runtime/core/rendezvous.mjs",
   "runtime/core/state-root.mjs",

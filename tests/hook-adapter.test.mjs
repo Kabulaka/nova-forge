@@ -11,6 +11,7 @@ import { detectHost, handleHook, resolvePluginPaths } from "../runtime/adapters/
 import { HOOK_INPUT_LIMIT } from "../runtime/core/constants.mjs";
 import { getCheckpoint, saveCheckpoint } from "../runtime/core/state-machine.mjs";
 import { cwdKey, scopeKey } from "../runtime/core/util.mjs";
+import { McpRuntime } from "../runtime/mcp/server.mjs";
 import { pluginRoot, saveInput, temporaryDirectory } from "./helpers.mjs";
 
 function environment(dataRoot, host = "codex") {
@@ -107,6 +108,89 @@ test("startup injects static rules without inventing a checkpoint", () => {
     assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
     const state = getCheckpoint(temp.directory, currentBinding()).envelope;
     assert.equal(state.taskCapsule, null);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("PreToolUse overwrites caller proof input and authorizes exactly one checkpoint call", () => {
+  for (const host of ["codex", "claude-code"]) {
+    const temp = temporaryDirectory();
+    try {
+      const env = environment(temp.directory, host);
+      handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+      const toolName =
+        host === "codex"
+          ? "mcp__nova_checkpoint__nova_checkpoint_get"
+          : "mcp__plugin_nova-forge_nova-checkpoint__nova_checkpoint_get";
+      const prepared = handleHook(
+        input("PreToolUse", {
+          tool_name: toolName,
+          tool_use_id: `${host}-get-1`,
+          tool_input: { scopeProof: "caller-controlled" },
+        }),
+        env,
+        { now: 2_000 },
+      );
+      assert.equal(prepared.hookSpecificOutput.hookEventName, "PreToolUse");
+      assert.equal(prepared.hookSpecificOutput.permissionDecision, "allow");
+      assert.match(prepared.hookSpecificOutput.updatedInput.scopeProof, /^[a-f0-9]{64}$/);
+      assert.notEqual(prepared.hookSpecificOutput.updatedInput.scopeProof, "caller-controlled");
+      const proofFile = path.join(
+        temp.directory,
+        "rendezvous",
+        host,
+        "proofs",
+        `${prepared.hookSpecificOutput.updatedInput.scopeProof}.json`,
+      );
+      const proofRecord = fs.readFileSync(proofFile, "utf8");
+      assert.doesNotMatch(proofRecord, /hook-session|caller-controlled/);
+      assert.match(proofRecord, new RegExp(`${host}-get-1`));
+
+      const runtime = new McpRuntime({ dataRoot: temp.directory, pluginRoot, host });
+      const current = runtime.callTool(
+        "nova_checkpoint_get",
+        prepared.hookSpecificOutput.updatedInput,
+        { now: 2_001 },
+      );
+      assert.equal(current.authorityGeneration, 0);
+      assert.equal(fs.existsSync(proofFile), false);
+      assert.throws(
+        () => runtime.callTool(
+          "nova_checkpoint_get",
+          prepared.hookSpecificOutput.updatedInput,
+          { now: 2_002 },
+        ),
+        { code: "SCOPE_PROOF_INVALID" },
+      );
+    } finally {
+      temp.cleanup();
+    }
+  }
+});
+
+test("PreToolUse proof failures allow the host call but leave it unauthorized", () => {
+  const temp = temporaryDirectory();
+  try {
+    const env = environment(temp.directory);
+    handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+    const output = handleHook(
+      input("PreToolUse", {
+        tool_name: "mcp__nova_checkpoint__nova_checkpoint_get",
+        tool_use_id: "",
+        tool_input: {},
+      }),
+      env,
+      { now: 2_000 },
+    );
+    assert.match(output.systemMessage, /INVALID_SCOPE_PROOF/);
+    assert.equal(Object.hasOwn(output, "hookSpecificOutput"), false);
+    assert.equal(Object.hasOwn(output, "decision"), false);
+    assert.equal(Object.hasOwn(output, "continue"), false);
+    const runtime = new McpRuntime({ dataRoot: temp.directory, pluginRoot, host: "codex" });
+    assert.throws(() => runtime.callTool("nova_checkpoint_get", {}), {
+      code: "SCOPE_PROOF_REQUIRED",
+    });
   } finally {
     temp.cleanup();
   }

@@ -1,12 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { JSON_RPC_FRAME_LIMIT, MCP_PROTOCOL_VERSION } from "../core/constants.mjs";
-import {
-  registerMcpInstance,
-  resolveHostProcessId,
-  validateActiveBinding,
-  waitForBinding,
-} from "../core/rendezvous.mjs";
+import { consumeScopeProof } from "../core/scope-proof.mjs";
 import {
   bootstrapStateRoot,
   legacyDataRoots,
@@ -165,10 +160,6 @@ export class McpRuntime {
     dataRoot,
     pluginRoot,
     host,
-    cwd = process.cwd(),
-    pid = process.pid,
-    hostPid = process.ppid,
-    hostIdentity,
     environment = process.env,
     legacyRoots = [],
   }) {
@@ -177,39 +168,15 @@ export class McpRuntime {
     }
     bootstrapStateRoot({ environment, host, dataRoot, legacyRoots });
     this.dataRoot = dataRoot;
+    this.host = host;
     this.pluginVersion = readPluginVersion(pluginRoot);
-    this.registration = registerMcpInstance(dataRoot, {
-      host,
-      cwd,
-      pid,
-      hostPid,
-      hostIdentity,
-      allowCwdMismatch: host === "codex",
-    });
-    this.binding = null;
-  }
-
-  currentBinding() {
-    if (this.binding) {
-      validateActiveBinding(this.dataRoot, this.registration, this.binding);
-      return this.binding;
-    }
-    this.binding = waitForBinding(this.dataRoot, this.registration);
-    if (!this.binding) {
-      throw new NovaError(
-        "BINDING_UNAVAILABLE",
-        "MCP instance is not uniquely bound to a trusted host session",
-      );
-    }
-    validateActiveBinding(this.dataRoot, this.registration, this.binding);
-    return this.binding;
   }
 
   listTools() {
     return [
       {
         name: "nova_checkpoint_get",
-        description: "Read the latest validated checkpoint for this bound host session.",
+        description: "Read the latest validated checkpoint for the current trusted host session.",
         inputSchema: { type: "object", additionalProperties: false, properties: {} },
       },
       {
@@ -221,13 +188,26 @@ export class McpRuntime {
     ];
   }
 
-  callTool(name, args) {
-    const binding = this.currentBinding();
+  callTool(name, args, options = {}) {
+    if (name !== "nova_checkpoint_get" && name !== "nova_checkpoint_save") {
+      throw new NovaError("UNKNOWN_TOOL", `unknown MCP tool ${name}`);
+    }
+    if (!isPlainObject(args)) {
+      throw new NovaError("INVALID_SCHEMA", `${name} arguments must be a JSON object`);
+    }
+    const toolArgs = { ...args };
+    const scopeProof = toolArgs.scopeProof;
+    delete toolArgs.scopeProof;
+    const binding = consumeScopeProof(
+      this.dataRoot,
+      { host: this.host, scopeProof, toolName: name },
+      options,
+    );
     if (name === "nova_checkpoint_get") {
-      if (args && Object.keys(args).length > 0) {
+      if (Object.keys(toolArgs).length > 0) {
         throw new NovaError("INVALID_SCHEMA", "nova_checkpoint_get accepts no arguments");
       }
-      const { envelope, source } = getCheckpoint(this.dataRoot, binding);
+      const { envelope, source } = getCheckpoint(this.dataRoot, binding, options);
       const value = {
         source,
         schemaVersion: envelope.schemaVersion,
@@ -242,7 +222,13 @@ export class McpRuntime {
       return value;
     }
     if (name === "nova_checkpoint_save") {
-      const outcome = saveCheckpoint(this.dataRoot, binding, this.pluginVersion, args);
+      const outcome = saveCheckpoint(
+        this.dataRoot,
+        binding,
+        this.pluginVersion,
+        toolArgs,
+        options,
+      );
       return {
         saved: true,
         idempotent: outcome.result.idempotent,
@@ -252,7 +238,6 @@ export class McpRuntime {
         dirty: outcome.envelope.dirty,
       };
     }
-    throw new NovaError("UNKNOWN_TOOL", `unknown MCP tool ${name}`);
   }
 }
 
@@ -344,7 +329,6 @@ async function main() {
     dataRoot,
     pluginRoot,
     host,
-    hostPid: resolveHostProcessId(host),
     legacyRoots: legacyDataRoots(process.env, host),
   });
   let buffer = Buffer.alloc(0);

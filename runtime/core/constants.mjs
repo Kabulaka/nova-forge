@@ -13,6 +13,7 @@ export const GLOBAL_QUOTA_BYTES = 1024 * 1024 * 1024;
 export const HOST_SESSION_LIMIT = 2000;
 export const RENDEZVOUS_TTL_MS = 30_000;
 export const RENDEZVOUS_SETTLE_MS = 100;
+export const SCOPE_PROOF_TTL_MS = 30_000;
 export const LOCK_TIMEOUT_MS = 2_000;
 export const INJECTION_CHARACTER_LIMIT = 9_500;
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
