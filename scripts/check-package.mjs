@@ -37,6 +37,8 @@ const forbidden = [...files].filter(
   (file) =>
     file.startsWith(".nova/") ||
     file.startsWith("tests/") ||
+    file.includes("/__pycache__/") ||
+    /\.py[cod]$/.test(file) ||
     /^nova-(?:requirements|architecture|development|doctor|review)(?:\/|$)/.test(file),
 );
 const invalidReferences = [...files]

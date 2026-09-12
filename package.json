@@ -21,7 +21,9 @@
     "codex/AGENTS.global.md",
     "hooks/",
     "runtime/",
-    "skills/"
+    "skills/",
+    "!skills/**/__pycache__/**",
+    "!skills/**/*.py[cod]"
   ],
   "scripts": {
     "test": "node --test tests/*.test.mjs",
