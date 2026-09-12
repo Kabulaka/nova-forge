@@ -1,0 +1,39 @@
+{
+  "batch_id": "NR-20260912-release-v031",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "maintenance",
+      "commits": [
+        {
+          "commit": "b579785c269e6b8b0e4ae48091352d84ac2cc10e",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "architecture ready; release notes; npm run check (pass)",
+      "work_item": "MAINT-01a0957d-c848-75cf-a084-911fe99b7b5b"
+    }
+  ],
+  "manifest_sha256": "634715ba55e48ac21308a68a5ea4056300fb8e9002eddc8b85e1998ba378eaf9",
+  "review_content_sha256": "55a15c3390b5e70bbae93760d941449fc142fcecf66992e4337a2d5ec3f68869",
+  "review_fix_scope": [],
+  "review_fix_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "review_heads": {
+    "main": "b579785c269e6b8b0e4ae48091352d84ac2cc10e"
+  },
+  "review_round": 1,
+  "review_scope": [
+    "main:.agents/plugins/marketplace.json",
+    "main:.claude-plugin/marketplace.json",
+    "main:.claude-plugin/plugin.json",
+    "main:.codex-plugin/plugin.json",
+    "main:README.md",
+    "main:docs/release-notes/v0.3.1.md",
+    "main:package.json"
+  ],
+  "reviewed_at": "2026-09-12T20:28:12+08:00",
+  "reviewer": "/root/review_v031_release",
+  "schema": 2
+}
