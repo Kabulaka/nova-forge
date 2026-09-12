@@ -23,7 +23,7 @@
 | 确定性校验与治理关闭 | Python 3 标准库；Ubuntu、macOS、Windows 原生运行，公共命令与审计语义跨平台一致 | 各技能 `scripts/` 与三平台治理测试 |
 | 插件运行时 | Node.js 22.5+、ESM、仅标准库；缺失时明确失败，不自动安装 Node.js 或 Bun | [双宿主插件工程骨架](architecture/foundation/dual-host-plugin.md) |
 | 插件封装 | Codex `.codex-plugin/plugin.json`、Claude Code `.claude-plugin/plugin.json`、共享 `skills/` 与 `hooks/` | 双宿主官方插件规范与工程骨架契约 |
-| 会话连续性 | stdio MCP 提交结构化权威状态，Hook 校验、阻断并在 `SessionStart` 注入恢复胶囊；默认用户私有根为 `~/.nova`，绝对 `NOVA_HOME` 可覆盖 | [双宿主插件工程骨架](architecture/foundation/dual-host-plugin.md)与[会话检查点数据契约](architecture/data/session-checkpoint.md) |
+| 会话连续性 | stdio MCP 提交结构化权威状态；`PreToolUse` 从可信宿主事件为每次检查点调用覆盖式注入一次性作用域证明，Hook 校验并在 `SessionStart` 注入恢复胶囊；默认用户私有根为 `~/.nova`，绝对 `NOVA_HOME` 可覆盖 | [双宿主插件工程骨架](architecture/foundation/dual-host-plugin.md)与[会话检查点数据契约](architecture/data/session-checkpoint.md) |
 | 审计记录 | JSONL 与严格 JSON-in-YAML | `.nova/audit/features/`、`.nova/audit/reviews/` 与 `.nova/audit/index/` |
 | 发现入口 | 支持且已启用插件的宿主只使用版本化插件；Codex IDE、旧版宿主和显式故障恢复互斥使用安全软链接 | 双 manifest、双 marketplace、兼容安装检查、入口优先级及两个宿主的用户级规则链接状态 |
 | 发布 | SemVer；`package.json` 为版本单一来源；主分支只跑 CI，人工 `vX.Y.Z` 标签触发 GitHub Release | manifests、marketplaces 与 GitHub Actions |
@@ -82,8 +82,8 @@ compat/                              软链接安装、检查与回滚
 | `skills/nova-*/assets/` | 复制或改写为输出的模板 | 不作为隐藏指令或运行状态存储 |
 | `skills/nova-*/scripts/` | 可重复的确定性操作 | 同目录放直接测试，失败返回非零状态 |
 | `.codex-plugin/`、`.claude-plugin/`、`.agents/plugins/` | 插件身份、组件和 marketplace 入口 | 路径指向插件根共享组件，版本由 `package.json` 同步，不复制技能或规则正文 |
-| `hooks/`、`runtime/adapters/` | 解析宿主事件并映射为共享操作 | 只处理宿主字段、阻断语义和上下文输出，不实现第二套状态机 |
-| `runtime/core/`、`runtime/mcp/` | 初始化稳定用户私有状态根、迁移旧状态，并保存、校验和查询结构化同会话检查点 | 本机原子 JSON、无网络、无原生依赖，不从自然语言推断正式状态，不持久化到插件缓存、项目目录或临时目录 |
+| `hooks/`、`runtime/adapters/` | 解析宿主事件、为检查点工具注入一次性可信作用域证明并映射共享操作 | 只处理宿主字段、证明签发与消费边界、阻断语义和上下文输出，不实现第二套状态机 |
+| `runtime/core/`、`runtime/mcp/` | 初始化稳定用户私有状态根、迁移旧状态，并通过一次性作用域证明保存、校验和查询结构化同会话检查点 | 本机原子 JSON、无网络、无原生依赖，不从自然语言推断正式状态，不接受模型提供的会话选择，不持久化到插件缓存、项目目录或临时目录 |
 | `compat/` | 维护非插件宿主的安全软链接入口 | 冲突时整次零写入，不覆盖普通文件或真实目录 |
 | `.github/workflows/` | 验证并打包三平台插件 | 主分支不发版，只有人工匹配版本标签可创建正式 Release |
 
@@ -137,9 +137,9 @@ flowchart LR
 | 交付治理 | 固化已确认需求基线，在首个开发任务前按独立、内聚、可控边界登记完整交付台账及内部里程碑，并从可信审计聚合进度 | requirement/delivery-plan commit、`.nova/delivery/` 与蓝图投影 |
 | 开发交付 | 将目标需求或普通功能收敛为自包含设计并完成实现、测试和本地提交 | `nova-development`、FEAT/PATCH/FIX/MAINT 与 `.nova/design/` |
 | 插件分发 | 向 Codex 与 Claude Code 暴露同版本的静态规则、技能、Hook 和 MCP | 双 manifest、双 marketplace 与 GitHub Release |
-| 宿主适配 | 把两个宿主的会话与压缩事件映射为共享状态操作 | `hooks/` 与 `runtime/adapters/`，不承载权威状态机 |
+| 宿主适配 | 把两个宿主的会话与压缩事件映射为共享状态操作，并在检查点工具执行前注入一次性可信作用域证明 | `hooks/` 与 `runtime/adapters/`，不承载权威状态机 |
 | 状态核心 | 解析并验证稳定用户私有根，按宿主迁移和隔离状态，原子保存、清理并生成有界恢复胶囊 | `runtime/core/` 与 `NOVA_HOME` 下的宿主私有分区 |
-| 检查点 MCP | 让 AI 在语义边界提交和查询显式结构化状态 | `runtime/mcp/` 的最小 stdio 工具，不接受自由文本推断 |
+| 检查点 MCP | 让 AI 在语义边界提交和查询显式结构化状态 | `runtime/mcp/` 的最小 stdio 工具；只消费宿主 Hook 注入的一次性作用域证明，不接受自由文本推断或会话选择参数 |
 | 版本发布 | 同步版本、三平台验证、打包并在人工标签后创建正式版本 | `package.json` 与 `.github/workflows/` |
 
 ## 5. 跨模块契约
@@ -171,8 +171,8 @@ flowchart LR
 | C-21 | 项目治理文档统一位于 `.nova/`；旧布局迁移以覆盖实体类型、模式、内容树和改写字节的 `Plan-SHA256` 绑定用户批准，再用 `git mv` 与同目录临时文件原子应用；活动设计确定性刷新路径变化后的收敛指纹，符号链接不跟随，任一失败恢复字节、模式、Git 状态和目录，历史审计及终态设计正文保持原字节 | 计划失配、越界、冲突、完整版本 5 设计、部分写入、原子替换、后置校验、回滚、兼容解析与幂等测试 |
 | C-22 | 支持且已启用插件的 Codex 与 Claude Code 只以各自版本化插件为发现权威；Codex IDE、旧版宿主和显式故障恢复才互斥使用兼容软链接，即使两种入口同源也不得重复加载规则或技能；`codex/AGENTS.global.md` 与 `skills/nova-*/` 分别是静态规则和五技能唯一权威源码 | 插件安装、组件路径、入口优先级、实体数量、规则哈希与重复发现正反用例 |
 | C-23 | `package.json.version` 是 SemVer 单一来源，双 manifest、双 marketplace 和构建产物必须一致；主分支只运行 CI，只有维护者人工创建匹配的 `vX.Y.Z` 标签才允许正式 GitHub 发布 | 版本失配、错误标签、主分支无发布、三平台打包和产物校验和测试 |
-| C-24 | AI 只通过绑定宿主适配器可信当前会话作用域的最小本地 MCP，以显式字段和 authority 类型写入权威检查点；检查点只是会话内权威状态的持久化投影，`taskCapsule` 必须无损保存并恢复含 inheritedContracts、stageEvidence、stageDecisions、unresolvedDeltas、resolutionBasis 的完整 stageProjection；工具不接受 host/sessionId 参数，Hook、transcript 和压缩摘要不得推断、补齐或提升正式决定 | 作用域缺失/错配/重放、MCP schema、五字段映射与恢复、resolutionBasis 保留、authority 隔离、候选提升拒绝与 transcript/summary 污染负例 |
-| C-25 | 检查点位于默认 `~/.nova` 或绝对 `NOVA_HOME`，先按宿主再按绑定宿主与会话的摘要隔离；使用 schema、单调 authorityGeneration、独立 leaseVersion、SHA-256、原子 envelope 和单个最后有效备份；可信活动后保留 30 天，不保存秘密，不存于插件缓存且不跨会话、宿主、设备或团队继承 | 默认/覆盖路径、读写/租约/清理并发、双宿主同项目、时钟回拨、损坏、回退、TTL、秘密扫描、缓存升级和隔离矩阵测试 |
+| C-24 | AI 只通过宿主适配器可信当前会话作用域的最小本地 MCP，以显式字段和 authority 类型写入权威检查点；每次查询或写入前由 `PreToolUse` 使用可信 `session_id`、目录、工具名和调用 ID 创建并覆盖式注入一次性不透明作用域证明，MCP 原子消费后才访问对应作用域；模型声明参数不接受 host/sessionId，也不能生成或选择作用域；检查点只是会话内权威状态的持久化投影，`taskCapsule` 必须无损保存并恢复含 inheritedContracts、stageEvidence、stageDecisions、unresolvedDeltas、resolutionBasis 的完整 stageProjection；Hook、transcript 和压缩摘要不得推断、补齐或提升正式决定 | 同宿主多会话与同目录并发、fork/子代理、证明缺失/错配/伪造/过期/重放、MCP schema、五字段映射与恢复、resolutionBasis 保留、authority 隔离、候选提升拒绝与 transcript/summary 污染负例 |
+| C-25 | 检查点位于默认 `~/.nova` 或绝对 `NOVA_HOME`，先按宿主再按可信作用域中的宿主与会话摘要隔离；一次性作用域证明只保留于用户私有根的短期运行记录，原子消费后失效且不进入 checkpoint；检查点使用 schema、单调 authorityGeneration、独立 leaseVersion、SHA-256、原子 envelope 和单个最后有效备份；可信活动后保留 30 天，不保存可复用秘密，不存于插件缓存且不跨会话、宿主、设备或团队继承 | 默认/覆盖路径、证明消费与清理、读写/租约/清理并发、双宿主同项目、时钟回拨、损坏、回退、TTL、秘密扫描、缓存升级和隔离矩阵测试 |
 | C-26 | 双宿主可信输入/工具事件递增 eventWatermark 并置 dirty，MCP 成功覆盖当前水位后才清除；`Stop`、`PreCompact`、`PostCompact` 与 `SessionStart` 对缺失、未覆盖、损坏或错序状态停止 Nova authority 提升并报告降级，但始终放行宿主回答、原生压缩和续接；只有完整 `PreCompact → PostCompact → SessionStart(compact)` attempt/generation/watermark 握手才注入压缩恢复胶囊，resume 也只允许同作用域最近有效代 | 漏写、旧/未来水位、dirty、首次安装、旧版升级、MCP/状态根故障、手动/自动压缩、错序/缺失/重复事件、无权威降级和正常恢复正反用例 |
 | C-27 | 首版运行时固定 Node.js 22.5+、ESM 和标准库，插件不得自动安装 Node.js 或 Bun；Ubuntu、macOS、Windows 均须通过单元、打包和真实路径/引号兼容检查后才可发布 | 三平台 Actions、缺失/低版本运行时、路径空格、Windows 分隔符和无外部依赖检查 |
 | C-28 | MCP frame、检查点字段/集合/嵌套/总字节、每宿主会话数与磁盘、全局磁盘均有确定上限；超限在解析、规范化、哈希或临时写入的对应最早阶段拒绝，只清理已过期未锁定作用域，未过期状态不因配额被静默逐出 | 边界值、超限、30 天内大量会话、备份放大、配额清理顺序与零临时文件负例 |
@@ -237,7 +237,7 @@ flowchart LR
 | 需求基线 | 下游同时绑定 ancestor 中合法 requirement commit、逐字 Requirement-Ref、需求块路径与内容 SHA-256；工作树或字段不一致均不得成为正式输入 | 提交 schema、Git 祖先、内容指纹、精确范围和篡改负例 |
 | 交付台账 | 每个需求版本恰有一份严格 JSON 权威台账；蓝图只投影未完成有效 FEAT，内部里程碑不形成独立工作项，任务完成只从可信 Review 审计派生，计划变化保留原身份与原因；schema 1 PEND 只读兼容 | schema、任务边界、里程碑、交叉引用、依赖无环、历史比较、并发写入和投影一致性测试 |
 | 插件状态 | 检查点位于稳定 `NOVA_HOME` 的宿主物理分区而非插件安装/缓存目录；升级只迁入同宿主已验证状态，禁用、卸载或缓存清理均不删除状态，另一宿主和另一版本缓存不得成为回退权威 | 默认/覆盖路径、双宿主混用、缓存切换、迁移中断、升级、卸载重装与状态路径检查 |
-| 会话隔离 | `host + sessionId 摘要` 只来自宿主适配器建立的可信当前会话能力，是唯一查询边界；MCP 参数不能选择会话，不做模糊搜索或跨边界回退 | 双宿主、双会话、能力伪造/重放、设备目录与 fork/clear 负例 |
+| 会话隔离 | `host + sessionId 摘要` 只来自宿主适配器的可信 Hook 输入，是唯一查询边界；`PreToolUse` 为每次检查点调用覆盖式注入绑定工具调用的一次性不透明证明，MCP 模型参数不能选择会话，不做进程数量配对、模糊搜索或跨边界回退 | 双宿主、同 PID 双会话、同目录双会话、证明伪造/过期/重放、设备目录与 fork/clear 负例 |
 | 检查点内容 | 只存恢复必需结构化字段、控制文档路径和指纹；密码、令牌、秘密和控制文档正文拒绝落盘 | schema、secretScan 与内容扫描 |
 | 发布供应链 | 标签、版本、manifest、marketplace、产物清单和 SHA-256 一致，GitHub token 仅由受保护 Action 使用 | 最小权限、标签失配、产物重建和权限检查 |
 
@@ -252,7 +252,7 @@ flowchart LR
 | 临时前向测试 | 测试进程 | 使用隔离目录，结束后清理或由临时目录生命周期回收 |
 | 人工 Review 拒绝或中断 | 主代理 | 按 `nova-review` 统一修复并复审，或保留未审状态返回调试；不自动关闭待办 |
 | 旧布局迁移 | `nova-development` 迁移器 | 冲突或校验失败时零写入；成功后只保留 `.nova/` 实体，旧路径由确定性映射解析 |
-| 语义边界检查点写入 | 状态核心 | 临时文件完整同步后原子替换；失败保留最后有效代并立即暴露，用户无需手工保存 |
+| 语义边界检查点查询与写入 | 宿主 `PreToolUse`、检查点 MCP 与状态核心 | Hook 以可信事件为当前工具调用签发一次性作用域证明；MCP 原子消费并校验后才查询或写入，临时文件完整同步后原子替换；证明缺失、过期、错配、伪造或重放时零状态访问，写入失败保留最后有效代并立即暴露 |
 | 回合新鲜度 | 双宿主输入/工具与 `Stop` 适配器 | 可信事件递增水位并置 dirty；检查点未覆盖时不提升旧代、报告降级并放行回合结束，不依赖阻断后由模型自救 |
 | 压缩前检查 | 双宿主 `PreCompact` 适配器 | 只为覆盖当前水位且 dirty=false 的结构化检查点冻结 attempt；否则不建立 Nova authority、报告降级并放行宿主原生压缩，不从 transcript 补写 |
 | 压缩后核验 | 双宿主 `PostCompact` 适配器 | 匹配冻结 attempt 时记录完成 generation/watermark；错序或不一致时不提升压缩摘要、报告降级并放行宿主完成压缩 |

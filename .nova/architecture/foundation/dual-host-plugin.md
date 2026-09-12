@@ -17,9 +17,9 @@
 | `.codex-plugin/plugin.json`、`.claude-plugin/plugin.json` | 分别声明 Codex 与 Claude Code 插件身份、同一版本及组件入口 | `package.json` 的版本与插件根相对路径 | 各自维护不一致的规则或技能副本 |
 | `.agents/plugins/marketplace.json`、`.claude-plugin/marketplace.json` | 提供两个宿主可安装的 GitHub 仓库 marketplace 入口 | 同一插件根、发布版本与展示元数据 | 官方公共目录、主分支未标记版本自动发布 |
 | `hooks/` | 声明宿主事件并把输入、阻断和上下文输出映射到共享运行时 | `runtime/adapters/` 与宿主提供的会话 ID、事件来源和插件根 | 从 transcript 或压缩摘要推断正式决定 |
-| `runtime/adapters/` | Codex、Claude Code 薄适配器、路径解析及当前会话可信作用域建立 | `runtime/core/`、宿主事件 JSON 和注入根路径 | 在适配器中复制状态机、持久化或业务规则，或允许模型选择 host/sessionId |
+| `runtime/adapters/` | Codex、Claude Code 薄适配器、路径解析及每次检查点工具调用的一次性可信作用域证明签发 | `runtime/core/`、宿主事件 JSON 和注入根路径 | 在适配器中复制状态机、检查点持久化或业务规则，或允许模型选择 host/sessionId |
 | `runtime/core/` | 状态根解析、幂等初始化、旧状态迁移，以及检查点 schema、校验、原子读写、代际、校验和、TTL 与恢复胶囊 | Node.js 22.5+ 标准库、默认用户私有根或绝对 `NOVA_HOME` | 网络、数据库、原生扩展、插件安装/缓存目录或项目工作区持久化 |
-| `runtime/mcp/` | 暴露最小的结构化检查点写入和查询工具；进程绑定宿主适配器建立的当前会话能力，工具参数不暴露 host/sessionId | `runtime/core/` 与只读可信作用域 | 接受无 authority 标记的自由文本作为正式状态，或按调用参数切换会话作用域 |
+| `runtime/mcp/` | 暴露最小的结构化检查点写入和查询工具；模型声明参数不暴露 host/sessionId，每次调用只消费宿主 `PreToolUse` 覆盖式注入的一次性不透明作用域证明 | `runtime/core/` 与经原子消费验证的可信作用域 | 接受无 authority 标记的自由文本作为正式状态，接受模型生成的作用域证明，或按公开调用参数切换会话作用域 |
 | `compat/` | Codex IDE、旧版宿主和故障恢复的软链接安装、互斥迁移、检查与回滚 | 工作区权威文件及显式目标路径 | 覆盖普通文件、真实目录、成为插件宿主默认入口或与已启用插件形成重复发现 |
 | `.github/workflows/` | 三平台 CI、版本一致性检查、打包及人工标签发布 | Ubuntu、macOS、Windows；`package.json` SemVer | 主分支自动发布、自动创建版本标签或写官方目录 |
 
@@ -28,7 +28,7 @@
 | 对象 | 共享契约 | 验证 |
 |------|----------|------|
 | 根路径解析 | 未显式配置时以当前用户主目录下 `.nova` 为 `NOVA_HOME`；显式 `NOVA_HOME` 必须是规范化绝对路径，空值、相对路径或无法确定用户主目录时失败封闭 | Ubuntu、macOS、Windows 默认路径、绝对覆盖、空值和相对路径正反用例 |
-| 宿主隔离 | 权威状态固定落于 `state/<host>/<scopeKey>`，运行期 rendezvous 固定落于 `rendezvous/<host>`；`scopeKey` 继续同时绑定宿主与原始会话 ID 的不可逆摘要，任何宿主不得枚举、读取或回退到另一宿主分区 | 双宿主同项目、同名会话、并发启动、错配和模糊回退负例 |
+| 宿主隔离 | 权威状态固定落于 `state/<host>/<scopeKey>`，短期一次性证明记录固定落于 `rendezvous/<host>/proofs`；`scopeKey` 继续同时绑定宿主与原始会话 ID 的不可逆摘要，任何宿主不得枚举、读取或回退到另一宿主分区 | 双宿主同项目、同名会话、同 PID/同目录并发启动、错配和模糊回退负例 |
 | 双层初始化 | 兼容安装器在可执行时尽力预建；Hook 的首次 `SessionStart` 与 MCP 返回 `initialize` 前都调用同一幂等 bootstrap，递归创建私有目录并通过创建、写入、同步、原子替换和删除临时探针证明真实可写 | 全新安装、重复初始化、安装阶段不可写而首次启用可写、只读挂载和中途失败测试 |
 | 升级迁移 | Codex 只接收原 Codex 插件数据根，Claude Code 只接收原 Claude Code 插件数据根；旧 envelope 先按现有 schema、校验和、宿主和会话作用域验证，再跨根复制并用迁移记录原子发布；旧根不删除、不覆盖，中断后可幂等重试 | 双宿主旧根、损坏状态、跨根中断、重复迁移、目标冲突和部分成功负例 |
 | 权威切换 | 单个宿主迁移记录提交后，新根才成为该宿主唯一写入权威；读取不得长期双写或在新旧根间模糊选择，未完成迁移只报告阻断并保留旧数据 | 权威切换、重复启动、旧新冲突和回退拒绝测试 |
@@ -39,14 +39,15 @@
 | 语义事件 | Codex | Claude Code | 共享行为 |
 |----------|-------|-------------|----------|
 | 会话启动或恢复 | `SessionStart` 的 `startup`、`resume` | `SessionStart` 的 `startup`、`resume` | 从宿主事件建立不可由模型选择的当前会话作用域；加载静态规则，且仅 `resume` 查询该作用域检查点并记录 `injectedGeneration` |
+| 检查点工具调用前 | 匹配本插件 `nova_checkpoint_get/save` 的 `PreToolUse`，使用 `updatedInput` 覆盖内部字段 | 匹配本插件 `nova_checkpoint_get/save` 的 `PreToolUse`，使用 `updatedInput` 覆盖内部字段 | 从可信 `session_id`、目录、工具名和调用 ID 创建短期一次性不透明 `scopeProof`；完整保留模型业务参数并覆盖任何同名内部字段，Hook 失败或未运行时 MCP 因缺少有效证明失败封闭 |
 | 输入与工具事件 | `UserPromptSubmit`、`PostToolUse` | `UserPromptSubmit`、`PostToolUse` | 不分析自然语言，按可信宿主事件递增 `eventWatermark` 并置 dirty；检查点 MCP 自身事件不重复置 dirty |
 | 回合结束 | `Stop` | `Stop` | dirty 未被当前检查点覆盖时报告降级但放行宿主回答；不得依赖 Stop 阻断后由 AI 自救，也不得把旧代冒充最新权威 |
 | 压缩前 | `PreCompact` 的 `manual`、`auto` | `PreCompact` 的 `manual`、`auto` | 只有检查点 `coveredEventWatermark` 等于当前水位且 dirty=false 时才冻结 `attemptId + generation + watermark`；缺失、未覆盖或状态故障时不冻结 Nova authority，报告降级并放行宿主原生压缩 |
 | 压缩完成 | `PostCompact` | `PostCompact` | 匹配已冻结 attempt 时记录 completed generation/watermark；无冻结、错配或重复冲突时不得提升宿主摘要或写入 `injectedGeneration`，但必须放行宿主完成压缩 |
 | 压缩后续接 | `SessionStart` 的 `compact` | `SessionStart` 的 `compact` | 匹配已完成 attempt 时注入同一 generation 的有界胶囊并原子记录 `injectedGeneration`；缺少有效完成记录时只注入静态规则和降级上下文，不得阻断宿主会话 |
-| 权威状态变化 | AI 调用插件 MCP 工具 | AI 调用插件 MCP 工具 | 工具使用隐式可信作用域，以明确字段和 authority 类型绑定当前 `eventWatermark` 创建新 authority generation；持久化成功后才清除 dirty |
+| 权威状态变化 | AI 调用插件 MCP 工具 | AI 调用插件 MCP 工具 | MCP 原子消费与当前工具调用绑定的一次性 `scopeProof`，取得隐式可信作用域后以明确字段和 authority 类型绑定当前 `eventWatermark` 创建新 authority generation；持久化成功后才清除 dirty |
 
-生命周期 Hook 遵循“宿主可用性放行、checkpoint 权威性失败封闭”：首次安装、从无检查点版本升级、老会话恢复、MCP 不可用、状态根不可写、状态缺失/损坏/schema 不兼容或 Hook 输入异常，均不得通过非零退出、`continue:false` 或 `decision:block` 锁死普通对话与原生压缩；失败时只允许注入静态规则、无权威恢复提示或可见诊断，任何无效状态仍不得成为恢复 authority。
+生命周期 Hook 遵循“宿主可用性放行、checkpoint 权威性失败封闭”：首次安装、从无检查点版本升级、老会话恢复、MCP 不可用、状态根不可写、状态缺失/损坏/schema 不兼容、`PreToolUse` 证明签发失败或 Hook 输入异常，均不得锁死普通对话与原生压缩；检查点工具在缺少有效证明时自身拒绝且零状态访问，其他失败只允许注入静态规则、无权威恢复提示或可见诊断，任何无效状态仍不得成为恢复 authority。
 
 ### 2.3 发现入口权威、迁移与回退
 
