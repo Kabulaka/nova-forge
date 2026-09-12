@@ -1,0 +1,45 @@
+{
+  "batch_id": "NR-20260912-checkpoint-scope-proof",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "fix",
+      "commits": [
+        {
+          "commit": "db52619884d7a40ed7b57d88de8da04f4bfa74c4",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "受影响测试 32/32、plugin/package 校验及 diff check 均通过 (pass)",
+      "work_item": "FIX-01a094fc-3ada-79da-93d4-bc9e7429ee72"
+    }
+  ],
+  "manifest_sha256": "92543a10b8f3fa84b24c692c32bbe067e4335d18b8dfbd74690d7459b1cc3d99",
+  "review_content_sha256": "fda0a16d58f790f451728140272ba70254124ec4a5b80eb4de196730020b395c",
+  "review_fix_scope": [
+    "main:runtime/core/scope-proof.mjs",
+    "main:tests/hook-adapter.test.mjs"
+  ],
+  "review_fix_sha256": "7b2e4c3b3c5005cee269a8b4e259169447a77ff8a60e0f8a51096cac5d4dbac2",
+  "review_heads": {
+    "main": "db52619884d7a40ed7b57d88de8da04f4bfa74c4"
+  },
+  "review_round": 2,
+  "review_scope": [
+    "main:hooks/hooks.json",
+    "main:hooks/run.mjs",
+    "main:runtime/adapters/hook.mjs",
+    "main:runtime/core/constants.mjs",
+    "main:runtime/core/scope-proof.mjs",
+    "main:runtime/mcp/server.mjs",
+    "main:scripts/validate-plugin.mjs",
+    "main:tests/hook-adapter.test.mjs",
+    "main:tests/mcp.test.mjs",
+    "main:tests/plugin-structure.test.mjs"
+  ],
+  "reviewed_at": "2026-09-12T18:26:55+08:00",
+  "reviewer": "/root/scope_proof_review",
+  "schema": 2
+}

@@ -196,6 +196,49 @@ test("PreToolUse proof failures allow the host call but leave it unauthorized", 
   }
 });
 
+test(
+  "PreToolUse rejects a proof directory symlink without touching its external target",
+  { skip: process.platform === "win32" },
+  () => {
+    const temp = temporaryDirectory();
+    try {
+      const dataRoot = path.join(temp.directory, "nova-home");
+      const outside = path.join(temp.directory, "outside");
+      fs.mkdirSync(outside, { mode: 0o755 });
+      const outsideMode = fs.statSync(outside).mode & 0o777;
+      const env = environment(dataRoot);
+      handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+      const proofs = path.join(dataRoot, "rendezvous", "codex", "proofs");
+      fs.symlinkSync(outside, proofs, "dir");
+
+      const output = handleHook(
+        input("PreToolUse", {
+          tool_name: "mcp__nova_checkpoint__nova_checkpoint_get",
+          tool_use_id: "symlinked-proof",
+          tool_input: {},
+        }),
+        env,
+        { now: 2_000 },
+      );
+      assert.match(output.systemMessage, /SCOPE_PROOF_PATH_UNSAFE/);
+      assert.equal(Object.hasOwn(output, "hookSpecificOutput"), false);
+      assert.equal(fs.lstatSync(proofs).isSymbolicLink(), true);
+      assert.deepEqual(fs.readdirSync(outside), []);
+      assert.equal(fs.statSync(outside).mode & 0o777, outsideMode);
+
+      const runtime = new McpRuntime({ dataRoot, pluginRoot, host: "codex" });
+      assert.throws(
+        () => runtime.callTool("nova_checkpoint_get", { scopeProof: "f".repeat(64) }),
+        { code: "SCOPE_PROOF_PATH_UNSAFE" },
+      );
+      assert.deepEqual(fs.readdirSync(outside), []);
+      assert.equal(fs.statSync(outside).mode & 0o777, outsideMode);
+    } finally {
+      temp.cleanup();
+    }
+  },
+);
+
 test("SessionStart keeps static rules and allows startup when the state root cannot initialize", () => {
   const temp = temporaryDirectory();
   try {

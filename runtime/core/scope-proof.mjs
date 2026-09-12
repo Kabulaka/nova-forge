@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { LOCK_TIMEOUT_MS, SCOPE_PROOF_TTL_MS, STRING_LIMIT } from "./constants.mjs";
 import {
-  ensurePrivateDirectory,
   NovaError,
   parseIso,
   randomId,
@@ -42,11 +41,70 @@ function requireToolName(toolName) {
   }
 }
 
+function isWithin(root, target) {
+  const relative = path.relative(root, target);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== "..");
+}
+
+function createOrInspectDirectory(directory, label, create) {
+  let stat;
+  try {
+    stat = fs.lstatSync(directory);
+  } catch (error) {
+    if (error?.code !== "ENOENT" || !create) throw error;
+    try {
+      fs.mkdirSync(directory, { mode: 0o700 });
+    } catch (mkdirError) {
+      if (mkdirError?.code !== "EEXIST") throw mkdirError;
+    }
+    stat = fs.lstatSync(directory);
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new NovaError(
+      "SCOPE_PROOF_PATH_UNSAFE",
+      `${label} must be a real directory inside NOVA_HOME`,
+    );
+  }
+}
+
+function ensureProofDirectories(dataRoot, host) {
+  if (typeof dataRoot !== "string" || !path.isAbsolute(dataRoot)) {
+    throw new NovaError("SCOPE_PROOF_PATH_UNSAFE", "NOVA_HOME must be an absolute directory");
+  }
+  const normalizedRoot = path.normalize(dataRoot);
+  const directories = [
+    normalizedRoot,
+    path.join(normalizedRoot, "rendezvous"),
+    path.join(normalizedRoot, "rendezvous", host),
+    path.join(normalizedRoot, "rendezvous", host, "proofs"),
+  ];
+  directories.forEach((directory, index) => {
+    createOrInspectDirectory(directory, index === 0 ? "NOVA_HOME" : "scope proof directory", index > 0);
+  });
+  const realRoot = fs.realpathSync(normalizedRoot);
+  const realProofs = fs.realpathSync(directories.at(-1));
+  if (!isWithin(realRoot, realProofs)) {
+    throw new NovaError(
+      "SCOPE_PROOF_PATH_UNSAFE",
+      "scope proof directory must remain inside NOVA_HOME",
+    );
+  }
+  for (const directory of directories) {
+    try {
+      fs.chmodSync(directory, 0o700);
+    } catch (error) {
+      if (process.platform !== "win32") throw error;
+    }
+  }
+  return {
+    hostRoot: directories.at(-2),
+    proofs: directories.at(-1),
+  };
+}
+
 function proofPaths(dataRoot, host) {
   requireHost(host);
-  const hostRoot = path.join(dataRoot, "rendezvous", host);
-  const proofs = path.join(hostRoot, "proofs");
-  ensurePrivateDirectory(proofs);
+  const { hostRoot, proofs } = ensureProofDirectories(dataRoot, host);
   return {
     proofs,
     lock: path.join(hostRoot, ".proofs.lock"),
