@@ -147,6 +147,29 @@ npm run codex:dev:install
 npm run claude:dev:install
 ```
 
+#### 用独立宿主目录做隔离开发
+
+`CODEX_HOME` 只切换 Codex CLI 的独立状态根；开发安装器会把它传给 Codex，并只在该根中处理 Nova 插件缓存。Claude Code 使用 `CLAUDE_CONFIG_DIR`，Nova Forge 的检查点与开发 marketplace 快照使用 `NOVA_HOME`。因此，只设置 `CODEX_HOME` 只能隔离 Codex，不能同时隔离 Claude Code 和 Nova 状态。三个变量都必须是绝对路径，并且安装、启动宿主、验证和卸载时必须保持同一组值。
+
+完整双宿主隔离可在新终端中执行：
+
+```bash
+export NOVA_DEV_ROOT="$(mktemp -d)"
+export CODEX_HOME="$NOVA_DEV_ROOT/codex"
+export CLAUDE_CONFIG_DIR="$NOVA_DEV_ROOT/claude"
+export NOVA_HOME="$NOVA_DEV_ROOT/nova"
+mkdir -p "$CODEX_HOME" "$CLAUDE_CONFIG_DIR" "$NOVA_HOME"
+
+npm run dev:install -- --dry-run
+npm run dev:install
+```
+
+这不是把现有 `~/.codex` 或 `~/.claude` 复制到新目录。安装器只把当前仓库中 `npm pack` 会包含的 Nova Forge 文件复制到 `$NOVA_HOME/marketplaces/nova-forge-dev`，随后让两个宿主在各自的新根中登记插件；原宿主目录、个人配置、历史会话和其他插件都不会被复制。不要整体复制旧宿主目录，否则旧缓存、旧插件登记和其他本机状态会重新进入测试环境，失去隔离意义。
+
+如果新宿主根没有可用的登录状态，应在保持上述变量的同一终端中按宿主正常流程重新登录。安装完成后，也必须从该终端启动 `codex` 或 `claude`；换到未设置这些变量的终端会重新使用默认的 `~/.codex`、`~/.claude` 和 `~/.nova`。只隔离 Codex 时可以仅设置绝对 `CODEX_HOME` 与 `NOVA_HOME`，然后运行 `npm run codex:dev:install`。
+
+测试结束后，在同一终端按下文先预览再卸载；确认 `NOVA_DEV_ROOT` 确实是本次创建的临时目录后，才按需删除该目录。
+
 卸载开发版前可预览：
 
 ```bash
