@@ -116,9 +116,11 @@ unlink ~/.claude/CLAUDE.md
 
 技能链接也必须逐项确认后再解除；不要用递归删除或未经检查的通配符清理用户目录。
 
-### 2. 安装本地开发版本（需要克隆）
+### 2. 离线安装本地开发版本（需提前克隆）
 
 本地开发插件与 GitHub 正式插件不能在同一宿主中同时启用。开发版安装脚本会先读取 Codex 和 Claude Code 的 JSON 状态，并把当前工作区中 `npm pack` 会包含的文件复制、校验为隔离快照；快照就绪后才替换两个宿主中已安装的 `nova-forge@...`（包括 GitHub 正式版、旧开发版和 E2E 版）。它不会直接从脏工作区加载 Hook，也不会把测试、`.nova/` 或未打包文件带入插件；快照会分别生成 Codex 和 Claude Code cachebuster，并且只允许 `hooks/hooks.json` 这一份 Hook 声明。
+
+仓库已经克隆到本机，并且 Node.js 22.5+、Codex CLI、Claude Code CLI 均已安装时，这套开发版安装流程不需要联网下载 Nova Forge、npm 依赖或 marketplace 内容。`npm run dev:install` 是同时安装 Codex 和 Claude Code 的双宿主入口；`npm run codex:dev:install` 只安装 Codex，`npm run claude:dev:install` 只安装 Claude Code。这里的“离线”仅指插件安装过程，安装后的模型对话是否需要网络仍由各宿主及其模型提供方决定。
 
 先预览将卸载和替换的精确对象：
 
