@@ -54,6 +54,8 @@ maint(release): 更新发布校验依赖
 
 新协议使用 `Nova-Schema: 2`。不可变 schema 1 commit 继续按旧字段和语义只读验证；仓库一旦出现首个合法 schema 2 commit，之后再创建 schema 1 commit 必须失败。提交尾部只解析连续 trailer block，不得写可变 `Review-State`，也不得混合 checkpoint、work-item 和 Review closure 字段。
 
+Claude Code 可在 Nova trailer block 之后以独立段追加一个或多个 `Co-Authored-By` 宿主归属 trailer；校验器把该段视为只读来源信息，并继续以前一段 Nova trailers 为权威元数据。其他分离段、未知 trailer 或正文示例不得借此进入权威 trailer block。
+
 ## 4. Requirement checkpoint
 
 ```text

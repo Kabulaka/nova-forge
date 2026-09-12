@@ -180,6 +180,12 @@ test("development snapshot uses package contents, one hook manifest, and a fresh
     const claudeManifest = JSON.parse(
       fs.readFileSync(path.join(snapshot.pluginRoot, ".claude-plugin", "plugin.json"), "utf8"),
     );
+    const embeddedClaudeMarketplace = JSON.parse(
+      fs.readFileSync(
+        path.join(snapshot.pluginRoot, ".claude-plugin", "marketplace.json"),
+        "utf8",
+      ),
+    );
     const codexMarketplace = JSON.parse(
       fs.readFileSync(
         path.join(snapshot.stageRoot, ".agents", "plugins", "marketplace.json"),
@@ -195,19 +201,17 @@ test("development snapshot uses package contents, one hook manifest, and a fresh
 
     assert.match(
       manifest.version,
-      new RegExp(
-        `^${packageVersionPattern}\\+codex\\.local-20260911t123456000z-\\d+-[0-9a-f]{8}$`,
-      ),
+      new RegExp(`^${packageVersionPattern}\\+codex\\.local-20260911t123456000z-\\d+$`),
     );
     assert.match(
       claudeManifest.version,
-      new RegExp(
-        `^${packageVersionPattern}\\+claude\\.local-20260911t123456000z-\\d+-[0-9a-f]{8}$`,
-      ),
+      new RegExp(`^${packageVersionPattern}\\+claude\\.local-20260911t123456000z-\\d+$`),
     );
     assert.equal(snapshot.version, manifest.version);
     assert.equal(snapshot.codexVersion, manifest.version);
     assert.equal(snapshot.claudeVersion, claudeManifest.version);
+    assert.equal(embeddedClaudeMarketplace.metadata.version, claudeManifest.version);
+    assert.equal(embeddedClaudeMarketplace.plugins[0].version, claudeManifest.version);
     assert.match(snapshot.digest, /^[a-f0-9]{64}$/);
     assert.equal(fs.existsSync(path.join(snapshot.pluginRoot, "hooks", "hooks.json")), true);
     assert.equal(
@@ -225,6 +229,16 @@ test("development snapshot uses package contents, one hook manifest, and a fresh
     assert.equal(claudeMarketplace.metadata.version, claudeManifest.version);
     assert.equal(claudeMarketplace.plugins[0].source, "./plugins/nova-forge");
     assert.equal(claudeMarketplace.plugins[0].version, claudeManifest.version);
+
+    const pairedSnapshot = buildSnapshot(
+      repoRoot,
+      novaHome,
+      process.env,
+      new Date("2026-09-11T12:34:56.000Z"),
+    );
+    assert.equal(pairedSnapshot.codexVersion, snapshot.codexVersion);
+    assert.equal(pairedSnapshot.claudeVersion, snapshot.claudeVersion);
+    assert.equal(pairedSnapshot.digest, snapshot.digest);
   } finally {
     fs.rmSync(novaHome, { recursive: true, force: true });
   }

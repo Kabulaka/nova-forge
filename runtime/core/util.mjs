@@ -32,7 +32,14 @@ export function randomId(bytes = 24) {
 
 export function stableStringify(value) {
   if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) {
+      throw new NovaError(
+        "UNSERIALIZABLE_VALUE",
+        `canonical JSON does not support ${typeof value}`,
+      );
+    }
+    return serialized;
   }
   if (Array.isArray(value)) {
     return `[${value.map(stableStringify).join(",")}]`;

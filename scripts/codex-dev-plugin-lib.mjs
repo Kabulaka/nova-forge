@@ -225,7 +225,7 @@ function copyPackageFile(repoRoot, pluginRoot, relative) {
 
 function cachebuster(now = new Date()) {
   const digits = now.toISOString().replace(/[-:.]/g, "").toLowerCase();
-  return `local-${digits}-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
+  return `local-${digits}-${process.pid}`;
 }
 
 function updateManifestVersion(pluginRoot, manifestDirectory, hostLabel, token) {
@@ -238,6 +238,21 @@ function updateManifestVersion(pluginRoot, manifestDirectory, hostLabel, token) 
   manifest.version = `${baseVersion}+${hostLabel}.${token}`;
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   return manifest.version;
+}
+
+function updateEmbeddedClaudeMarketplaceVersion(pluginRoot, version) {
+  const marketplacePath = path.join(pluginRoot, ".claude-plugin", "marketplace.json");
+  const marketplace = JSON.parse(fs.readFileSync(marketplacePath, "utf8"));
+  if (
+    marketplace.name !== PLUGIN_NAME ||
+    !Array.isArray(marketplace.plugins) ||
+    marketplace.plugins[0]?.name !== PLUGIN_NAME
+  ) {
+    throw new Error(`invalid embedded Claude marketplace: ${marketplacePath}`);
+  }
+  marketplace.metadata = { ...marketplace.metadata, version };
+  marketplace.plugins[0] = { ...marketplace.plugins[0], version };
+  fs.writeFileSync(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
 }
 
 function writeCodexMarketplace(stageRoot) {
@@ -306,6 +321,9 @@ function validateSnapshot(pluginRoot) {
   const claudeManifest = JSON.parse(
     fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"),
   );
+  const embeddedClaudeMarketplace = JSON.parse(
+    fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "marketplace.json"), "utf8"),
+  );
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\+codex\.local-[0-9a-ftz-]+$/.test(codexManifest.version)) {
     throw new Error(
       `Codex development manifest has an invalid cachebuster version: ${codexManifest.version}`,
@@ -315,6 +333,12 @@ function validateSnapshot(pluginRoot) {
     throw new Error(
       `Claude development manifest has an invalid cachebuster version: ${claudeManifest.version}`,
     );
+  }
+  if (
+    embeddedClaudeMarketplace.metadata?.version !== claudeManifest.version ||
+    embeddedClaudeMarketplace.plugins?.[0]?.version !== claudeManifest.version
+  ) {
+    throw new Error("embedded Claude marketplace version must match the development manifest");
   }
 }
 
@@ -343,6 +367,7 @@ export function buildSnapshot(repoRoot, novaHome, environment = process.env, now
     const token = cachebuster(now);
     const codexVersion = updateManifestVersion(pluginRoot, ".codex-plugin", "codex", token);
     const claudeVersion = updateManifestVersion(pluginRoot, ".claude-plugin", "claude", token);
+    updateEmbeddedClaudeMarketplaceVersion(pluginRoot, claudeVersion);
     writeCodexMarketplace(stageRoot);
     writeClaudeMarketplace(stageRoot, claudeVersion);
     validateSnapshot(pluginRoot);

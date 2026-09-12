@@ -113,6 +113,53 @@ test("startup injects static rules without inventing a checkpoint", () => {
   }
 });
 
+test("late plugin activation self-starts before the first prompt for both hosts", () => {
+  const version = JSON.parse(fs.readFileSync(path.join(pluginRoot, "package.json"), "utf8")).version;
+  for (const host of ["codex", "claude-code"]) {
+    const temp = temporaryDirectory();
+    try {
+      const env = environment(temp.directory, host);
+      const output = handleHook(
+        input("UserPromptSubmit", {
+          turn_id: host === "claude-code" ? undefined : "late-turn-1",
+          prompt: "first prompt after activation",
+        }),
+        env,
+        { now: 1_000 },
+      );
+      assert.match(output.hookSpecificOutput.additionalContext, /全局工作约定/);
+      assert.match(output.hookSpecificOutput.additionalContext, /Nova 检查点生命周期/);
+      assert.match(output.hookSpecificOutput.additionalContext, /nova-checkpoint-turn/);
+      assert.match(output.hookSpecificOutput.additionalContext, /including reading or hashing/);
+      assert.match(output.hookSpecificOutput.additionalContext, /complete host-exposed MCP name/);
+      assert.match(output.hookSpecificOutput.additionalContext, /objective, stage, and nextAction/);
+      assert.match(output.hookSpecificOutput.additionalContext, /resolutionBasis/);
+      assert.match(output.hookSpecificOutput.additionalContext, /delegatedScope, currentQuestion/);
+      assert.match(output.hookSpecificOutput.additionalContext, /never use confirmed/);
+      assert.match(
+        output.hookSpecificOutput.additionalContext,
+        /stageDecisions=delegated-ai-candidate/,
+      );
+      if (host === "codex") {
+        assert.match(
+          output.hookSpecificOutput.additionalContext,
+          /mcp__nova_checkpoint__nova_checkpoint_get/,
+        );
+      }
+      assert.equal(Object.hasOwn(output, "systemMessage"), false);
+
+      const state = getCheckpoint(temp.directory, currentBinding(host), { now: 2_000 }).envelope;
+      assert.equal(state.pluginVersion, version);
+      assert.equal(state.eventWatermark, 1);
+      assert.equal(state.coveredEventWatermark, 0);
+      assert.equal(state.dirty, true);
+      assert.match(handleHook(input("Stop"), env, { now: 3_000 }).systemMessage, /CHECKPOINT_NOT_COVERED/);
+    } finally {
+      temp.cleanup();
+    }
+  }
+});
+
 test("PreToolUse overwrites caller proof input and authorizes exactly one checkpoint call", () => {
   for (const host of ["codex", "claude-code"]) {
     const temp = temporaryDirectory();
@@ -341,7 +388,7 @@ test("covered checkpoint passes Stop and completes the compact handshake", () =>
   }
 });
 
-test("Claude Code early compact SessionStart degrades while a later PostCompact completes", () => {
+test("Claude Code early compact SessionStart waits for PostCompact and injects before the next prompt", () => {
   const temp = temporaryDirectory();
   try {
     const env = environment(temp.directory, "claude-code");
@@ -360,9 +407,9 @@ test("Claude Code early compact SessionStart degrades while a later PostCompact 
       env,
       { now: 5_000 },
     );
-    assert.match(earlyResume.hookSpecificOutput.additionalContext, /nova-checkpoint-degraded/);
+    assert.match(earlyResume.hookSpecificOutput.additionalContext, /全局工作约定/);
     assert.doesNotMatch(earlyResume.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
-    assert.match(earlyResume.systemMessage, /COMPACTION_HANDSHAKE_MISMATCH/);
+    assert.equal(Object.hasOwn(earlyResume, "systemMessage"), false);
     assert.equal(Object.hasOwn(earlyResume, "decision"), false);
     assert.equal(Object.hasOwn(earlyResume, "continue"), false);
 
@@ -370,9 +417,74 @@ test("Claude Code early compact SessionStart degrades while a later PostCompact 
       handleHook(input("PostCompact", { trigger: "manual" }), env, { now: 6_000 }),
       {},
     );
-    const state = getCheckpoint(temp.directory, currentBinding("claude-code"), { now: 7_000 }).envelope;
-    assert.equal(state.compactionHandshake.status, "completed");
-    assert.equal(state.compactionHandshake.completedWatermark, 1);
+    const completed = getCheckpoint(temp.directory, currentBinding("claude-code"), {
+      now: 7_000,
+    }).envelope;
+    assert.equal(completed.compactionHandshake.status, "completed");
+    assert.equal(completed.compactionHandshake.completedWatermark, 1);
+
+    const nextPrompt = handleHook(
+      input("UserPromptSubmit", { prompt: "continue", turn_id: undefined }),
+      env,
+      { now: 8_000 },
+    );
+    assert.match(nextPrompt.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
+    assert.match(nextPrompt.hookSpecificOutput.additionalContext, /Same-session only/);
+    const injected = getCheckpoint(temp.directory, currentBinding("claude-code"), {
+      now: 9_000,
+    }).envelope;
+    assert.equal(injected.compactionHandshake.status, "injected");
+    assert.equal(injected.compactionHandshake.injectedGeneration, 1);
+    assert.equal(injected.coveredEventWatermark, 1);
+    assert.equal(injected.eventWatermark, 2);
+    assert.equal(injected.dirty, true);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("Claude Code never injects a frozen compact attempt when PostCompact is missing", () => {
+  const temp = temporaryDirectory();
+  try {
+    const env = environment(temp.directory, "claude-code");
+    handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+    handleHook(input("UserPromptSubmit", { turn_id: undefined }), env, { now: 2_000 });
+    saveCheckpoint(temp.directory, currentBinding("claude-code"), "0.1.0", saveInput(1), {
+      now: 3_000,
+    });
+    handleHook(input("PreCompact", { trigger: "manual" }), env, { now: 4_000 });
+    const earlyResume = handleHook(
+      input("SessionStart", { source: "compact", turn_id: "turn-compact" }),
+      env,
+      { now: 5_000 },
+    );
+    assert.doesNotMatch(earlyResume.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
+
+    const nextPrompt = handleHook(
+      input("UserPromptSubmit", { prompt: "continue", turn_id: undefined }),
+      env,
+      { now: 6_000 },
+    );
+    assert.doesNotMatch(nextPrompt.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
+    const beforeLateCompletion = getCheckpoint(
+      temp.directory,
+      currentBinding("claude-code"),
+      { now: 7_000 },
+    ).envelope;
+    assert.equal(beforeLateCompletion.compactionHandshake.status, "frozen");
+    assert.equal(beforeLateCompletion.eventWatermark, 2);
+    assert.equal(beforeLateCompletion.dirty, true);
+
+    const lateCompletion = handleHook(
+      input("PostCompact", { trigger: "manual" }),
+      env,
+      { now: 8_000 },
+    );
+    assert.match(lateCompletion.systemMessage, /COMPACTION_HANDSHAKE_MISMATCH/);
+    const failed = getCheckpoint(temp.directory, currentBinding("claude-code"), {
+      now: 9_000,
+    }).envelope;
+    assert.equal(failed.compactionHandshake.status, "failed");
   } finally {
     temp.cleanup();
   }
@@ -468,10 +580,10 @@ test("ordinary lifecycle events do not reread static rules or rerun bootstrap", 
       ...env,
       NOVA_PLUGIN_ROOT: path.join(temp.directory, "removed-plugin-cache"),
     };
-    assert.deepEqual(
-      handleHook(input("UserPromptSubmit"), detachedPluginEnv, { now: 2_000 }),
-      {},
-    );
+    const output = handleHook(input("UserPromptSubmit"), detachedPluginEnv, { now: 2_000 });
+    assert.equal(output.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+    assert.match(output.hookSpecificOutput.additionalContext, /nova-checkpoint-turn/);
+    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /全局工作约定/);
     const state = getCheckpoint(temp.directory, currentBinding(), { now: 3_000 }).envelope;
     assert.equal(state.eventWatermark, 1);
     assert.equal(state.dirty, true);
@@ -578,8 +690,10 @@ test("Claude Code UserPromptSubmit does not require Codex turn ids", () => {
     const env = environment(temp.directory, "claude-code");
     handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
     const prompt = input("UserPromptSubmit", { prompt: "same prompt", turn_id: undefined });
-    assert.deepEqual(handleHook(prompt, env, { now: 2_000 }), {});
-    assert.deepEqual(handleHook(prompt, env, { now: 3_000 }), {});
+    const first = handleHook(prompt, env, { now: 2_000 });
+    const second = handleHook(prompt, env, { now: 3_000 });
+    assert.match(first.hookSpecificOutput.additionalContext, /nova-checkpoint-turn/);
+    assert.match(second.hookSpecificOutput.additionalContext, /nova-checkpoint-turn/);
     handleHook(
       input("PostToolUse", {
         tool_use_id: "claude-own-tool",

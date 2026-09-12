@@ -8,6 +8,9 @@
         "codex"
       ],
       "cwd": ".",
+      "env_vars": [
+        "NOVA_HOME"
+      ],
       "default_tools_approval_mode": "approve"
     }
   }

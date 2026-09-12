@@ -81,6 +81,7 @@ CHECKPOINT_TRAILERS = frozenset(
 WORK_ITEM_TRAILERS = frozenset(STANDARD_TRAILERS) | {"Review-State"}
 AUDIT_MESSAGE_TRAILERS = frozenset(LEGACY_AUDIT_TRAILERS + AUDIT_TRAILERS)
 MANAGED_TRAILERS = CHECKPOINT_TRAILERS | WORK_ITEM_TRAILERS | AUDIT_MESSAGE_TRAILERS
+HOST_PROVENANCE_TRAILERS = frozenset({"Co-Authored-By"})
 LEGACY_WORK_ITEM_PREFIXES = {
     "designed": "PEND",
     "adhoc": "FIX",
@@ -398,13 +399,28 @@ def nova_path_candidates(value: str) -> tuple[str, ...]:
 
 def trailing_fields(text: str) -> list[tuple[str, str]]:
     lines = text.rstrip().splitlines()
-    fields: list[tuple[str, str]] = []
-    for line in reversed(lines):
-        match = re.fullmatch(r"([A-Za-z][A-Za-z0-9-]+):[ \t]*(.*?)\s*", line)
-        if match is None:
-            break
-        fields.append((match.group(1), match.group(2)))
-    fields.reverse()
+
+    def collect(end: int) -> tuple[list[tuple[str, str]], int]:
+        fields: list[tuple[str, str]] = []
+        index = end
+        while index >= 0:
+            match = re.fullmatch(
+                r"([A-Za-z][A-Za-z0-9-]+):[ \t]*(.*?)\s*", lines[index]
+            )
+            if match is None:
+                break
+            fields.append((match.group(1), match.group(2)))
+            index -= 1
+        fields.reverse()
+        return fields, index
+
+    fields, index = collect(len(lines) - 1)
+    if fields and all(key in HOST_PROVENANCE_TRAILERS for key, _ in fields):
+        while index >= 0 and not lines[index].strip():
+            index -= 1
+        managed_fields, _ = collect(index)
+        if any(key in MANAGED_TRAILERS for key, _ in managed_fields):
+            return managed_fields + fields
     return fields
 
 

@@ -61,6 +61,11 @@ requireValue(
   errors,
 );
 requireValue(
+  JSON.stringify(codexServer?.env_vars) === JSON.stringify(["NOVA_HOME"]),
+  "Codex MCP must whitelist NOVA_HOME for the shared hook/MCP state root",
+  errors,
+);
+requireValue(
   codexServer?.default_tools_approval_mode === "approve",
   "Codex checkpoint tools must be approved for noninteractive lifecycle use",
   errors,

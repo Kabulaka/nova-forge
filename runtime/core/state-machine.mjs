@@ -21,6 +21,14 @@ function assertCompactionTrigger(trigger) {
   }
 }
 
+function markEventOnDraft(draft, eventId) {
+  if (draft.recentEventIds.includes(eventId)) return { duplicate: true };
+  draft.eventWatermark += 1;
+  draft.dirty = true;
+  draft.recentEventIds = remember(draft.recentEventIds, eventId);
+  return { duplicate: false, eventWatermark: draft.eventWatermark };
+}
+
 export function startSession(
   dataRoot,
   binding,
@@ -58,13 +66,7 @@ export function markEvent(
     dataRoot,
     binding,
     pluginVersion,
-    (draft) => {
-      if (draft.recentEventIds.includes(eventId)) return { duplicate: true };
-      draft.eventWatermark += 1;
-      draft.dirty = true;
-      draft.recentEventIds = remember(draft.recentEventIds, eventId);
-      return { duplicate: false, eventWatermark: draft.eventWatermark };
-    },
+    (draft) => markEventOnDraft(draft, eventId),
     { now, create: true, allowBackupMutation: true },
   );
 }
@@ -285,6 +287,56 @@ export function recordInjectedCompaction(
       };
       refreshLease(draft, now);
       return { authorityGeneration: draft.authorityGeneration };
+    },
+    { now, create: false },
+  );
+}
+
+export function injectCompletedCompactionBeforePrompt(
+  dataRoot,
+  binding,
+  pluginVersion,
+  eventId,
+  { now = Date.now() } = {},
+) {
+  if (typeof eventId !== "string" || eventId.length === 0) {
+    throw new NovaError("INVALID_EVENT_ID", "trusted hook event id is required");
+  }
+  return mutateEnvelope(
+    dataRoot,
+    binding,
+    pluginVersion,
+    (draft) => {
+      assertCovered(draft);
+      const handshake = draft.compactionHandshake;
+      if (
+        handshake.status !== "completed" ||
+        handshake.completedGeneration !== draft.authorityGeneration ||
+        handshake.completedWatermark !== draft.eventWatermark
+      ) {
+        throw new NovaError(
+          "COMPACTION_HANDSHAKE_MISMATCH",
+          "UserPromptSubmit has no matching completed checkpoint",
+        );
+      }
+      const recoveryEnvelope = canonicalClone({
+        authorityGeneration: draft.authorityGeneration,
+        taskCapsule: draft.taskCapsule,
+        controlDocuments: draft.controlDocuments,
+      });
+      draft.compactionHandshake = {
+        ...handshake,
+        status: "injected",
+        injectedGeneration: draft.authorityGeneration,
+        injectedAt: utcIso(now),
+      };
+      refreshLease(draft, now);
+      const event = markEventOnDraft(draft, eventId);
+      return {
+        authorityGeneration: draft.authorityGeneration,
+        recoveryEnvelope,
+        ...event,
+      };
     },
     { now, create: false },
   );

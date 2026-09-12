@@ -49,6 +49,20 @@ test("MCP tools expose no selector or proof field and consume a proof for each c
     const tools = runtime.listTools();
     const schemaText = JSON.stringify(tools);
     assert.doesNotMatch(schemaText, /sessionId|session_id|scopeProof|"host"/);
+    const getTool = tools.find((tool) => tool.name === "nova_checkpoint_get");
+    const saveTool = tools.find((tool) => tool.name === "nova_checkpoint_save");
+    assert.match(getTool.description, /exact eventWatermark/);
+    assert.match(saveTool.description, /taskCapsule keys are exactly objective, stage/);
+    assert.match(saveTool.description, /resolutionBasis/);
+    assert.match(saveTool.description, /delegatedScope, currentQuestion/);
+    assert.match(saveTool.description, /never confirmed/);
+    assert.match(saveTool.description, /stageDecisions=delegated-ai-candidate/);
+    assert.equal(saveTool.inputSchema.properties.taskCapsule.properties.objective.type, "object");
+    assert.equal(
+      saveTool.inputSchema.properties.taskCapsule.properties.stageProjection.properties
+        .resolutionBasis.type,
+      "array",
+    );
     const saveProof = proof(
       temp.directory,
       scopeBinding,
@@ -206,6 +220,12 @@ test("JSON-RPC initialize and tool errors follow MCP result shape", () => {
   });
   assert.equal(initialized.result.serverInfo.name, "nova-checkpoint");
   assert.equal(initialized.result.protocolVersion, "2025-06-18");
+  assert.match(initialized.result.instructions, /call nova_checkpoint_get/);
+  assert.match(initialized.result.instructions, /objective, stage, and nextAction/);
+  assert.match(initialized.result.instructions, /resolutionBasis/);
+  assert.match(initialized.result.instructions, /delegatedScope, currentQuestion/);
+  assert.match(initialized.result.instructions, /never eventWatermark/);
+  assert.match(initialized.result.instructions, /stageDecisions only delegated-ai-candidate/);
   const future = handleRpc(runtime, {
     jsonrpc: "2.0",
     id: "future",

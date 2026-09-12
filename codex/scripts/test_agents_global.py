@@ -61,6 +61,22 @@ class AgentsGlobalContractTests(unittest.TestCase):
         )
         self.assertIn("不得阻断更高优先级的明确选择", section)
 
+    def test_checkpoint_lifecycle_covers_each_user_turn(self) -> None:
+        section = self._section("Nova 检查点生命周期")
+
+        self.assertIn("结束每个用户回合前", section)
+        self.assertIn("nova_checkpoint_get", section)
+        self.assertIn("nova_checkpoint_save", section)
+        self.assertIn("完整名称", section)
+        self.assertIn("mcp__nova_checkpoint__nova_checkpoint_get/save", section)
+        self.assertIn("{value, authorityState, source}", section)
+        self.assertIn("`objective`、`stage`、`nextAction` 不是字符串", section)
+        self.assertIn("`resolutionBasis` 五个数组", section)
+        self.assertIn("dirty=true", section)
+        self.assertIn("coveredEventWatermark", section)
+        self.assertIn("不得把未知、候选或 pending 提升为用户确认", section)
+        self.assertIn("不得循环重试", section)
+
     def test_fix_defaults_to_exempt_and_keeps_explicit_review_available(self) -> None:
         section = self._section("工作项与提交")
 

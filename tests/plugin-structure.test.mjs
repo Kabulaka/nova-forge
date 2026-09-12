@@ -35,6 +35,7 @@ test("Codex manifest uses the packaged MCP companion and default hook discovery"
     ["--host", "codex"],
   );
   assert.equal(mcp.mcpServers["nova-checkpoint"].cwd, ".");
+  assert.deepEqual(mcp.mcpServers["nova-checkpoint"].env_vars, ["NOVA_HOME"]);
   assert.equal(mcp.mcpServers["nova-checkpoint"].default_tools_approval_mode, "approve");
   assert.equal(Object.hasOwn(mcp.mcpServers["nova-checkpoint"], "env"), false);
 });

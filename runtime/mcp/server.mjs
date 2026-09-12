@@ -10,6 +10,23 @@ import {
 import { getCheckpoint, saveCheckpoint } from "../core/state-machine.mjs";
 import { isMainModule, NovaError, readPluginVersion, redactError } from "../core/util.mjs";
 
+const SERVER_INSTRUCTIONS =
+  "Before ending a turn, call nova_checkpoint_get; if dirty=true, call nova_checkpoint_save " +
+  "with coveredEventWatermark copied from that get, then get again. In every taskCapsule, " +
+  "objective, stage, and nextAction are {value, authorityState, source} objects, never strings. " +
+  "Save top-level keys are exactly idempotencyKey, coveredEventWatermark, taskCapsule, and " +
+  "controlDocuments; never eventWatermark. taskCapsule keys are exactly objective, stage, " +
+  "confirmedDecisions, exclusions, delegatedScope, currentQuestion, unresolvedDeltas, " +
+  "stageProjection, activeDeliveryScope, evidence, fileState, commitState, and nextAction. " +
+  "currentQuestion is an authority object or null; all collection fields are arrays. " +
+  "authorityState is one of user-confirmed, delegated-ai-candidate, verified-evidence, " +
+  "explicitly-excluded, or pending. Projection item states are strict: inheritedContracts only " +
+  "user-confirmed; stageEvidence only verified-evidence; stageDecisions only " +
+  "delegated-ai-candidate; unresolvedDeltas only pending; resolutionBasis accepts confirmed, " +
+  "evidence, candidate, or excluded states. stageProjection has exactly five array fields: " +
+  "inheritedContracts, stageEvidence, stageDecisions, unresolvedDeltas, and resolutionBasis. " +
+  "Do not invent authority, secrets, host, sessionId, or scopeProof.";
+
 function parseHost(argv) {
   const index = argv.indexOf("--host");
   const host = index >= 0 ? argv[index + 1] : undefined;
@@ -36,10 +53,12 @@ export function resolveMcpPluginRoot(
 
 const AUTHORITY_VALUE_SCHEMA = {
   type: "object",
+  description:
+    "One explicit authority value. Pass this object shape for objective, stage, nextAction, and every array item; never pass a bare string.",
   additionalProperties: false,
   required: ["value", "authorityState", "source"],
   properties: {
-    value: { type: "string", maxLength: 8192 },
+    value: { type: "string", maxLength: 8192, description: "The current fact or action text." },
     authorityState: {
       type: "string",
       enum: [
@@ -49,13 +68,19 @@ const AUTHORITY_VALUE_SCHEMA = {
         "explicitly-excluded",
         "pending",
       ],
+      description: "The explicit authority category for this value.",
     },
-    source: { type: "string", maxLength: 1024 },
+    source: {
+      type: "string",
+      maxLength: 1024,
+      description: "A concise provenance such as user request, verified workspace, or control document.",
+    },
   },
 };
 
 const AUTHORITY_ARRAY_SCHEMA = {
   type: "array",
+  description: "Always a JSON array of authority objects. Use [] when there are no entries.",
   maxItems: 128,
   items: AUTHORITY_VALUE_SCHEMA,
 };
@@ -67,7 +92,11 @@ function authorityArraySchema(states) {
       ...AUTHORITY_VALUE_SCHEMA,
       properties: {
         ...AUTHORITY_VALUE_SCHEMA.properties,
-        authorityState: { type: "string", enum: states },
+        authorityState: {
+          type: "string",
+          enum: states,
+          description: `This field accepts only: ${states.join(", ")}.`,
+        },
       },
     },
   };
@@ -75,6 +104,8 @@ function authorityArraySchema(states) {
 
 const TASK_CAPSULE_SCHEMA = {
   type: "object",
+  description:
+    "Complete recovery capsule. objective, stage, and nextAction are authority objects; collection fields are arrays of authority objects.",
   additionalProperties: false,
   required: [
     "objective",
@@ -92,8 +123,14 @@ const TASK_CAPSULE_SCHEMA = {
     "nextAction",
   ],
   properties: {
-    objective: AUTHORITY_VALUE_SCHEMA,
-    stage: AUTHORITY_VALUE_SCHEMA,
+    objective: {
+      ...AUTHORITY_VALUE_SCHEMA,
+      description: "Current objective as one authority object, never a string.",
+    },
+    stage: {
+      ...AUTHORITY_VALUE_SCHEMA,
+      description: "Current Nova or delivery stage as one authority object, never a string.",
+    },
     confirmedDecisions: authorityArraySchema(["user-confirmed"]),
     exclusions: AUTHORITY_ARRAY_SCHEMA,
     delegatedScope: AUTHORITY_ARRAY_SCHEMA,
@@ -101,6 +138,8 @@ const TASK_CAPSULE_SCHEMA = {
     unresolvedDeltas: AUTHORITY_ARRAY_SCHEMA,
     stageProjection: {
       type: "object",
+      description:
+        "Exactly five array fields. resolutionBasis is an array even when it has zero or one entry.",
       additionalProperties: false,
       required: [
         "inheritedContracts",
@@ -126,17 +165,30 @@ const TASK_CAPSULE_SCHEMA = {
     evidence: AUTHORITY_ARRAY_SCHEMA,
     fileState: AUTHORITY_ARRAY_SCHEMA,
     commitState: AUTHORITY_ARRAY_SCHEMA,
-    nextAction: AUTHORITY_VALUE_SCHEMA,
+    nextAction: {
+      ...AUTHORITY_VALUE_SCHEMA,
+      description: "Next executable action as one authority object, never a string.",
+    },
   },
 };
 
 const SAVE_SCHEMA = {
   type: "object",
+  description:
+    "Exact top-level keys: idempotencyKey, coveredEventWatermark, taskCapsule, controlDocuments. Do not send eventWatermark or any internal proof field.",
   additionalProperties: false,
   required: ["idempotencyKey", "coveredEventWatermark", "taskCapsule", "controlDocuments"],
   properties: {
-    idempotencyKey: { type: "string", maxLength: 256 },
-    coveredEventWatermark: { type: "integer", minimum: 0 },
+    idempotencyKey: {
+      type: "string",
+      maxLength: 256,
+      description: "Caller-chosen unique string for this exact payload.",
+    },
+    coveredEventWatermark: {
+      type: "integer",
+      minimum: 0,
+      description: "Copy the exact eventWatermark returned by the immediately preceding get.",
+    },
     taskCapsule: TASK_CAPSULE_SCHEMA,
     controlDocuments: {
       type: "array",
@@ -176,13 +228,14 @@ export class McpRuntime {
     return [
       {
         name: "nova_checkpoint_get",
-        description: "Read the latest validated checkpoint for the current trusted host session.",
+        description:
+          "Read the latest validated checkpoint for the current trusted host session. Call this before save, copy its exact eventWatermark into coveredEventWatermark, and call it again after save to verify dirty=false.",
         inputSchema: { type: "object", additionalProperties: false, properties: {} },
       },
       {
         name: "nova_checkpoint_save",
         description:
-          "Persist a complete structured Nova task checkpoint for the current trusted event watermark.",
+          "Persist a complete structured Nova task checkpoint. Top-level keys are exactly idempotencyKey, coveredEventWatermark, taskCapsule, controlDocuments; never eventWatermark. taskCapsule keys are exactly objective, stage, confirmedDecisions, exclusions, delegatedScope, currentQuestion, unresolvedDeltas, stageProjection, activeDeliveryScope, evidence, fileState, commitState, nextAction. Do not use delegationScope, candidateIdentities, currentQuestions, files, or commits. objective, stage, nextAction, currentQuestion (unless null), and every array item are {value, authorityState, source}; authorityState is user-confirmed, delegated-ai-candidate, verified-evidence, explicitly-excluded, or pending, never confirmed. Projection item states are strict: inheritedContracts=user-confirmed; stageEvidence=verified-evidence; stageDecisions=delegated-ai-candidate; unresolvedDeltas=pending; resolutionBasis accepts user-confirmed, verified-evidence, delegated-ai-candidate, or explicitly-excluded. Use [] when no correctly typed item exists. Every collection is an array. stageProjection has exactly inheritedContracts, stageEvidence, stageDecisions, unresolvedDeltas, resolutionBasis, all arrays.",
         inputSchema: SAVE_SCHEMA,
       },
     ];
@@ -280,6 +333,7 @@ export function handleRpc(runtime, request) {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: {} },
       serverInfo: { name: "nova-checkpoint", version: runtime.pluginVersion },
+      instructions: SERVER_INSTRUCTIONS,
     });
   }
   if (request.method === "ping") {

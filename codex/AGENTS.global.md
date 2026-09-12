@@ -27,12 +27,16 @@
 
 ## 上下文压缩与续接
 
-1. 上下文即将压缩、正在生成压缩摘要或压缩后续接时，优先保留当前目标与阶段、用户已确认决定、明确排除、委托范围、AI 候选身份、未决差量、当前问题、活动交付范围、有效证据、文件与提交状态、下一动作，以及已加载控制文档的绝对路径与 SHA-256。
-2. 压缩后先沿用摘要继续，不得把已回答事项重置为待确认，不得把候选决定提升为用户确认，不得把暂存范围提升为当前范围。
-3. 已加载控制文档的路径与 SHA-256 未变化时复用已有理解，不得为了保险重复全文读取；只有指纹变化，或当前动作必须取得逐字模板、提交契约、Review 状态格式等正文而摘要未保留时，才精确读取受影响内容。
-4. 摘要缺少会改变当前行为的信息时，先从当前会话记录或工作区事实定向恢复；仍无法确认时只询问缺失的具体差量，不得猜测或从头重放任务。
-5. 密码、访问令牌及其他秘密不得写入压缩摘要、诊断记录或长期记忆。新会话不自动继承旧会话任务；本节属于提示约束下的尽力保证，不得声称宿主压缩绝不遗漏。
-6. 续接时始终服从“当前用户明确指令 > 项目规则 > 本文件全局默认规则”的优先级；本节不得阻断更高优先级的明确选择。
+1. 压缩摘要优先保留当前目标与阶段、用户已确认决定、明确排除、委托范围、AI 候选身份、未决差量、当前问题、活动交付范围、有效证据、文件与提交状态、下一动作、控制文档的绝对路径与 SHA-256。
+2. 续接时不得把已回答事项重置为待确认、不得把候选决定提升为用户确认、不得把暂存范围提升为当前范围。指纹未变时不得为了保险重复全文读取；只有指纹变化或摘要缺少逐字模板、提交契约、Review 状态格式时精确补读。
+3. 先从会话与工作区定向恢复缺口，仍不确定时只询问缺失的具体差量。秘密不得写入压缩摘要；新会话不自动继承旧会话任务。本节是提示约束下的尽力保证。
+4. 始终服从“当前用户明确指令 > 项目规则 > 本文件全局默认规则”，不得阻断更高优先级的明确选择。
+
+## Nova 检查点生命周期
+
+1. 宿主会给工具加 MCP 前缀，须从工具列表选择完整名称；Codex 通常为 `mcp__nova_checkpoint__nova_checkpoint_get/save`，Claude Code 为以 `__nova_checkpoint_get/save` 结尾的完整名。准备结束每个用户回合前调用 `nova_checkpoint_get`；`dirty=true` 时以当前 `eventWatermark` 调用 `nova_checkpoint_save`，再 get 确认 `dirty=false` 且 `coveredEventWatermark` 相等。
+2. authority 值只能是 `{value, authorityState, source}`；`objective`、`stage`、`nextAction` 不是字符串。集合均为数组；`stageProjection` 恰含 `inheritedContracts`、`stageEvidence`、`stageDecisions`、`unresolvedDeltas`、`resolutionBasis` 五个数组。仅保存恢复状态，不得把未知、候选或 pending 提升为用户确认，也不保存秘密或控制正文。
+3. 工具不可用或一次补救失败时继续回答并保留不完整状态；不得循环重试、伪造 clean、借旧水位或 `Stop` 自救。
 
 ## Context-mode 可选路由
 
@@ -48,27 +52,25 @@
 
 ## 默认快速开发
 
-1. 当前实现事实以代码、测试和配置为准；项目公共约束以目标项目 `.nova/PROJECT_BLUEPRINT.md` 为准；设计文档定义目标，不证明实现。
-2. 同一失败连续修复三次仍未解决时停止，报告证据、已尝试方案和阻断点。
-3. 默认流程为固定任务差异基线与验收 → 编码 → 测试 → 精确范围本地 Git commit；只有 `Review-Policy: required` 才标记待 Review，合法 exempt 项以豁免证据直接完成；不得自动启动 Review。
-4. 本文件代表用户对最低验收通过且无阻断后的精确范围本地 Git commit 的持续授权；用户可在当次任务明确撤回。
-5. Git push、远程配置和 SVN commit 始终需要用户对具体操作的独立授权；不得从本地 Git 授权外推。
-6. 任务范围、编码契约、测试证据复用、依赖、失败停止、提交门禁、plan mode 和固定完成报告的完整约束，以 `skills/nova-development/references/implementation-sop.md` 为准。
+1. 实现事实以代码、测试和配置为准；蓝图/设计只定义公共约束与目标。同一失败三次未解决即停止并报告。
+2. 默认流程：固定差异与验收 → 编码 → 测试 → 精确本地提交；仅 required 待 Review，合法 exempt 直接完成，且不得自动启动 Review。
+3. 本文件代表用户对最低验收通过且无阻断后的精确范围本地 Git commit 的持续授权；Git push、远程配置和 SVN commit 仍需独立授权。
+4. 完整范围、契约、证据、依赖、门禁、plan mode 与报告要求见 `skills/nova-development/references/implementation-sop.md`。
 
 ## 工作项与提交
 
 提交分类、豁免和 trailers 以 `skills/nova-review/references/commit-contract.md` 为唯一详细定义：
 
-工作项是独立、内聚、可控的交付单元，必须具有完整结果与验收，并能独立排期、暂停、恢复、Review 或取消。大需求可沿领域能力或端到端功能块边界拆成多个开发任务；需求、架构、编码、测试等流程阶段，以及文件、模块、技能、代理或提交批次不得作为拆项依据。多个步骤只有共同完成才有价值或共同修改同一规模可控能力时，必须沿用一个工作项并以内部里程碑跟踪。一个工作项默认只有一个实现结果 commit；只有预先登记、失败后可安全恢复且有独立恢复价值的里程碑允许同编号追加。
+工作项须独立、内聚、可验收且可暂停/取消；按能力边界拆分，不按阶段、文件、模块、代理或提交批次拆分。一个工作项默认一个结果 commit，只有预先登记且可独立恢复的里程碑可追加。
 
-- `feature` 使用 `FEAT-*`，`Design-Ref` 必须指向设计锚点，且需要 Review；
-- `patch` 使用 `PATCH-*`，`Design-Ref: none`，仅限不新增能力或公共契约的主动局部调整，仍需要 Review；
-- `fix` 使用 `FIX-*`，`Design-Ref: none`，须据证恢复偏离；默认 exempt + EX-FIX；提交前指定 Review 用 required + none；已提交未归档 EX-FIX 可按编号 Review，保留元数据；
-- `maintenance` 使用 `MAINT-*`，`Design-Ref: none`，默认需要 Review，只有客观白名单可豁免；
-- schema 1 历史 `PEND-*`、`designed / adhoc / maintenance` 及可信审计只读兼容；新入口不得创建 PEND；
+- `feature` 使用 `FEAT-*`、设计锚点并 Review；
+- `patch` 使用 `PATCH-*`，`Design-Ref: none`，不新增能力/公共契约且需 Review；
+- `fix` 使用 `FIX-*`，`Design-Ref: none`，据证恢复偏离；默认 exempt + EX-FIX；提交前指定 Review 用 required + none；已提交未归档 EX-FIX 可按编号 Review；
+- `maintenance` 使用 `MAINT-*`，`Design-Ref: none`，默认 Review，仅客观白名单可豁免；
+- schema 1 历史身份只读兼容，新入口不得创建 PEND；
 - 缺失、矛盾或无法证明的分类一律停止并重新路由，不得靠更宽泛分类掩盖语义。
 
-schema 2 首行固定为 `type(scope): 中文结果摘要`，scope 仅限 `requirements / architecture / delivery / review / doctor / plugin / discovery / release`。Work-Item commit 必含 `Nova-Schema`、`Work-Item`、`Change-Class`、`Design-Ref`、`Review-Policy`、`Exemption-Rule`、`Validation`；源于已归档 FEAT 或历史 PEND 的 FIX 还须有 `Related-Work-Item`。requirement、architecture、delivery-plan 使用各自 `Commit-Kind`，不进入 Review。禁止写 `Review-State`。Review 前同范围修正优先安全 amend；REJECT 不提交；归档后重新分类建项。
+schema 2 使用中文 `type(scope)` 首行和完整 Work-Item trailers；检查点用 `Commit-Kind` 且不 Review。禁止写 `Review-State`；Review 前优先 amend，REJECT 不提交，归档后重新建项。详细唯一约束见提交契约。
 
 ## 人工 Review
 
@@ -79,4 +81,4 @@ schema 2 首行固定为 `type(scope): 中文结果摘要`，scope 仅限 `requi
 
 ## Plan mode 与完成报告
 
-Plan mode 只由用户手动启用，方案须经用户批准才编码；完整追加约束和需求、架构、FEAT、PATCH、FIX、MAINT、Review 七类固定完成报告由 `skills/nova-development/references/implementation-sop.md` 定义。发送前必须使用 `nova_review.py validate-report --stage <stage>` 校验项目外临时候选报告。Plan mode 本身不自动授权或启动 Review。`required` 项未运行 Review 时报告必须保留 Review 状态并明确写“未 Review / 待Review”；合法客观豁免写 `exempt` 并列规则与完整 diff 证据；两者轮次均为“不适用”，不得把自检、测试或豁免表述为 Review PASS。
+Plan mode 仅由用户启用且方案批准后编码；Plan mode 本身不自动授权或启动 Review。报告按实施 SOP，用 `nova_review.py validate-report --stage <stage>` 校验项目外候选；required 写未 Review/待Review，exempt 写规则与完整 diff 证据，轮次均不适用，且不得把自检、测试或豁免表述为 Review PASS。

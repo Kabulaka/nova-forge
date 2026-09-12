@@ -812,6 +812,12 @@ export function mutateEnvelope(
         "current checkpoint is invalid; backup is preserved but is not current authority",
       );
     }
+    if (loaded === null && typeof pluginVersion !== "string") {
+      throw new NovaError(
+        "CHECKPOINT_MISSING",
+        "no checkpoint exists for the current session and its plugin version is unavailable",
+      );
+    }
     const before = loaded?.envelope ?? initialEnvelope(binding, pluginVersion, now);
     const draft = canonicalClone(before);
     if (loaded?.source === "backup" && loaded.currentValid === false) draft.dirty = true;

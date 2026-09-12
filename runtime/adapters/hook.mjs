@@ -12,6 +12,7 @@ import {
   completeCompaction,
   freezeCompaction,
   getCheckpoint,
+  injectCompletedCompactionBeforePrompt,
   markEvent,
   recordInjectedCompaction,
   recordResumeInjection,
@@ -109,6 +110,41 @@ function contextOutput(event, context, systemMessage) {
   return output;
 }
 
+function checkpointTurnContext(host) {
+  const toolNames =
+    host === "codex"
+      ? "mcp__nova_checkpoint__nova_checkpoint_get and mcp__nova_checkpoint__nova_checkpoint_save"
+      : "the available plugin MCP tools whose full names end in __nova_checkpoint_get and __nova_checkpoint_save";
+  return (
+    "<nova-checkpoint-turn>\n" +
+    "Mandatory before ending this user turn: first finish every non-checkpoint tool call, " +
+    `including reading or hashing control documents, then call ${toolNames}. Use the complete ` +
+    "host-exposed MCP name; a prefixed name is the checkpoint tool, not evidence that the tool is " +
+    "unavailable. After the first get, use only the matching checkpoint save/get tools. If " +
+    "dirty=true, save a complete recovery task capsule for its current eventWatermark. Every " +
+    "authority value is exactly an object with value, authorityState, and source; objective, " +
+    "stage, and nextAction are authority objects, never strings. Every collection field is a JSON " +
+    "array (use [] only when it is truly empty). Save uses exactly the top-level keys " +
+    "idempotencyKey, coveredEventWatermark, taskCapsule, and controlDocuments; never send " +
+    "eventWatermark. taskCapsule uses exactly objective, stage, confirmedDecisions, exclusions, " +
+    "delegatedScope, currentQuestion, unresolvedDeltas, stageProjection, activeDeliveryScope, " +
+    "evidence, fileState, commitState, and nextAction. currentQuestion is one authority object or " +
+    "null. Do not rename them to delegationScope, candidateIdentities, currentQuestions, files, or " +
+    "commits. authorityState is exactly one of user-confirmed, delegated-ai-candidate, " +
+    "verified-evidence, explicitly-excluded, or pending; never use confirmed. Projection item " +
+    "states are strict: inheritedContracts=user-confirmed, stageEvidence=verified-evidence, " +
+    "stageDecisions=delegated-ai-candidate, unresolvedDeltas=pending; use [] when no correctly " +
+    "typed item exists. stageProjection " +
+    "contains exactly the five " +
+    "array fields inheritedContracts, stageEvidence, stageDecisions, unresolvedDeltas, and " +
+    "resolutionBasis. Then call checkpoint get again and verify dirty=false and " +
+    "coveredEventWatermark equals eventWatermark. If the " +
+    "checkpoint tools are unavailable or one repair attempt fails, continue the response with the " +
+    "incomplete state visible; do not loop, fabricate coverage, or rely on the Stop hook to repair it.\n" +
+    "</nova-checkpoint-turn>"
+  );
+}
+
 function uncoveredResumeContext(rules, envelope) {
   const recoveryState = JSON.stringify({
     eventWatermark: envelope.eventWatermark,
@@ -172,6 +208,22 @@ function proofOutput(input, scopeProof) {
   };
 }
 
+function markLifecycleEvent(dataRoot, binding, eventIdentifier, host, environment, now) {
+  try {
+    markEvent(dataRoot, binding, undefined, eventIdentifier, { now });
+    return null;
+  } catch (error) {
+    if (error?.code !== "CHECKPOINT_MISSING") throw error;
+  }
+
+  const { pluginRoot, legacyRoots } = resolvePluginPaths(environment, host);
+  const pluginVersion = readPluginVersion(pluginRoot);
+  bootstrapStateRoot({ environment, host, dataRoot, legacyRoots, now });
+  startSession(dataRoot, binding, pluginVersion, "startup", { now });
+  markEvent(dataRoot, binding, pluginVersion, eventIdentifier, { now });
+  return pluginRoot;
+}
+
 export function handleHook(input, environment = process.env, options = {}) {
   const event = input?.hook_event_name;
   let rules;
@@ -203,11 +255,21 @@ export function handleHook(input, environment = process.env, options = {}) {
         const loaded = getCheckpoint(dataRoot, binding, { now });
         try {
           assertCovered(loaded.envelope);
-          context = buildRecoveryContext(rules, loaded.envelope);
-          if (source === "compact") {
+          const claudeCompactPending =
+            source === "compact" &&
+            host === "claude-code" &&
+            loaded.envelope.compactionHandshake.status === "frozen";
+          if (claudeCompactPending) {
+            context = buildRecoveryContext(rules, { taskCapsule: null });
+          } else {
+            context = buildRecoveryContext(rules, loaded.envelope);
+          }
+          if (source === "compact" && !claudeCompactPending) {
             recordInjectedCompaction(dataRoot, binding, pluginVersion, { now });
           } else {
-            recordResumeInjection(dataRoot, binding, pluginVersion, { now });
+            if (source === "resume") {
+              recordResumeInjection(dataRoot, binding, pluginVersion, { now });
+            }
           }
         } catch (error) {
           if (source !== "resume" || error?.code !== "CHECKPOINT_NOT_COVERED") throw error;
@@ -238,12 +300,60 @@ export function handleHook(input, environment = process.env, options = {}) {
       return proofOutput(input, scopeProof);
     }
     if (event === "UserPromptSubmit") {
-      markEvent(dataRoot, binding, undefined, eventId(host, input), { now });
-      return {};
+      const promptEventId = eventId(host, input);
+      if (host === "claude-code") {
+        let loaded;
+        try {
+          loaded = getCheckpoint(dataRoot, binding, { now });
+        } catch {
+          loaded = null;
+        }
+        if (
+          loaded?.currentValid !== false &&
+          loaded?.envelope.compactionHandshake.status === "completed"
+        ) {
+          const pluginRoot = resolvePluginRoot(environment);
+          rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
+          const injected = injectCompletedCompactionBeforePrompt(
+            dataRoot,
+            binding,
+            readPluginVersion(pluginRoot),
+            promptEventId,
+            { now },
+          );
+          return contextOutput(
+            event,
+            `${buildRecoveryContext(rules, injected.result.recoveryEnvelope)}\n\n${checkpointTurnContext(host)}`,
+          );
+        }
+      }
+      const latePluginRoot = markLifecycleEvent(
+        dataRoot,
+        binding,
+        promptEventId,
+        host,
+        environment,
+        now,
+      );
+      if (latePluginRoot !== null) {
+        rules = fs.readFileSync(path.join(latePluginRoot, "codex", "AGENTS.global.md"), "utf8");
+        return contextOutput(
+          event,
+          `${buildRecoveryContext(rules, { taskCapsule: null })}\n\n${checkpointTurnContext(host)}`,
+        );
+      }
+      return contextOutput(event, checkpointTurnContext(host));
     }
     if (event === "PostToolUse") {
       if (!isOwnCheckpointTool(host, input.tool_name)) {
-        markEvent(dataRoot, binding, undefined, eventId(host, input), { now });
+        markLifecycleEvent(
+          dataRoot,
+          binding,
+          eventId(host, input),
+          host,
+          environment,
+          now,
+        );
       }
       return {};
     }

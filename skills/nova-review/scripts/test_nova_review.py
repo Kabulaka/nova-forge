@@ -2515,6 +2515,35 @@ class NovaReviewTests(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("Validation must end with (pass)", rejected.stderr)
 
+    def test_detached_claude_co_author_preserves_managed_trailer_block(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work_item = NOVA_TOOL.new_work_item("fix")
+            commit_message = (
+                message(
+                    work_item,
+                    "fix",
+                    policy="exempt",
+                    exemption="EX-FIX",
+                    schema="2",
+                    subject="fix(delivery): 恢复 Claude 提交审查入口",
+                ).rstrip()
+                + "\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\n"
+            )
+
+            accepted = self.validate(root, commit_message)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            repo = root / "repo"
+            self.init_repo(repo)
+            commit_hash = self.commit(repo, "fix.py", "fixed\n", commit_message)
+            selected = self.run_tool(
+                "select", "--repo", str(repo), "--mode", "explicit",
+                "--work-item", work_item,
+            )
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(json.loads(selected.stdout)[0]["commits"], [commit_hash])
+
     def test_git_c_quoted_utf8_paths_are_decoded_and_invalid_bytes_rejected(self) -> None:
         relative = ".nova/design/中文路径.md"
 

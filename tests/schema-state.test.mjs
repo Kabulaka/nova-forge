@@ -14,12 +14,20 @@ import {
   startSession,
 } from "../runtime/core/state-machine.mjs";
 import { sealEnvelope } from "../runtime/core/storage.mjs";
+import { canonicalClone, stableStringify } from "../runtime/core/util.mjs";
 import { binding, capsule, pluginRoot, saveInput, temporaryDirectory } from "./helpers.mjs";
 
 test("checkpoint schema requires the complete five-field stage projection", () => {
   const input = saveInput(0);
   delete input.taskCapsule.stageProjection.resolutionBasis;
   assert.throws(() => validateSaveInput(input), /missing=resolutionBasis/);
+});
+
+test("canonical JSON rejects undefined instead of emitting invalid JSON", () => {
+  assert.throws(() => stableStringify(undefined), { code: "UNSERIALIZABLE_VALUE" });
+  assert.throws(() => canonicalClone({ pluginVersion: undefined }), {
+    code: "UNSERIALIZABLE_VALUE",
+  });
 });
 
 test("checkpoint schema rejects secrets and unknown authority", () => {
