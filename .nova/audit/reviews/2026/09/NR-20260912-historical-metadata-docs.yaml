@@ -1,0 +1,51 @@
+{
+  "batch_id": "NR-20260912-historical-metadata-docs",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "adhoc",
+      "commits": [
+        {
+          "commit": "31594fd7e44fa87e921865a7a9e2bda7551e5030",
+          "repository": "main"
+        },
+        {
+          "commit": "d79401cccbefd099fab2b718af832f8b4beede46",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "quick_validate.py nova-brainstorming; YAML metadata assertions; git diff --check (pass)",
+      "work_item": "FIX-01a04c70-60fa-7c89-806e-972cf21ab3b4"
+    },
+    {
+      "change_class": "adhoc",
+      "commits": [
+        {
+          "commit": "5472a2eed425c132906669aca92412a120702b1b",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "README links; discovery link smoke; validate_discovery.py (pass)",
+      "work_item": "FIX-01a05d2e-f0e5-7f63-acc8-7cee7eed4ccf"
+    }
+  ],
+  "manifest_sha256": "817855356fe70cd4af68b050868699393510bf682a05fc2c8a6144104e17bc92",
+  "review_content_sha256": "a5d7e494e623f54c6a586377cc3c80a08998446c05b75c96e2d5c4062649902c",
+  "review_fix_scope": [],
+  "review_fix_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "review_heads": {
+    "main": "d6335ff92be2afa31956edb681a066467ed00481"
+  },
+  "review_round": 1,
+  "review_scope": [
+    "main:README.md",
+    "main:nova-brainstorming/agents/openai.yaml"
+  ],
+  "reviewed_at": "2026-09-12T15:43:22+08:00",
+  "reviewer": "review_historical_display+review_historical_discovery",
+  "schema": 2
+}
