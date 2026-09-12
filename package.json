@@ -26,6 +26,12 @@
     "!skills/**/*.py[cod]"
   ],
   "scripts": {
+    "dev:install": "node scripts/install-dev-plugin.mjs",
+    "dev:uninstall": "node scripts/uninstall-dev-plugin.mjs",
+    "codex:dev:install": "node scripts/install-codex-dev-plugin.mjs",
+    "codex:dev:uninstall": "node scripts/uninstall-codex-dev-plugin.mjs",
+    "claude:dev:install": "node scripts/install-dev-plugin.mjs --host claude-code",
+    "claude:dev:uninstall": "node scripts/uninstall-dev-plugin.mjs --host claude-code",
     "test": "node --test tests/*.test.mjs",
     "check:version": "node scripts/sync-version.mjs --check",
     "check:plugin": "node scripts/validate-plugin.mjs",

@@ -170,6 +170,7 @@ export function handleHook(input, environment = process.env, options = {}) {
         host,
         cwd: input.cwd,
         sessionKey: binding.sessionKey,
+        hostPid: options.hostPid ?? process.ppid,
         now,
       });
       startSession(dataRoot, binding, pluginVersion, source, { now });

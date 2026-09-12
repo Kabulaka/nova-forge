@@ -6,7 +6,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { readHookInput } from "../hooks/run.mjs";
+import { main as runHookMain, readHookInput } from "../hooks/run.mjs";
 import { detectHost, handleHook, resolvePluginPaths } from "../runtime/adapters/hook.mjs";
 import { HOOK_INPUT_LIMIT } from "../runtime/core/constants.mjs";
 import { getCheckpoint, saveCheckpoint } from "../runtime/core/state-machine.mjs";
@@ -54,6 +54,26 @@ function runHookProcessWithLimit(dataRoot, host, inputValue, inputLimit) {
     },
   });
 }
+
+test("hook entrypoint detects the trusted host environment before resolving its owner process", async () => {
+  const temp = temporaryDirectory();
+  try {
+    let stdout = "";
+    let stderr = "";
+    await runHookMain({
+      inputStream: Readable.from([
+        JSON.stringify(input("SessionStart", { source: "startup" })),
+      ]),
+      outputStream: { write: (value) => (stdout += value) },
+      errorStream: { write: (value) => (stderr += value) },
+      environment: environment(temp.directory),
+    });
+    assert.equal(stderr, "");
+    assert.match(stdout, /<nova-static-rules>/);
+  } finally {
+    temp.cleanup();
+  }
+});
 
 test("host-native plugin variables are legacy sources while NOVA_HOME is authoritative", () => {
   const codexData = path.join(pluginRoot, ".codex-data");

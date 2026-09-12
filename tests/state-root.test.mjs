@@ -210,6 +210,42 @@ test("invalid legacy state and a different valid target both fail closed", () =>
 });
 
 test(
+  "migration rejects an equivalent target that escapes Nova home through a symlink",
+  { skip: process.platform === "win32" },
+  () => {
+    const temp = temporaryDirectory();
+    try {
+      const legacyRoot = path.join(temp.directory, "legacy");
+      const dataRoot = path.join(temp.directory, "new");
+      const outsideTarget = path.join(temp.directory, "outside-target");
+      const current = binding("codex", "symlink-target");
+      startSession(legacyRoot, current, "0.1.0", "startup", { now: Date.now() });
+      bootstrapStateRoot({ dataRoot, host: "codex", legacyRoots: [] });
+      fs.cpSync(
+        path.join(legacyRoot, "state", "codex", current.sessionKey),
+        outsideTarget,
+        { recursive: true },
+      );
+      const target = path.join(dataRoot, "state", "codex", current.sessionKey);
+      fs.symlinkSync(outsideTarget, target, "dir");
+
+      assert.throws(
+        () => bootstrapStateRoot({ dataRoot, host: "codex", legacyRoots: [legacyRoot] }),
+        (error) => {
+          assert.equal(error.code, "STATE_ROOT_UNAVAILABLE");
+          assert.match(error.message, /migration target must not be a symlink/);
+          return true;
+        },
+      );
+      assert.equal(fs.lstatSync(target).isSymbolicLink(), true);
+      assert.equal(fs.existsSync(path.join(outsideTarget, "current.json")), true);
+    } finally {
+      temp.cleanup();
+    }
+  },
+);
+
+test(
   "MCP initialize succeeds with a read-only plugin tree and a writable Nova home",
   { skip: process.platform === "win32" },
   () => {

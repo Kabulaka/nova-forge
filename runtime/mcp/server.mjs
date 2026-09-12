@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { JSON_RPC_FRAME_LIMIT, MCP_PROTOCOL_VERSION } from "../core/constants.mjs";
-import { registerMcpInstance, waitForBinding } from "../core/rendezvous.mjs";
+import {
+  registerMcpInstance,
+  resolveHostProcessId,
+  waitForBinding,
+} from "../core/rendezvous.mjs";
 import {
   bootstrapStateRoot,
   legacyDataRoots,
@@ -162,6 +166,7 @@ export class McpRuntime {
     host,
     cwd = process.cwd(),
     pid = process.pid,
+    hostPid = process.ppid,
     environment = process.env,
     legacyRoots = [],
   }) {
@@ -175,6 +180,7 @@ export class McpRuntime {
       host,
       cwd,
       pid,
+      hostPid,
       allowCwdMismatch: host === "codex",
     });
     this.binding = null;
@@ -331,6 +337,7 @@ async function main() {
     dataRoot,
     pluginRoot,
     host,
+    hostPid: resolveHostProcessId(host),
     legacyRoots: legacyDataRoots(process.env, host),
   });
   let buffer = Buffer.alloc(0);

@@ -6,9 +6,33 @@ import {
   claimSession,
   consumeBinding,
   registerMcpInstance,
+  selectHostProcessId,
 } from "../runtime/core/rendezvous.mjs";
 import { scopeKey } from "../runtime/core/util.mjs";
 import { pluginRoot, temporaryDirectory } from "./helpers.mjs";
+
+test("host process selection skips hook shells and finds the owning host", () => {
+  const hookAncestry = [
+    { pid: 30_003, parentPid: 30_002, command: "node /cache/.claude/plugins/nova/hooks/run.mjs" },
+    { pid: 30_002, parentPid: 30_001, command: "/bin/sh -c node hooks/run.mjs" },
+    { pid: 30_001, parentPid: 1, command: "/usr/local/bin/claude -p smoke" },
+  ];
+  const mcpAncestry = [
+    { pid: 30_004, parentPid: 30_001, command: "node runtime/mcp/server.mjs" },
+    { pid: 30_001, parentPid: 1, command: "/usr/local/bin/claude -p smoke" },
+  ];
+  assert.equal(selectHostProcessId("claude-code", hookAncestry, 30_002), 30_001);
+  assert.equal(selectHostProcessId("claude-code", mcpAncestry, 30_001), 30_001);
+  assert.equal(
+    selectHostProcessId(
+      "codex",
+      [{ pid: 40_001, parentPid: 1, command: "/opt/openai/codex app-server" }],
+      9,
+    ),
+    40_001,
+  );
+  assert.equal(selectHostProcessId("codex", hookAncestry, 30_002), 30_002);
+});
 
 test("one hook claim binds exactly one MCP instance without exposing session id", () => {
   const temp = temporaryDirectory();
@@ -95,6 +119,72 @@ test("Codex cwd-agnostic rendezvous fails closed with multiple project claims", 
     });
     assert.equal(second.status, "ambiguous");
     assert.equal(consumeBinding(temp.directory, registration, { now: 1_200 }), null);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("an unclaimed MCP instance from another live host process does not block Codex binding", () => {
+  const temp = temporaryDirectory();
+  try {
+    registerMcpInstance(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      hostPid: 10_001,
+      allowCwdMismatch: true,
+      pid: process.pid,
+      now: 1_000,
+    });
+    const registration = registerMcpInstance(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      hostPid: 10_002,
+      allowCwdMismatch: true,
+      pid: process.pid,
+      now: 1_010,
+    });
+    const claim = claimSession(temp.directory, {
+      host: "codex",
+      cwd: path.join(temp.directory, "project"),
+      sessionKey: scopeKey("codex", "new-session"),
+      hostPid: 10_002,
+      now: 1_020,
+    });
+
+    assert.equal(claim.status, "pending");
+    const binding = consumeBinding(temp.directory, registration, { now: 1_200 });
+    assert.equal(binding.sessionKey, scopeKey("codex", "new-session"));
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("concurrent Codex host processes bind only their own claim and MCP instance", () => {
+  const temp = temporaryDirectory();
+  try {
+    const registrations = [20_001, 20_002].map((hostPid, index) => {
+      const registration = registerMcpInstance(temp.directory, {
+        host: "codex",
+        cwd: pluginRoot,
+        hostPid,
+        allowCwdMismatch: true,
+        pid: process.pid,
+        now: 1_000 + index,
+      });
+      claimSession(temp.directory, {
+        host: "codex",
+        cwd: path.join(temp.directory, `project-${index}`),
+        sessionKey: scopeKey("codex", `session-${index}`),
+        hostPid,
+        now: 1_010 + index,
+      });
+      return registration;
+    });
+
+    for (const [index, registration] of registrations.entries()) {
+      const binding = consumeBinding(temp.directory, registration, { now: 1_200 });
+      assert.equal(binding.sessionKey, scopeKey("codex", `session-${index}`));
+    }
   } finally {
     temp.cleanup();
   }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { handleHook } from "../runtime/adapters/hook.mjs";
+import { detectHost, handleHook } from "../runtime/adapters/hook.mjs";
 import { HOOK_INPUT_LIMIT } from "../runtime/core/constants.mjs";
+import { resolveHostProcessId } from "../runtime/core/rendezvous.mjs";
 import { isMainModule, NovaError, redactError } from "../runtime/core/util.mjs";
 
 export async function readHookInput(stream, inputLimit = HOOK_INPUT_LIMIT) {
@@ -32,7 +33,8 @@ export async function main({
 } = {}) {
   try {
     const input = await readHookInput(inputStream, inputLimit);
-    const output = handleHook(input, environment);
+    const host = detectHost(environment);
+    const output = handleHook(input, environment, { hostPid: resolveHostProcessId(host) });
     if (Object.keys(output).length > 0) outputStream.write(`${JSON.stringify(output)}\n`);
   } catch (error) {
     const reason = `Nova hook failed: ${redactError(error)}`;

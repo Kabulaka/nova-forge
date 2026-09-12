@@ -69,6 +69,7 @@ Codex 可添加固定标签的仓库 marketplace，再从 `/plugins` 安装并�
 
 ```bash
 codex plugin marketplace add Kabulaka/nova-forge --ref v0.2.0
+codex plugin add nova-forge@nova-forge
 ```
 
 Claude Code 可添加同一仓库 marketplace，再从插件管理器安装 `nova-forge@nova-forge`：
@@ -115,7 +116,48 @@ unlink ~/.claude/CLAUDE.md
 
 技能链接也必须逐项确认后再解除；不要用递归删除或未经检查的通配符清理用户目录。
 
-### 2. 本地开发或兼容发现链接（需要克隆）
+### 2. 安装本地开发版本（需要克隆）
+
+本地开发插件与 GitHub 正式插件不能在同一宿主中同时启用。开发版安装脚本会先读取 Codex 和 Claude Code 的 JSON 状态，并把当前工作区中 `npm pack` 会包含的文件复制、校验为隔离快照；快照就绪后才替换两个宿主中已安装的 `nova-forge@...`（包括 GitHub 正式版、旧开发版和 E2E 版）。它不会直接从脏工作区加载 Hook，也不会把测试、`.nova/` 或未打包文件带入插件；快照会分别生成 Codex 和 Claude Code cachebuster，并且只允许 `hooks/hooks.json` 这一份 Hook 声明。
+
+先预览将卸载和替换的精确对象：
+
+```bash
+npm run dev:install -- --dry-run
+```
+
+确认后安装：
+
+```bash
+npm run dev:install
+```
+
+开发 marketplace 固定写入 `~/.nova/marketplaces/nova-forge-dev`（设置了绝对 `NOVA_HOME` 时位于该根下），两个宿主中的插件 ID 都是 `nova-forge@nova-forge-dev`。脚本会验证每个宿主最终只有这一份 Nova 插件处于已安装、已启用且无加载错误的状态；`~/.nova` 中的检查点数据不会被删除。
+
+Codex CLI 在重装插件时会清理旧版本缓存，但活动会话的 Hook 仍可能引用旧缓存路径。安装器会在 CLI 操作前保存 Nova 缓存并在操作后恢复旧版本目录，因此正在运行的旧会话不会再因 `MODULE_NOT_FOUND` 中断；Claude Code 的原生更新流程本身会保留旧版本缓存。旧会话继续使用其启动时加载的版本，新会话使用新快照。安装后不再要求为了避免 Hook 崩溃而强制退出旧会话，但要验收新代码仍应新开会话。
+
+只操作单个宿主时可使用：
+
+```bash
+npm run codex:dev:install
+npm run claude:dev:install
+```
+
+卸载开发版前可预览：
+
+```bash
+npm run dev:uninstall -- --dry-run
+```
+
+卸载开发版及其本地 marketplace 快照：
+
+```bash
+npm run dev:uninstall
+```
+
+完整卸载脚本只注销两个宿主中的 `nova-forge@nova-forge-dev` 和精确的开发 marketplace 目录，不删除 `~/.nova` 状态，也不会静默重装 GitHub 正式版。为保证仍在运行的会话不崩溃，宿主缓存中的旧版本目录会保留，但它们不再是已安装插件；关闭旧会话后可按宿主自己的缓存管理策略清理。单宿主卸载使用 `codex:dev:uninstall` 或 `claude:dev:uninstall`，此时共享快照会保留，避免破坏另一宿主。需要恢复正式版时，先执行第 1 小节对应宿主的 marketplace 和安装命令。
+
+### 3. 本地兼容发现链接（需要克隆）
 
 支持插件且已经启用 Nova 版本化插件的宿主，以插件入口为唯一发现权威，不要同时保留本节兼容链接。Codex IDE、旧版宿主或需要显式故障恢复时，才使用下述兼容安装器；两种入口即使解析到同一工作区源码也不能在同一宿主并存。
 
@@ -160,7 +202,7 @@ readlink -f ~/.claude/CLAUDE.md
 python skills/nova-review/scripts/validate_discovery.py --workspace "$PWD" --codex-home ~/.codex --claude-home ~/.claude
 ```
 
-### 3. 升级与回退注意事项
+### 4. 升级与回退注意事项
 
 - **版本化插件升级**：先结束当前会话并阅读目标版本 Release Notes，确认 Node.js 要求和升级说明；Codex 的 Git marketplace 使用固定标签，升级到新版本时按目标 Release Notes 重新配置对应 `vX.Y.Z`，不要把 `main` 当作正式版本。刷新或重新安装后，如 Hook 定义发生变化，必须重新审阅并信任，再新开会话验证。
 - **状态迁移与卸载**：升级时只迁移同宿主可验证的旧检查点，原插件数据根保持不变；禁用、卸载、版本缓存清理和兼容链接切换都不会删除 `~/.nova`。当前版本不提供自动清理入口，需要删除时必须由用户另行明确选择范围并自行操作。

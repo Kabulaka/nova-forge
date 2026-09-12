@@ -70,10 +70,10 @@ export function legacyDataRoots(environment = process.env, host) {
   return roots;
 }
 
-function rejectRootSymlink(directory) {
+function rejectDirectorySymlink(directory, label = "state root") {
   try {
     if (fs.lstatSync(directory).isSymbolicLink()) {
-      throw new NovaError("STATE_ROOT_SYMLINK", `state root must not be a symlink: ${directory}`);
+      throw new NovaError("STATE_ROOT_SYMLINK", `${label} must not be a symlink: ${directory}`);
     }
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
@@ -112,7 +112,7 @@ function writeProbe(dataRoot, faultInjector) {
 }
 
 function bootstrapDirectories(dataRoot, host, faultInjector) {
-  rejectRootSymlink(dataRoot);
+  rejectDirectorySymlink(dataRoot);
   ensurePrivateDirectory(dataRoot);
   const directories = [
     path.join(dataRoot, "state"),
@@ -123,7 +123,7 @@ function bootstrapDirectories(dataRoot, host, faultInjector) {
     path.join(dataRoot, "migrations", host),
   ];
   for (const directory of directories) {
-    rejectRootSymlink(directory);
+    rejectDirectorySymlink(directory);
     ensurePrivateDirectory(directory);
   }
   writeProbe(dataRoot, faultInjector);
@@ -289,6 +289,7 @@ export function migrateLegacyRoot(
         if (values.size === 0) continue;
         const files = serializedScope(values);
         const target = path.join(dataRoot, "state", host, entry.name);
+        rejectDirectorySymlink(target, "migration target");
         if (fs.existsSync(target) && !targetMatches(target, files, host, entry.name, now)) {
           throw new NovaError(
             "MIGRATION_TARGET_CONFLICT",
