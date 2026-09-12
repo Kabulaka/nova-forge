@@ -30,7 +30,6 @@ const documents = [
     (value) => {
       value.metadata.version = version;
       value.plugins[0].version = version;
-      value.plugins[0].source.ref = tag;
     },
   ],
 ];

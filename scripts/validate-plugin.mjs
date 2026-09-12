@@ -80,15 +80,21 @@ requireValue(
 );
 
 requireValue(
-  codexMarketplace.plugins?.[0]?.source?.ref === `v${packageJson.version}`,
-  "Codex marketplace ref mismatch",
+  codexMarketplace.plugins?.[0]?.source?.source === "url" &&
+    codexMarketplace.plugins?.[0]?.source?.url === "https://github.com/Kabulaka/nova-forge.git" &&
+    codexMarketplace.plugins?.[0]?.source?.ref === `v${packageJson.version}`,
+  "Codex marketplace source mismatch",
   errors,
 );
 requireValue(
   claudeMarketplace.metadata?.version === packageJson.version &&
-    claudeMarketplace.plugins?.[0]?.version === packageJson.version &&
-    claudeMarketplace.plugins?.[0]?.source?.ref === `v${packageJson.version}`,
+    claudeMarketplace.plugins?.[0]?.version === packageJson.version,
   "Claude Code marketplace version mismatch",
+  errors,
+);
+requireValue(
+  claudeMarketplace.plugins?.[0]?.source === "./",
+  "Claude Code marketplace must install from its cloned repository",
   errors,
 );
 

@@ -8,6 +8,21 @@ function readJson(relative) {
   return JSON.parse(fs.readFileSync(path.join(pluginRoot, relative), "utf8"));
 }
 
+test("marketplaces use host-native install sources", () => {
+  const packageJson = readJson("package.json");
+  const codexMarketplace = readJson(".agents/plugins/marketplace.json");
+  const claudeMarketplace = readJson(".claude-plugin/marketplace.json");
+
+  assert.deepEqual(codexMarketplace.plugins[0].source, {
+    source: "url",
+    url: "https://github.com/Kabulaka/nova-forge.git",
+    ref: `v${packageJson.version}`,
+  });
+  assert.equal(claudeMarketplace.plugins[0].source, "./");
+  assert.equal(claudeMarketplace.metadata.version, packageJson.version);
+  assert.equal(claudeMarketplace.plugins[0].version, packageJson.version);
+});
+
 test("Codex manifest uses the packaged MCP companion and default hook discovery", () => {
   const manifest = readJson(".codex-plugin/plugin.json");
   const mcp = readJson(".mcp.json");
