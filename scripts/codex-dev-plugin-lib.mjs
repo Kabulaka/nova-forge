@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { withOwnerLock } from "../runtime/core/util.mjs";
 
 export const DEV_MARKETPLACE_NAME = "nova-forge-dev";
 export const PLUGIN_NAME = "nova-forge";
@@ -18,12 +19,13 @@ function executable(name, override) {
 }
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+  const invocation = windowsCommandInvocation(command, args, options.env || process.env);
+  const result = spawnSync(invocation.command, invocation.args, {
     cwd: options.cwd,
     encoding: "utf8",
-    env: options.env || process.env,
+    env: invocation.environment,
     maxBuffer: 16 * 1024 * 1024,
-    shell: process.platform === "win32",
+    shell: false,
     windowsHide: true,
   });
   if (result.error) {
@@ -34,6 +36,38 @@ function run(command, args, options = {}) {
     throw new Error(`${command} ${args.join(" ")} failed (${result.status}): ${detail}`);
   }
   return result.stdout;
+}
+
+export function windowsCommandInvocation(
+  command,
+  args,
+  environment = process.env,
+  platform = process.platform,
+) {
+  if (platform !== "win32" || !/\.(?:cmd|bat)$/i.test(command)) {
+    return { command, args, environment };
+  }
+  const specVariable = "NOVA_DEV_COMMAND_SPEC_BASE64";
+  const spec = Buffer.from(JSON.stringify({ command, args }), "utf8").toString("base64");
+  const script = [
+    `$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:${specVariable}))`,
+    "$spec=$json|ConvertFrom-Json",
+    "$command=[string]$spec.command",
+    "$arguments=@($spec.args|ForEach-Object {[string]$_})",
+    "& $command @arguments",
+    "if($null -eq $LASTEXITCODE){exit 0}else{exit $LASTEXITCODE}",
+  ].join(";");
+  return {
+    command: environment.ComSpecPowerShell || "powershell.exe",
+    args: [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      Buffer.from(script, "utf16le").toString("base64"),
+    ],
+    environment: { ...environment, [specVariable]: spec },
+  };
 }
 
 function parseJsonOutput(label, output) {
@@ -130,6 +164,23 @@ export function listClaudeMarketplaces(claudeBin, environment = process.env) {
   return payload;
 }
 
+function marketplaceLocation(marketplace) {
+  const value =
+    marketplace?.root ||
+    marketplace?.installLocation ||
+    marketplace?.path ||
+    marketplace?.marketplaceSource?.source;
+  return typeof value === "string" && value.length > 0 ? path.resolve(value) : null;
+}
+
+function attemptRollback(errors, operation) {
+  try {
+    operation();
+  } catch (error) {
+    errors.push(error);
+  }
+}
+
 export function packageFiles(repoRoot, environment = process.env) {
   const npmBin = executable("npm", environment.NOVA_NPM_BIN);
   const payload = parseJsonOutput(
@@ -173,18 +224,18 @@ function copyPackageFile(repoRoot, pluginRoot, relative) {
 }
 
 function cachebuster(now = new Date()) {
-  const digits = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  return `local-${digits.toLowerCase()}`;
+  const digits = now.toISOString().replace(/[-:.]/g, "").toLowerCase();
+  return `local-${digits}-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
-function updateManifestVersion(pluginRoot, manifestDirectory, hostLabel, now) {
+function updateManifestVersion(pluginRoot, manifestDirectory, hostLabel, token) {
   const manifestPath = path.join(pluginRoot, manifestDirectory, "plugin.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   if (manifest.name !== PLUGIN_NAME || typeof manifest.version !== "string") {
     throw new Error(`invalid ${hostLabel} plugin manifest: ${manifestPath}`);
   }
   const baseVersion = manifest.version.split("+", 1)[0];
-  manifest.version = `${baseVersion}+${hostLabel}.${cachebuster(now)}`;
+  manifest.version = `${baseVersion}+${hostLabel}.${token}`;
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   return manifest.version;
 }
@@ -255,12 +306,12 @@ function validateSnapshot(pluginRoot) {
   const claudeManifest = JSON.parse(
     fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"),
   );
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\+codex\.local-[0-9tz-]+$/.test(codexManifest.version)) {
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\+codex\.local-[0-9a-ftz-]+$/.test(codexManifest.version)) {
     throw new Error(
       `Codex development manifest has an invalid cachebuster version: ${codexManifest.version}`,
     );
   }
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\+claude\.local-[0-9tz-]+$/.test(claudeManifest.version)) {
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\+claude\.local-[0-9a-ftz-]+$/.test(claudeManifest.version)) {
     throw new Error(
       `Claude development manifest has an invalid cachebuster version: ${claudeManifest.version}`,
     );
@@ -289,8 +340,9 @@ export function buildSnapshot(repoRoot, novaHome, environment = process.env, now
   try {
     const files = packageFiles(repoRoot, environment);
     for (const relative of files) copyPackageFile(repoRoot, pluginRoot, relative);
-    const codexVersion = updateManifestVersion(pluginRoot, ".codex-plugin", "codex", now);
-    const claudeVersion = updateManifestVersion(pluginRoot, ".claude-plugin", "claude", now);
+    const token = cachebuster(now);
+    const codexVersion = updateManifestVersion(pluginRoot, ".codex-plugin", "codex", token);
+    const claudeVersion = updateManifestVersion(pluginRoot, ".claude-plugin", "claude", token);
     writeCodexMarketplace(stageRoot);
     writeClaudeMarketplace(stageRoot, claudeVersion);
     validateSnapshot(pluginRoot);
@@ -428,7 +480,7 @@ function safeRemoveDevelopmentRoot(root, novaHome) {
   fs.rmSync(actual, { recursive: true, force: true });
 }
 
-export function installDevelopmentPlugin({
+function installDevelopmentPluginUnlocked({
   repoRoot,
   environment = process.env,
   home = os.homedir(),
@@ -444,6 +496,10 @@ export function installDevelopmentPlugin({
   const novaPlugins = installed.filter((plugin) => plugin.name === PLUGIN_NAME && plugin.installed);
   const marketplaces = listMarketplaces(codexBin, environment);
   const priorDevMarketplace = marketplaces.find((item) => item.name === DEV_MARKETPLACE_NAME);
+  const priorDevMarketplaceRoot = marketplaceLocation(priorDevMarketplace);
+  if (priorDevMarketplace && !priorDevMarketplaceRoot) {
+    throw new Error(`Codex marketplace ${DEV_MARKETPLACE_NAME} has no recoverable root`);
+  }
 
   output.write(`Source: ${repoRoot}\n`);
   output.write(`Development marketplace: ${targetRoot}\n`);
@@ -455,7 +511,13 @@ export function installDevelopmentPlugin({
   }
 
   const snapshot = buildSnapshot(repoRoot, novaHome, environment, now);
-  const cacheSnapshot = captureHostCaches(codexHome, novaHome);
+  let cacheSnapshot;
+  try {
+    cacheSnapshot = captureHostCaches(codexHome, novaHome);
+  } catch (error) {
+    fs.rmSync(snapshot.stageRoot, { recursive: true, force: true });
+    throw error;
+  }
   let backupRoot;
   const removedPluginIds = [];
   let removedDevMarketplace = false;
@@ -479,7 +541,18 @@ export function installDevelopmentPlugin({
     const after = listInstalledPlugins(codexBin, environment).filter(
       (plugin) => plugin.name === PLUGIN_NAME && plugin.installed,
     );
-    if (after.length !== 1 || after[0].pluginId !== DEV_PLUGIN_ID || !after[0].enabled) {
+    const configuredMarketplace = listMarketplaces(codexBin, environment).find(
+      (item) => item.name === DEV_MARKETPLACE_NAME,
+    );
+    if (
+      after.length !== 1 ||
+      after[0].pluginId !== DEV_PLUGIN_ID ||
+      !after[0].enabled ||
+      after[0].version !== snapshot.codexVersion ||
+      marketplaceLocation(configuredMarketplace) !== path.resolve(targetRoot) ||
+      path.resolve(after[0].source?.path || "") !==
+        path.resolve(targetRoot, "plugins", PLUGIN_NAME)
+    ) {
       throw new Error(`expected one enabled ${DEV_PLUGIN_ID}, found ${JSON.stringify(after)}`);
     }
     const restoredCacheVersions = restoreHostCaches(cacheSnapshot);
@@ -491,46 +564,50 @@ export function installDevelopmentPlugin({
     output.write("Existing sessions remain executable; start a new session to load the new snapshot.\n");
     return { ...snapshot, targetRoot, removedPluginIds, restoredCacheVersions };
   } catch (error) {
-    try {
+    const rollbackErrors = [];
+    attemptRollback(rollbackErrors, () => {
       const current = listInstalledPlugins(codexBin, environment);
       if (current.some((plugin) => plugin.pluginId === DEV_PLUGIN_ID && plugin.installed)) {
         removePlugin(codexBin, DEV_PLUGIN_ID, environment);
       }
-    } catch {}
-    try {
+    });
+    attemptRollback(rollbackErrors, () => {
       const current = listMarketplaces(codexBin, environment);
       if (current.some((item) => item.name === DEV_MARKETPLACE_NAME)) {
         removeMarketplace(codexBin, DEV_MARKETPLACE_NAME, environment);
       }
-    } catch {}
-    if (fs.existsSync(targetRoot)) safeRemoveDevelopmentRoot(targetRoot, novaHome);
-    if (backupRoot && fs.existsSync(backupRoot)) fs.renameSync(backupRoot, targetRoot);
-    if (fs.existsSync(snapshot.stageRoot)) {
-      fs.rmSync(snapshot.stageRoot, { recursive: true, force: true });
-    }
-    if (removedDevMarketplace && fs.existsSync(targetRoot)) {
-      try {
-        addMarketplace(codexBin, targetRoot, environment);
-      } catch {}
+    });
+    attemptRollback(rollbackErrors, () => {
+      if (fs.existsSync(targetRoot)) safeRemoveDevelopmentRoot(targetRoot, novaHome);
+    });
+    attemptRollback(rollbackErrors, () => {
+      if (backupRoot && fs.existsSync(backupRoot)) fs.renameSync(backupRoot, targetRoot);
+    });
+    attemptRollback(rollbackErrors, () => {
+      if (fs.existsSync(snapshot.stageRoot)) {
+        fs.rmSync(snapshot.stageRoot, { recursive: true, force: true });
+      }
+    });
+    if (removedDevMarketplace && priorDevMarketplaceRoot) {
+      attemptRollback(rollbackErrors, () =>
+        addMarketplace(codexBin, priorDevMarketplaceRoot, environment),
+      );
     }
     for (const pluginId of removedPluginIds) {
-      try {
-        addPlugin(codexBin, pluginId, environment);
-      } catch {}
+      attemptRollback(rollbackErrors, () => addPlugin(codexBin, pluginId, environment));
     }
-    try {
-      restoreHostCaches(cacheSnapshot);
-    } catch (cacheError) {
+    attemptRollback(rollbackErrors, () => restoreHostCaches(cacheSnapshot));
+    if (rollbackErrors.length > 0) {
       throw new AggregateError(
-        [error, cacheError],
-        "Codex development install failed and its live-session cache could not be restored",
+        [error, ...rollbackErrors],
+        "Codex development install failed and rollback was incomplete",
       );
     }
     throw error;
   }
 }
 
-export function uninstallDevelopmentPlugin({
+function uninstallDevelopmentPluginUnlocked({
   environment = process.env,
   home = os.homedir(),
   dryRun = false,
@@ -584,7 +661,7 @@ export function uninstallDevelopmentPlugin({
   return { targetRoot, removed: true, restoredCacheVersions };
 }
 
-export function installClaudeDevelopmentPlugin({
+function installClaudeDevelopmentPluginUnlocked({
   repoRoot,
   environment = process.env,
   home = os.homedir(),
@@ -619,7 +696,13 @@ export function installClaudeDevelopmentPlugin({
   }
 
   const snapshot = buildSnapshot(repoRoot, novaHome, environment, now);
-  const cacheSnapshot = captureHostCaches(claudeHome, novaHome);
+  let cacheSnapshot;
+  try {
+    cacheSnapshot = captureHostCaches(claudeHome, novaHome);
+  } catch (error) {
+    fs.rmSync(snapshot.stageRoot, { recursive: true, force: true });
+    throw error;
+  }
   let backupRoot;
   const removedPluginIds = [];
   let addedMarketplace = false;
@@ -677,47 +760,51 @@ export function installClaudeDevelopmentPlugin({
     return { ...snapshot, targetRoot, removedPluginIds, restoredCacheVersions };
   } catch (error) {
     const priorDevPlugin = novaPlugins.find((plugin) => plugin.id === DEV_PLUGIN_ID);
-    try {
+    const rollbackErrors = [];
+    attemptRollback(rollbackErrors, () => {
       const current = listClaudeInstalledPlugins(claudeBin, environment);
       if (current.some((plugin) => plugin.id === DEV_PLUGIN_ID)) {
         removeClaudePlugin(claudeBin, DEV_PLUGIN_ID, environment);
       }
-    } catch {}
+    });
     if (addedMarketplace) {
-      try {
-        removeClaudeMarketplace(claudeBin, DEV_MARKETPLACE_NAME, environment);
-      } catch {}
+      attemptRollback(rollbackErrors, () =>
+        removeClaudeMarketplace(claudeBin, DEV_MARKETPLACE_NAME, environment),
+      );
     }
-    if (fs.existsSync(targetRoot)) safeRemoveDevelopmentRoot(targetRoot, novaHome);
-    if (backupRoot && fs.existsSync(backupRoot)) fs.renameSync(backupRoot, targetRoot);
-    if (fs.existsSync(snapshot.stageRoot)) {
-      fs.rmSync(snapshot.stageRoot, { recursive: true, force: true });
-    }
+    attemptRollback(rollbackErrors, () => {
+      if (fs.existsSync(targetRoot)) safeRemoveDevelopmentRoot(targetRoot, novaHome);
+    });
+    attemptRollback(rollbackErrors, () => {
+      if (backupRoot && fs.existsSync(backupRoot)) fs.renameSync(backupRoot, targetRoot);
+    });
+    attemptRollback(rollbackErrors, () => {
+      if (fs.existsSync(snapshot.stageRoot)) {
+        fs.rmSync(snapshot.stageRoot, { recursive: true, force: true });
+      }
+    });
     if (priorDevPlugin) {
-      try {
-        installClaudePlugin(claudeBin, environment);
-      } catch {}
+      attemptRollback(rollbackErrors, () => installClaudePlugin(claudeBin, environment));
     }
     for (const pluginId of removedPluginIds) {
-      try {
+      attemptRollback(rollbackErrors, () =>
         run(claudeBin, ["plugin", "install", pluginId, "--scope", "user"], {
           env: environment,
-        });
-      } catch {}
+        }),
+      );
     }
-    try {
-      restoreHostCaches(cacheSnapshot);
-    } catch (cacheError) {
+    attemptRollback(rollbackErrors, () => restoreHostCaches(cacheSnapshot));
+    if (rollbackErrors.length > 0) {
       throw new AggregateError(
-        [error, cacheError],
-        "Claude development install failed and its live-session cache could not be restored",
+        [error, ...rollbackErrors],
+        "Claude development install failed and rollback was incomplete",
       );
     }
     throw error;
   }
 }
 
-export function uninstallClaudeDevelopmentPlugin({
+function uninstallClaudeDevelopmentPluginUnlocked({
   environment = process.env,
   home = os.homedir(),
   dryRun = false,
@@ -767,4 +854,36 @@ export function uninstallClaudeDevelopmentPlugin({
   output.write(`Nova state preserved at: ${novaHome}\n`);
   output.write(`Retained old Claude cache versions for live sessions: ${restoredCacheVersions}\n`);
   return { targetRoot, removed: true, restoredCacheVersions };
+}
+
+function withDevelopmentLock(options, callback) {
+  const environment = options.environment || process.env;
+  const home = options.home || os.homedir();
+  const novaHome = resolveNovaHome(environment, home);
+  if (options.dryRun) return callback();
+  return withOwnerLock(
+    path.join(novaHome, "marketplaces", ".nova-forge-dev.lock"),
+    callback,
+    {
+      timeoutMs: options.lockTimeoutMs ?? 10_000,
+      timeoutCode: "DEVELOPMENT_INSTALL_LOCK_TIMEOUT",
+      timeoutMessage: "another Nova development install or uninstall is still running",
+    },
+  );
+}
+
+export function installDevelopmentPlugin(options) {
+  return withDevelopmentLock(options, () => installDevelopmentPluginUnlocked(options));
+}
+
+export function uninstallDevelopmentPlugin(options = {}) {
+  return withDevelopmentLock(options, () => uninstallDevelopmentPluginUnlocked(options));
+}
+
+export function installClaudeDevelopmentPlugin(options) {
+  return withDevelopmentLock(options, () => installClaudeDevelopmentPluginUnlocked(options));
+}
+
+export function uninstallClaudeDevelopmentPlugin(options = {}) {
+  return withDevelopmentLock(options, () => uninstallClaudeDevelopmentPluginUnlocked(options));
 }

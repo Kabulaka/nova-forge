@@ -5,9 +5,15 @@ import path from "node:path";
 import test from "node:test";
 import {
   bootstrapStateRoot,
+  migrateLegacyRoot,
   resolveNovaHome,
 } from "../runtime/core/state-root.mjs";
 import { startSession } from "../runtime/core/state-machine.mjs";
+import {
+  cleanupExpiredScopes,
+  readEnvelope,
+  resetEnvelope,
+} from "../runtime/core/storage.mjs";
 import { binding, pluginRoot, temporaryDirectory } from "./helpers.mjs";
 
 test("Nova home defaults to the user directory and accepts only an absolute override", () => {
@@ -138,7 +144,7 @@ test("legacy migration copies only the current host and preserves the source", (
   }
 });
 
-test("migration interruption keeps the source and resumes from equivalent published state", () => {
+test("migration interruption keeps published state unreadable until the record commits", () => {
   const temp = temporaryDirectory();
   try {
     const legacyRoot = path.join(temp.directory, "legacy");
@@ -161,12 +167,129 @@ test("migration interruption keeps the source and resumes from equivalent publis
       fs.existsSync(path.join(dataRoot, "state", "codex", current.sessionKey, "current.json")),
       true,
     );
+    assert.equal(
+      fs.existsSync(
+        path.join(
+          dataRoot,
+          "state",
+          "codex",
+          current.sessionKey,
+          ".migration-pending.json",
+        ),
+      ),
+      true,
+    );
+    assert.throws(() => readEnvelope(dataRoot, current), { code: "MIGRATION_NOT_COMMITTED" });
+    assert.deepEqual(
+      cleanupExpiredScopes(dataRoot, { now: Date.now() + 40 * 24 * 60 * 60 * 1_000 }),
+      { removed: 0, reclaimedBytes: 0 },
+    );
+    assert.throws(() => resetEnvelope(dataRoot, current, "0.1.0"), {
+      code: "MIGRATION_NOT_COMMITTED",
+    });
     const resumed = bootstrapStateRoot({ dataRoot, host: "codex", legacyRoots: [legacyRoot] });
     assert.equal(resumed.migrations[0].status, "completed");
+    assert.equal(readEnvelope(dataRoot, current).source, "current");
     assert.equal(
       fs.existsSync(path.join(legacyRoot, "state", "codex", current.sessionKey, "current.json")),
       true,
     );
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("a completed migration record validates its target before clearing an interrupted marker", () => {
+  const temp = temporaryDirectory();
+  try {
+    const legacyRoot = path.join(temp.directory, "legacy");
+    const dataRoot = path.join(temp.directory, "new");
+    const current = binding("codex", "clear-interrupt");
+    startSession(legacyRoot, current, "0.1.0", "startup", { now: Date.now() });
+    assert.throws(
+      () =>
+        bootstrapStateRoot({
+          dataRoot,
+          host: "codex",
+          legacyRoots: [legacyRoot],
+          faultInjector(stage) {
+            if (stage === "migration-clear") throw new Error("injected marker interruption");
+          },
+        }),
+      { code: "STATE_ROOT_UNAVAILABLE" },
+    );
+    assert.throws(() => readEnvelope(dataRoot, current), { code: "MIGRATION_NOT_COMMITTED" });
+    const resumed = bootstrapStateRoot({ dataRoot, host: "codex", legacyRoots: [legacyRoot] });
+    assert.equal(resumed.migrations[0].idempotent, true);
+    assert.equal(readEnvelope(dataRoot, current).source, "current");
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("a completed migration record never clears the marker from a damaged target", () => {
+  const temp = temporaryDirectory();
+  try {
+    const legacyRoot = path.join(temp.directory, "legacy");
+    const dataRoot = path.join(temp.directory, "new");
+    const current = binding("codex", "damaged-committed-target");
+    startSession(legacyRoot, current, "0.1.0", "startup", { now: Date.now() });
+    assert.throws(
+      () =>
+        bootstrapStateRoot({
+          dataRoot,
+          host: "codex",
+          legacyRoots: [legacyRoot],
+          faultInjector(stage) {
+            if (stage === "migration-clear") throw new Error("injected marker interruption");
+          },
+        }),
+      { code: "STATE_ROOT_UNAVAILABLE" },
+    );
+    const target = path.join(dataRoot, "state", "codex", current.sessionKey);
+    const marker = path.join(target, ".migration-pending.json");
+    fs.rmSync(path.join(target, "current.json"));
+    fs.rmSync(path.join(target, "backup.json"), { force: true });
+    assert.throws(
+      () => migrateLegacyRoot(dataRoot, "codex", legacyRoot),
+      { code: "MIGRATION_TARGET_INVALID" },
+    );
+    assert.equal(fs.existsSync(marker), true);
+    assert.throws(() => readEnvelope(dataRoot, current), { code: "MIGRATION_NOT_COMMITTED" });
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("a completed migration accepts a valid backup-only target before clearing its marker", () => {
+  const temp = temporaryDirectory();
+  try {
+    const legacyRoot = path.join(temp.directory, "legacy");
+    const dataRoot = path.join(temp.directory, "new");
+    const current = binding("codex", "backup-only-committed-target");
+    startSession(legacyRoot, current, "0.1.0", "startup", { now: Date.now() });
+    assert.throws(
+      () =>
+        bootstrapStateRoot({
+          dataRoot,
+          host: "codex",
+          legacyRoots: [legacyRoot],
+          faultInjector(stage) {
+            if (stage === "migration-clear") throw new Error("injected marker interruption");
+          },
+        }),
+      { code: "STATE_ROOT_UNAVAILABLE" },
+    );
+    const target = path.join(dataRoot, "state", "codex", current.sessionKey);
+    const marker = path.join(target, ".migration-pending.json");
+    fs.renameSync(path.join(target, "current.json"), path.join(target, "backup.json"));
+
+    const resumed = migrateLegacyRoot(dataRoot, "codex", legacyRoot);
+
+    assert.equal(resumed.status, "completed");
+    assert.equal(resumed.idempotent, true);
+    assert.equal(fs.existsSync(marker), false);
+    assert.equal(readEnvelope(dataRoot, current).source, "backup");
   } finally {
     temp.cleanup();
   }

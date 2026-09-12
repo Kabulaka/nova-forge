@@ -89,6 +89,8 @@ export NOVA_HOME=/absolute/path/to/nova-state
 
 安装器可执行时会尽力预建状态根；无论安装阶段是否能够写入，首次 Hook `SessionStart` 和 MCP `initialize` 都会再次幂等创建，并通过实际写入、同步、原子替换和删除探针确认可用。旧插件数据只作为当前宿主的迁移来源：有效检查点按 `host → scopeKey` 非破坏复制，旧根不会被删除，rendezvous、锁和能力文件不会迁移。相对 `NOVA_HOME`、不可写目录或迁移冲突会明确失败并提示目标路径，不会改用工作区或 `/tmp`。
 
+动态检查点把一个宿主进程的首个可信 `SessionStart` 作为唯一会话 owner；同一进程若出现第二个会话或第二个 MCP instance，会持久撤销该进程的 Nova MCP 绑定并让后续状态调用失败封闭，普通对话仍可继续。当前宿主没有向 Hook 与 stdio MCP 同时提供会话 nonce，因此同一长生命周期宿主进程内的 Nova 多会话并发不受支持；应为每个需要动态检查点的会话启动独立 Codex/Claude Code 进程。
+
 #### 从旧版兼容链接迁移
 
 旧版通过 `install_global_rules.py` 把全局规则和五个技能链接到用户目录。迁移前先结束相关宿主的当前会话，并逐项确认入口类型和实际目标：
@@ -185,7 +187,7 @@ python codex/scripts/install_global_rules.py
 - 任一目标是普通文件或真实目录时，安装整体失败且不修改其他入口；请先核对其用途，再自行决定是否迁移或合并。
 - 仓库迁移或更换克隆目录后，重新执行同一命令即可刷新全部链接。
 - 工作区目录始终是唯一实体源码，两个宿主的用户目录只保存发现链接。
-- 安装器输出 `STATE:` 表示 `~/.nova`（或绝对 `NOVA_HOME`）已完成真实写验证；输出 `WARN:` 时链接安装仍可完成，首次 Hook/MCP 会重试，重试仍失败则插件按错误中的路径和 `NOVA_HOME` 提示失败封闭。
+- 安装器输出 `STATE:` 表示 `~/.nova`（或绝对 `NOVA_HOME`）已完成真实写验证；输出 `WARN:` 时链接安装仍可完成，首次 Hook/MCP 会重试。重试仍失败时，Hook 会显示诊断并放行普通对话与宿主原生压缩，只有 checkpoint 权威状态保持失败封闭；MCP 状态调用会按错误中的路径和 `NOVA_HOME` 提示明确拒绝。
 
 链接更新后请分别新开 Codex 和 Claude Code 会话，使用户级规则与技能重新加载。
 

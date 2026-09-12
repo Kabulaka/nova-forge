@@ -332,11 +332,79 @@ test("Codex UserPromptSubmit failures report degradation without blocking conver
   }
 });
 
+test("ordinary lifecycle events do not reread static rules or rerun bootstrap", () => {
+  const temp = temporaryDirectory();
+  try {
+    const env = environment(temp.directory);
+    handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+    const detachedPluginEnv = {
+      ...env,
+      NOVA_PLUGIN_ROOT: path.join(temp.directory, "removed-plugin-cache"),
+    };
+    assert.deepEqual(
+      handleHook(input("UserPromptSubmit"), detachedPluginEnv, { now: 2_000 }),
+      {},
+    );
+    const state = getCheckpoint(temp.directory, currentBinding(), { now: 3_000 }).envelope;
+    assert.equal(state.eventWatermark, 1);
+    assert.equal(state.dirty, true);
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("corrupt checkpoint state cannot block Stop or become recovery authority", () => {
   const temp = temporaryDirectory();
   try {
     const env = environment(temp.directory);
-    handleHook(input("SessionStart", { source: "startup" }), env);
+    handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+    handleHook(input("UserPromptSubmit"), env, { now: 2_000 });
+    saveCheckpoint(temp.directory, currentBinding(), "0.1.0", saveInput(1), { now: 3_000 });
+    const currentFile = path.join(
+      temp.directory,
+      "state",
+      "codex",
+      currentBinding().sessionKey,
+      "current.json",
+    );
+    const validCurrent = fs.readFileSync(currentFile, "utf8");
+    fs.writeFileSync(currentFile, "{not-json");
+
+    const stop = handleHook(input("Stop"), env, { now: 4_000 });
+    assert.match(stop.systemMessage, /CHECKPOINT|JSON|parse|corrupt|invalid/i);
+    assert.match(stop.systemMessage, /host operation was allowed to continue/);
+    assert.equal(Object.hasOwn(stop, "decision"), false);
+    assert.equal(Object.hasOwn(stop, "continue"), false);
+    assert.deepEqual(
+      handleHook(input("Stop", { stop_hook_active: true }), env, { now: 4_100 }),
+      {},
+    );
+
+    fs.writeFileSync(currentFile, validCurrent);
+    assert.deepEqual(handleHook(input("Stop"), env, { now: 5_000 }), {});
+    fs.writeFileSync(currentFile, "{not-json");
+    const repeatedCycle = handleHook(input("Stop"), env, { now: 6_000 });
+    assert.match(repeatedCycle.systemMessage, /CHECKPOINT|JSON|parse|corrupt|invalid/i);
+    assert.deepEqual(handleHook(input("Stop"), env, { now: 6_100 }), {});
+
+    const resumed = handleHook(input("SessionStart", { source: "resume" }), env, { now: 7_000 });
+    assert.match(resumed.hookSpecificOutput.additionalContext, /nova-checkpoint-degraded/);
+    assert.doesNotMatch(resumed.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("a clean backup behind a corrupt dirty current is never resumed as authority", () => {
+  const temp = temporaryDirectory();
+  try {
+    const env = environment(temp.directory);
+    handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+    handleHook(input("UserPromptSubmit"), env, { now: 2_000 });
+    const saved = saveInput(1);
+    saved.taskCapsule.objective.value = "STALE_BACKUP_SENTINEL";
+    saveCheckpoint(temp.directory, currentBinding(), "0.1.0", saved, { now: 3_000 });
+    handleHook(input("UserPromptSubmit", { turn_id: "turn-2" }), env, { now: 4_000 });
     const currentFile = path.join(
       temp.directory,
       "state",
@@ -346,14 +414,15 @@ test("corrupt checkpoint state cannot block Stop or become recovery authority", 
     );
     fs.writeFileSync(currentFile, "{not-json");
 
-    const stop = handleHook(input("Stop"), env);
-    assert.match(stop.systemMessage, /CHECKPOINT|JSON|parse|corrupt|invalid/i);
-    assert.match(stop.systemMessage, /host operation was allowed to continue/);
-    assert.equal(Object.hasOwn(stop, "decision"), false);
-    assert.equal(Object.hasOwn(stop, "continue"), false);
-
-    const resumed = handleHook(input("SessionStart", { source: "resume" }), env);
-    assert.match(resumed.hookSpecificOutput.additionalContext, /nova-checkpoint-degraded/);
+    const stop = handleHook(input("Stop", { turn_id: "turn-2" }), env, { now: 5_000 });
+    assert.match(stop.systemMessage, /CHECKPOINT_RECOVERED_FROM_BACKUP/);
+    const resumed = handleHook(
+      input("SessionStart", { source: "resume", turn_id: "turn-3" }),
+      env,
+      { now: 6_000 },
+    );
+    assert.match(resumed.hookSpecificOutput.additionalContext, /recovery-required|degraded/);
+    assert.doesNotMatch(resumed.hookSpecificOutput.additionalContext, /STALE_BACKUP_SENTINEL/);
     assert.doesNotMatch(resumed.hookSpecificOutput.additionalContext, /nova-recovery-capsule/);
   } finally {
     temp.cleanup();

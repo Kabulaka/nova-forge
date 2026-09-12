@@ -14,6 +14,7 @@ import {
 
 const HOSTS = new Set(["codex", "claude-code"]);
 const MIGRATION_VERSION = 1;
+const MIGRATION_PENDING_FILE = ".migration-pending.json";
 
 function syncDirectory(directory) {
   if (process.platform === "win32") return;
@@ -200,7 +201,7 @@ function targetMatches(directory, expected, host, scopeKey, now) {
   return [...expected].every(([name, content]) => serialized.get(name) === content);
 }
 
-function publishScope(dataRoot, host, scopeKey, files, now, faultInjector) {
+function publishScope(dataRoot, host, scopeKey, sourceHash, files, now, faultInjector) {
   const hostRoot = path.join(dataRoot, "state", host);
   const target = path.join(hostRoot, scopeKey);
   const staging = path.join(hostRoot, `.${scopeKey}.migration.${process.pid}.${randomId(8)}`);
@@ -217,6 +218,17 @@ function publishScope(dataRoot, host, scopeKey, files, now, faultInjector) {
         fs.closeSync(descriptor);
       }
     }
+    const marker = path.join(staging, MIGRATION_PENDING_FILE);
+    writePrivateFile(
+      marker,
+      `${stableStringify({ version: MIGRATION_VERSION, host, scopeKey, sourceHash })}\n`,
+    );
+    const markerDescriptor = fs.openSync(marker, "r+");
+    try {
+      fs.fsyncSync(markerDescriptor);
+    } finally {
+      fs.closeSync(markerDescriptor);
+    }
     syncDirectory(staging);
     if (!targetMatches(staging, files, host, scopeKey, now)) {
       throw new NovaError(
@@ -229,6 +241,33 @@ function publishScope(dataRoot, host, scopeKey, files, now, faultInjector) {
     syncDirectory(hostRoot);
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+function clearMigrationMarkers(dataRoot, host, sourceHash, scopes, now, faultInjector) {
+  for (const scopeKey of scopes) {
+    const directory = path.join(dataRoot, "state", host, scopeKey);
+    const marker = path.join(directory, MIGRATION_PENDING_FILE);
+    try {
+      const pending = JSON.parse(fs.readFileSync(marker, "utf8"));
+      if (
+        pending.version !== MIGRATION_VERSION ||
+        pending.host !== host ||
+        pending.scopeKey !== scopeKey ||
+        pending.sourceHash !== sourceHash ||
+        readValidScope(directory, host, scopeKey, now).size === 0
+      ) {
+        throw new NovaError(
+          "MIGRATION_TARGET_INVALID",
+          `completed migration target is incomplete or invalid: ${directory}`,
+        );
+      }
+      faultInjector?.("migration-clear", scopeKey);
+      fs.unlinkSync(marker);
+      syncDirectory(directory);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
   }
 }
 
@@ -278,6 +317,14 @@ export function migrateLegacyRoot(
       if (fs.existsSync(recordFile)) {
         const record = JSON.parse(fs.readFileSync(recordFile, "utf8"));
         verifyMigrationRecord(record, { host, sourceRoot, dataRoot });
+        clearMigrationMarkers(
+          dataRoot,
+          host,
+          sourceHash,
+          record.scopes,
+          now,
+          faultInjector,
+        );
         return { status: "completed", scopes: record.scopes, idempotent: true };
       }
 
@@ -303,7 +350,15 @@ export function migrateLegacyRoot(
 
       for (const candidate of candidates) {
         if (!fs.existsSync(candidate.target)) {
-          publishScope(dataRoot, host, candidate.scopeKey, candidate.files, now, faultInjector);
+          publishScope(
+            dataRoot,
+            host,
+            candidate.scopeKey,
+            sourceHash,
+            candidate.files,
+            now,
+            faultInjector,
+          );
         }
       }
       const scopes = candidates.map((value) => value.scopeKey).sort();
@@ -319,6 +374,7 @@ export function migrateLegacyRoot(
         },
         faultInjector,
       );
+      clearMigrationMarkers(dataRoot, host, sourceHash, scopes, now, faultInjector);
       return { status: "completed", scopes, idempotent: false };
     },
     {

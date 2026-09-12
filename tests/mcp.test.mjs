@@ -34,13 +34,13 @@ test("MCP tools expose no host or session selector and use the bound scope", () 
     const binding = { host: "codex", sessionKey, cwdHash: cwdKey(pluginRoot) };
     startSession(temp.directory, binding, "0.1.0", "startup", { now });
     markEvent(temp.directory, binding, "0.1.0", "prompt:1", { now: now + 1 });
-    claimSession(temp.directory, { host: "codex", cwd: pluginRoot, sessionKey, now: now + 2 });
     const runtime = new McpRuntime({
       dataRoot: temp.directory,
       pluginRoot,
       host: "codex",
       cwd: pluginRoot,
     });
+    claimSession(temp.directory, { host: "codex", cwd: pluginRoot, sessionKey, now: now + 2 });
     const tools = runtime.listTools();
     const schemaText = JSON.stringify(tools);
     assert.doesNotMatch(schemaText, /sessionId|session_id|"host"/);
@@ -50,6 +50,16 @@ test("MCP tools expose no host or session selector and use the bound scope", () 
     const current = runtime.callTool("nova_checkpoint_get", {});
     assert.equal(current.authorityGeneration, 1);
     assert.equal(current.taskCapsule.stageProjection.inheritedContracts[0].value, "Same-session only");
+    const revoked = claimSession(temp.directory, {
+      host: "codex",
+      cwd: `${pluginRoot}-other-session`,
+      sessionKey: scopeKey("codex", "second-session"),
+      now: now + 3,
+    });
+    assert.equal(revoked.status, "revoked");
+    assert.throws(() => runtime.callTool("nova_checkpoint_get", {}), {
+      code: "BINDING_REVOKED",
+    });
   } finally {
     temp.cleanup();
   }
@@ -66,6 +76,41 @@ test("unbound MCP instance fails closed", () => {
     });
     assert.throws(() => runtime.callTool("nova_checkpoint_get", {}), {
       code: "BINDING_UNAVAILABLE",
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("the first MCP tool call rejects a binding from a changed host process generation", () => {
+  const temp = temporaryDirectory();
+  try {
+    const now = Date.now();
+    const sessionKey = scopeKey("codex", "stale-first-call");
+    const hostPid = process.pid;
+    const staleIdentity = "stale-host-process-generation";
+    const binding = { host: "codex", sessionKey, cwdHash: cwdKey(pluginRoot) };
+    startSession(temp.directory, binding, "0.1.0", "startup", { now });
+    const runtime = new McpRuntime({
+      dataRoot: temp.directory,
+      pluginRoot,
+      host: "codex",
+      cwd: pluginRoot,
+      hostPid,
+      hostIdentity: staleIdentity,
+    });
+    claimSession(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      sessionKey,
+      hostPid,
+      hostIdentity: staleIdentity,
+      now: now + 1,
+    });
+
+    assert.equal(runtime.binding, null);
+    assert.throws(() => runtime.callTool("nova_checkpoint_get", {}), {
+      code: "BINDING_REVOKED",
     });
   } finally {
     temp.cleanup();

@@ -22,6 +22,8 @@ import {
 } from "./util.mjs";
 
 const UNCOVERED_STOP_NOTICE_FILE = ".uncovered-stop-notice.json";
+const MIGRATION_PENDING_FILE = ".migration-pending.json";
+const STOP_NOTICE_FILE = ".stop-notice.json";
 
 function stateDirectory(dataRoot, binding) {
   return path.join(dataRoot, "state", binding.host, binding.sessionKey);
@@ -99,6 +101,12 @@ function readCandidate(file, binding, now) {
 
 export function readEnvelope(dataRoot, binding, { now = Date.now(), allowMissing = false } = {}) {
   const directory = stateDirectory(dataRoot, binding);
+  if (fs.existsSync(path.join(directory, MIGRATION_PENDING_FILE))) {
+    throw new NovaError(
+      "MIGRATION_NOT_COMMITTED",
+      "checkpoint scope belongs to an incomplete legacy migration",
+    );
+  }
   const currentFile = path.join(directory, "current.json");
   const backupFile = path.join(directory, "backup.json");
   if (fs.existsSync(currentFile)) {
@@ -403,6 +411,7 @@ export function cleanupExpiredScopes(
     for (const scopeEntry of fs.readdirSync(hostRoot, { withFileTypes: true })) {
       if (!scopeEntry.isDirectory()) continue;
       const directory = path.join(hostRoot, scopeEntry.name);
+      if (fs.existsSync(path.join(directory, MIGRATION_PENDING_FILE))) continue;
       const snapshot = cleanupSnapshot(directory);
       if (!snapshot) continue;
       const { binding } = snapshot;
@@ -431,6 +440,7 @@ export function cleanupExpiredScopes(
     let didRemove = false;
     try {
       withScopeLock(dataRoot, candidate.snapshot.binding, () => {
+        if (fs.existsSync(path.join(candidate.directory, MIGRATION_PENDING_FILE))) return;
         const current = cleanupSnapshot(candidate.directory, candidate.snapshot.binding);
         if (
           !sameCleanupSnapshot(candidate.snapshot, current) ||
@@ -721,6 +731,42 @@ export function claimUncoveredStopNotice(dataRoot, binding, envelope, now = Date
   });
 }
 
+export function claimStopDiagnostic(dataRoot, binding, error, now = Date.now()) {
+  return withScopeLock(dataRoot, binding, () => {
+    const directory = stateDirectory(dataRoot, binding);
+    const noticeFile = path.join(directory, STOP_NOTICE_FILE);
+    const fingerprint = sha256(
+      stableStringify({
+        code: typeof error?.code === "string" ? error.code : "INTERNAL_ERROR",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    try {
+      const existing = JSON.parse(fs.readFileSync(noticeFile, "utf8"));
+      if (existing.fingerprint === fingerprint) return false;
+    } catch {
+      // Diagnostics are best effort and never affect checkpoint authority.
+    }
+    const temporary = path.join(directory, `.stop-notice-${randomId(8)}.tmp`);
+    writePrivateFile(temporary, `${stableStringify({ fingerprint, reportedAt: utcIso(now) })}\n`);
+    try {
+      if (process.platform === "win32") tryRemove(noticeFile);
+      fs.renameSync(temporary, noticeFile);
+    } finally {
+      tryRemove(temporary);
+    }
+    return true;
+  });
+}
+
+export function clearStopDiagnostics(dataRoot, binding) {
+  return withScopeLock(dataRoot, binding, () => {
+    const directory = stateDirectory(dataRoot, binding);
+    tryRemove(path.join(directory, STOP_NOTICE_FILE));
+    tryRemove(path.join(directory, UNCOVERED_STOP_NOTICE_FILE));
+  });
+}
+
 function isCoveredAuthority(envelope) {
   return (
     envelope.taskCapsule !== null &&
@@ -756,12 +802,19 @@ export function mutateEnvelope(
   binding,
   pluginVersion,
   mutator,
-  { now = Date.now(), create = true, limits } = {},
+  { now = Date.now(), create = true, limits, allowBackupMutation = false } = {},
 ) {
   return withScopeLock(dataRoot, binding, () => {
     const loaded = readEnvelope(dataRoot, binding, { now, allowMissing: create });
+    if (loaded?.source === "backup" && loaded.currentValid === false && !allowBackupMutation) {
+      throw new NovaError(
+        "CHECKPOINT_RECOVERED_FROM_BACKUP",
+        "current checkpoint is invalid; backup is preserved but is not current authority",
+      );
+    }
     const before = loaded?.envelope ?? initialEnvelope(binding, pluginVersion, now);
     const draft = canonicalClone(before);
+    if (loaded?.source === "backup" && loaded.currentValid === false) draft.dirty = true;
     const result = mutator(draft, before);
     const envelope = writeEnvelope(dataRoot, binding, draft, {
       rotateCurrentToBackup:
@@ -776,9 +829,16 @@ export function mutateEnvelope(
 export function resetEnvelope(dataRoot, binding, pluginVersion, now = Date.now()) {
   return withScopeLock(dataRoot, binding, () => {
     const directory = stateDirectory(dataRoot, binding);
+    if (fs.existsSync(path.join(directory, MIGRATION_PENDING_FILE))) {
+      throw new NovaError(
+        "MIGRATION_NOT_COMMITTED",
+        "cannot reset a checkpoint scope while its legacy migration is incomplete",
+      );
+    }
     tryRemove(path.join(directory, "current.json"));
     tryRemove(path.join(directory, "backup.json"));
     tryRemove(path.join(directory, UNCOVERED_STOP_NOTICE_FILE));
+    tryRemove(path.join(directory, STOP_NOTICE_FILE));
     const envelope = writeEnvelope(dataRoot, binding, initialEnvelope(binding, pluginVersion, now), {
       rotateCurrentToBackup: false,
       now,

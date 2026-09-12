@@ -17,7 +17,11 @@ import {
   recordResumeInjection,
   startSession,
 } from "../core/state-machine.mjs";
-import { claimUncoveredStopNotice } from "../core/storage.mjs";
+import {
+  claimStopDiagnostic,
+  claimUncoveredStopNotice,
+  clearStopDiagnostics,
+} from "../core/storage.mjs";
 import {
   NovaError,
   cwdKey,
@@ -149,19 +153,23 @@ function isOwnCheckpointTool(host, toolName) {
 export function handleHook(input, environment = process.env, options = {}) {
   const event = input?.hook_event_name;
   let rules;
+  let dataRoot;
+  let binding;
+  let now;
   try {
     if (input === null || typeof input !== "object" || Array.isArray(input)) {
       throw new NovaError("INVALID_HOOK_INPUT", "hook input must be a JSON object");
     }
     const host = detectHost(environment);
-    const pluginRoot = resolvePluginRoot(environment);
-    const pluginVersion = readPluginVersion(pluginRoot);
-    rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
-    const { dataRoot, legacyRoots } = resolvePluginPaths(environment, host);
-    bootstrapStateRoot({ environment, host, dataRoot, legacyRoots, now: options.now ?? Date.now() });
-    const binding = trustedBinding(host, input);
-    const now = options.now ?? Date.now();
+    binding = trustedBinding(host, input);
+    now = options.now ?? Date.now();
+    dataRoot = resolveNovaHome(environment);
     if (event === "SessionStart") {
+      const pluginRoot = resolvePluginRoot(environment);
+      const pluginVersion = readPluginVersion(pluginRoot);
+      rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
+      const { legacyRoots } = resolvePluginPaths(environment, host);
+      bootstrapStateRoot({ environment, host, dataRoot, legacyRoots, now });
       const source = input.source;
       if (!["startup", "resume", "clear", "compact"].includes(source)) {
         throw new NovaError("UNSUPPORTED_SESSION_SOURCE", `unsupported SessionStart source ${source}`);
@@ -199,7 +207,7 @@ export function handleHook(input, environment = process.env, options = {}) {
       }
       const warning = [
         recoveryWarning,
-        rendezvous.status === "ambiguous"
+        ["ambiguous", "revoked"].includes(rendezvous.status)
           ? "Nova checkpoint MCP binding is ambiguous and remains disabled for this session."
           : undefined,
       ]
@@ -209,17 +217,24 @@ export function handleHook(input, environment = process.env, options = {}) {
     }
 
     if (event === "UserPromptSubmit") {
-      markEvent(dataRoot, binding, pluginVersion, eventId(host, input), { now });
+      markEvent(dataRoot, binding, undefined, eventId(host, input), { now });
       return {};
     }
     if (event === "PostToolUse") {
       if (!isOwnCheckpointTool(host, input.tool_name)) {
-        markEvent(dataRoot, binding, pluginVersion, eventId(host, input), { now });
+        markEvent(dataRoot, binding, undefined, eventId(host, input), { now });
       }
       return {};
     }
     if (event === "Stop") {
-      const { envelope } = getCheckpoint(dataRoot, binding, { now });
+      const loaded = getCheckpoint(dataRoot, binding, { now });
+      if (loaded.source === "backup" && loaded.currentValid === false) {
+        throw new NovaError(
+          "CHECKPOINT_RECOVERED_FROM_BACKUP",
+          "current checkpoint is invalid; backup is preserved but is not current authority",
+        );
+      }
+      const { envelope } = loaded;
       try {
         assertCovered(envelope);
       } catch (error) {
@@ -227,18 +242,26 @@ export function handleHook(input, environment = process.env, options = {}) {
         if (!claimUncoveredStopNotice(dataRoot, binding, envelope, now)) return {};
         throw error;
       }
+      clearStopDiagnostics(dataRoot, binding);
       return {};
     }
     if (event === "PreCompact") {
-      freezeCompaction(dataRoot, binding, pluginVersion, input.trigger, { now });
+      freezeCompaction(dataRoot, binding, undefined, input.trigger, { now });
       return {};
     }
     if (event === "PostCompact") {
-      completeCompaction(dataRoot, binding, pluginVersion, input.trigger, { now });
+      completeCompaction(dataRoot, binding, undefined, input.trigger, { now });
       return {};
     }
     throw new NovaError("UNSUPPORTED_HOOK_EVENT", `unsupported hook event ${event}`);
   } catch (error) {
+    if (event === "Stop" && dataRoot && binding) {
+      try {
+        if (!claimStopDiagnostic(dataRoot, binding, error, now ?? Date.now())) return {};
+      } catch {
+        // A diagnostic write failure must not block the host or hide the original warning.
+      }
+    }
     const reason = `Nova checkpoint safety gate: ${redactError(error)}`;
     return degradedOutput(event, reason, rules);
   }

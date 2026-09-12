@@ -7,9 +7,12 @@ import {
   consumeBinding,
   registerMcpInstance,
   selectHostProcessId,
+  validateActiveBinding,
 } from "../runtime/core/rendezvous.mjs";
 import { scopeKey } from "../runtime/core/util.mjs";
 import { pluginRoot, temporaryDirectory } from "./helpers.mjs";
+
+const testHostIdentity = (hostPid) => `test-host-${hostPid}`;
 
 test("host process selection skips hook shells and finds the owning host", () => {
   const hookAncestry = [
@@ -38,16 +41,16 @@ test("one hook claim binds exactly one MCP instance without exposing session id"
   const temp = temporaryDirectory();
   try {
     const sessionKey = scopeKey("codex", "raw-session-id");
-    assert.equal(
-      claimSession(temp.directory, { host: "codex", cwd: pluginRoot, sessionKey, now: 1_000 }).status,
-      "pending",
-    );
     const registration = registerMcpInstance(temp.directory, {
       host: "codex",
       cwd: pluginRoot,
-      now: 1_001,
+      now: 1_000,
     });
     assert.equal(registration.outcome.status, "pending");
+    assert.equal(
+      claimSession(temp.directory, { host: "codex", cwd: pluginRoot, sessionKey, now: 1_001 }).status,
+      "pending",
+    );
     assert.throws(
       () =>
         consumeBinding(
@@ -117,8 +120,63 @@ test("Codex cwd-agnostic rendezvous fails closed with multiple project claims", 
       sessionKey: scopeKey("codex", "portable-b"),
       now: 1_020,
     });
-    assert.equal(second.status, "ambiguous");
+    assert.equal(second.status, "revoked");
     assert.equal(consumeBinding(temp.directory, registration, { now: 1_200 }), null);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("a second session revokes an MCP instance that arrived before the first claim", () => {
+  const temp = temporaryDirectory();
+  try {
+    const registration = registerMcpInstance(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      hostPid: 44_001,
+      hostIdentity: testHostIdentity(44_001),
+      allowCwdMismatch: true,
+      pid: process.pid,
+      now: 1_000,
+    });
+    assert.equal(registration.outcome.status, "pending");
+    const sessionA = scopeKey("codex", "session-a");
+    claimSession(temp.directory, {
+      host: "codex",
+      cwd: path.join(temp.directory, "project-a"),
+      sessionKey: sessionA,
+      hostPid: 44_001,
+      hostIdentity: testHostIdentity(44_001),
+      now: 1_010,
+    });
+    const binding = consumeBinding(temp.directory, registration, { now: 1_200 });
+    assert.equal(binding.sessionKey, sessionA);
+    const second = claimSession(temp.directory, {
+      host: "codex",
+      cwd: path.join(temp.directory, "project-b"),
+      sessionKey: scopeKey("codex", "session-b"),
+      hostPid: 44_001,
+      hostIdentity: testHostIdentity(44_001),
+      now: 1_300,
+    });
+    assert.equal(second.status, "revoked");
+    assert.throws(
+      () =>
+        validateActiveBinding(temp.directory, registration, binding, {
+          hostIdentity: testHostIdentity(44_001),
+        }),
+      { code: "BINDING_REVOKED" },
+    );
+    fs.unlinkSync(path.join(temp.directory, "rendezvous", "codex", "owners", "44001.json"));
+    const stillRevoked = claimSession(temp.directory, {
+      host: "codex",
+      cwd: path.join(temp.directory, "project-a"),
+      sessionKey: sessionA,
+      hostPid: 44_001,
+      hostIdentity: testHostIdentity(44_001),
+      now: 1_400,
+    });
+    assert.equal(stillRevoked.status, "revoked");
   } finally {
     temp.cleanup();
   }
@@ -131,6 +189,7 @@ test("an unclaimed MCP instance from another live host process does not block Co
       host: "codex",
       cwd: pluginRoot,
       hostPid: 10_001,
+      hostIdentity: testHostIdentity(10_001),
       allowCwdMismatch: true,
       pid: process.pid,
       now: 1_000,
@@ -139,6 +198,7 @@ test("an unclaimed MCP instance from another live host process does not block Co
       host: "codex",
       cwd: pluginRoot,
       hostPid: 10_002,
+      hostIdentity: testHostIdentity(10_002),
       allowCwdMismatch: true,
       pid: process.pid,
       now: 1_010,
@@ -148,6 +208,7 @@ test("an unclaimed MCP instance from another live host process does not block Co
       cwd: path.join(temp.directory, "project"),
       sessionKey: scopeKey("codex", "new-session"),
       hostPid: 10_002,
+      hostIdentity: testHostIdentity(10_002),
       now: 1_020,
     });
 
@@ -167,6 +228,7 @@ test("concurrent Codex host processes bind only their own claim and MCP instance
         host: "codex",
         cwd: pluginRoot,
         hostPid,
+        hostIdentity: testHostIdentity(hostPid),
         allowCwdMismatch: true,
         pid: process.pid,
         now: 1_000 + index,
@@ -176,6 +238,7 @@ test("concurrent Codex host processes bind only their own claim and MCP instance
         cwd: path.join(temp.directory, `project-${index}`),
         sessionKey: scopeKey("codex", `session-${index}`),
         hostPid,
+        hostIdentity: testHostIdentity(hostPid),
         now: 1_010 + index,
       });
       return registration;
@@ -261,6 +324,65 @@ test("a dead MCP instance is still pruned immediately", () => {
   }
 });
 
+test("a reused host pid with a different process identity cannot inherit the old owner", () => {
+  const temp = temporaryDirectory();
+  try {
+    const hostPid = 55_001;
+    const first = registerMcpInstance(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      hostPid,
+      hostIdentity: "process-generation-a",
+      pid: process.pid,
+      now: 1_000,
+    });
+    claimSession(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      sessionKey: scopeKey("codex", "generation-a"),
+      hostPid,
+      hostIdentity: "process-generation-a",
+      now: 1_010,
+    });
+    const firstBinding = consumeBinding(temp.directory, first, { now: 1_200 });
+    assert.throws(
+      () =>
+        validateActiveBinding(temp.directory, first, firstBinding, {
+          hostIdentity: "process-generation-b",
+        }),
+      { code: "BINDING_REVOKED" },
+    );
+
+    const second = registerMcpInstance(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      hostPid,
+      hostIdentity: "process-generation-b",
+      pid: process.pid,
+      now: 2_000,
+    });
+    claimSession(temp.directory, {
+      host: "codex",
+      cwd: pluginRoot,
+      sessionKey: scopeKey("codex", "generation-b"),
+      hostPid,
+      hostIdentity: "process-generation-b",
+      now: 2_010,
+    });
+    const secondBinding = consumeBinding(temp.directory, second, { now: 2_200 });
+    assert.notEqual(secondBinding.sessionKey, firstBinding.sessionKey);
+    assert.throws(
+      () =>
+        validateActiveBinding(temp.directory, first, firstBinding, {
+          hostIdentity: "process-generation-b",
+        }),
+      { code: "BINDING_REVOKED" },
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("rendezvous rejects a second instance that arrives inside the settle window", () => {
   const temp = temporaryDirectory();
   try {
@@ -277,7 +399,7 @@ test("rendezvous rejects a second instance that arrives inside the settle window
       now: 1_050,
     });
     assert.equal(first.outcome.status, "pending");
-    assert.equal(second.outcome.status, "ambiguous");
+    assert.equal(second.outcome.status, "revoked");
     assert.equal(consumeBinding(temp.directory, first, { now: 1_200 }), null);
     assert.equal(consumeBinding(temp.directory, second, { now: 1_200 }), null);
   } finally {
@@ -306,7 +428,7 @@ test("rendezvous rejects a second claim that arrives inside the settle window", 
       now: 1_050,
     });
     assert.equal(first.status, "pending");
-    assert.equal(second.status, "ambiguous");
+    assert.equal(second.status, "revoked");
     assert.equal(consumeBinding(temp.directory, registration, { now: 1_200 }), null);
   } finally {
     temp.cleanup();
@@ -316,22 +438,25 @@ test("rendezvous rejects a second claim that arrives inside the settle window", 
 test("concurrent same-directory claims fail closed as ambiguous", () => {
   const temp = temporaryDirectory();
   try {
+    const registration = registerMcpInstance(temp.directory, {
+      host: "claude-code",
+      cwd: pluginRoot,
+      now: 1_000,
+    });
     claimSession(temp.directory, {
       host: "claude-code",
       cwd: pluginRoot,
       sessionKey: scopeKey("claude-code", "session-a"),
+      now: 1_010,
     });
     const second = claimSession(temp.directory, {
       host: "claude-code",
       cwd: pluginRoot,
       sessionKey: scopeKey("claude-code", "session-b"),
+      now: 1_020,
     });
-    assert.equal(second.status, "ambiguous");
-    const registration = registerMcpInstance(temp.directory, {
-      host: "claude-code",
-      cwd: pluginRoot,
-    });
-    assert.equal(registration.outcome.status, "ambiguous");
+    assert.equal(second.status, "revoked");
+    assert.equal(registration.outcome.status, "pending");
     assert.equal(consumeBinding(temp.directory, registration), null);
   } finally {
     temp.cleanup();

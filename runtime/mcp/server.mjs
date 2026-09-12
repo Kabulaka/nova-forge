@@ -4,6 +4,7 @@ import { JSON_RPC_FRAME_LIMIT, MCP_PROTOCOL_VERSION } from "../core/constants.mj
 import {
   registerMcpInstance,
   resolveHostProcessId,
+  validateActiveBinding,
   waitForBinding,
 } from "../core/rendezvous.mjs";
 import {
@@ -167,6 +168,7 @@ export class McpRuntime {
     cwd = process.cwd(),
     pid = process.pid,
     hostPid = process.ppid,
+    hostIdentity,
     environment = process.env,
     legacyRoots = [],
   }) {
@@ -181,13 +183,17 @@ export class McpRuntime {
       cwd,
       pid,
       hostPid,
+      hostIdentity,
       allowCwdMismatch: host === "codex",
     });
     this.binding = null;
   }
 
   currentBinding() {
-    if (this.binding) return this.binding;
+    if (this.binding) {
+      validateActiveBinding(this.dataRoot, this.registration, this.binding);
+      return this.binding;
+    }
     this.binding = waitForBinding(this.dataRoot, this.registration);
     if (!this.binding) {
       throw new NovaError(
@@ -195,6 +201,7 @@ export class McpRuntime {
         "MCP instance is not uniquely bound to a trusted host session",
       );
     }
+    validateActiveBinding(this.dataRoot, this.registration, this.binding);
     return this.binding;
   }
 

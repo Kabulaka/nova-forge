@@ -39,7 +39,7 @@ export function startSession(
       if (before.leaseVersion > 0) refreshLease(draft, now);
       draft.pluginVersion = pluginVersion;
     },
-    { now, create: true },
+    { now, create: true, allowBackupMutation: true },
   );
   return { ...result, reset: false };
 }
@@ -65,7 +65,7 @@ export function markEvent(
       draft.recentEventIds = remember(draft.recentEventIds, eventId);
       return { duplicate: false, eventWatermark: draft.eventWatermark };
     },
-    { now, create: true },
+    { now, create: true, allowBackupMutation: true },
   );
 }
 

@@ -15,9 +15,17 @@
       "work_items": [
         "FEAT-01a08f23-5743-7912-953f-a1371d11807d"
       ]
+    },
+    {
+      "kind": "completed",
+      "plan_version": 3,
+      "reason": "trusted Review PASS",
+      "review_batch": "NR-20260912-plugin-mainline",
+      "reviewed_at": "2026-09-12T15:15:04+08:00",
+      "work_item": "FEAT-01a08f23-5743-7912-953f-a1371d11807d"
     }
   ],
-  "plan_version": 2,
+  "plan_version": 3,
   "requirement_checkpoint": {
     "commit": "f136c9b1ef6d792da497a10b79f9e60aca632b06",
     "path": ".nova/requirements/REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff_Codex与Claude_Code插件分发及同会话压缩续接.md",
@@ -25,7 +33,7 @@
   },
   "requirement_ref": "REQ-01a06524-60ee-7d61-a9f1-c588cd2bfdff@v2",
   "schema": 2,
-  "status": "development",
+  "status": "implemented",
   "work_items": [
     {
       "blocked_reason": null,
@@ -45,7 +53,7 @@
           "title": "插件状态自动初始化与迁移"
         }
       ],
-      "state": "review_pending",
+      "state": "completed",
       "supersedes": [],
       "title": "Nova 插件状态自动初始化与迁移",
       "work_item": "FEAT-01a08f23-5743-7912-953f-a1371d11807d"
