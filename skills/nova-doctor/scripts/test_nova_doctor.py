@@ -16,6 +16,7 @@ from unittest import mock
 
 TOOL = Path(__file__).with_name("nova_doctor.py")
 WORKSPACE = Path(__file__).resolve().parents[3]
+SUITE_ROOT = WORKSPACE / "skills"
 SPEC = importlib.util.spec_from_file_location("nova_doctor_under_test", TOOL)
 assert SPEC is not None and SPEC.loader is not None
 DOCTOR = importlib.util.module_from_spec(SPEC)
@@ -225,7 +226,7 @@ class NovaDoctorTests(unittest.TestCase):
             subprocess.run(["git", "init", "-q", str(root)], check=True)
             (root / ".nova").mkdir()
             (root / ".git/nova-review-transaction").mkdir()
-            result = DOCTOR.check_audit(root, WORKSPACE)
+            result = DOCTOR.check_audit(root, SUITE_ROOT)
             self.assertEqual(result.status, "FAIL")
             self.assertIn("requires recovery", " ".join((result.message, *result.details)))
 
@@ -235,7 +236,7 @@ class NovaDoctorTests(unittest.TestCase):
             features = root / ".nova" / "audit" / "features"
             features.mkdir(parents=True)
             (features / "2026.jsonl").write_text("{broken json\n", encoding="utf-8")
-            result = DOCTOR.check_audit(root, WORKSPACE)
+            result = DOCTOR.check_audit(root, SUITE_ROOT)
         self.assertEqual(result.status, "FAIL")
         self.assertEqual(result.message, "audit records are inconsistent")
         self.assertTrue(result.details)
@@ -251,7 +252,7 @@ class NovaDoctorTests(unittest.TestCase):
                 json.dumps({"requirement_ref": f"{requirement}@v1"}),
                 encoding="utf-8",
             )
-            result = DOCTOR.check_delivery_ledgers(root, WORKSPACE)
+            result = DOCTOR.check_delivery_ledgers(root, SUITE_ROOT)
         self.assertEqual(result.status, "FAIL")
         self.assertIn("non-canonical delivery ledger path", result.details[0])
 
@@ -318,7 +319,7 @@ class NovaDoctorTests(unittest.TestCase):
             with mock.patch.object(
                 DOCTOR, "load_review_module", return_value=FakeReviewModule
             ):
-                result = DOCTOR.check_audit(root, WORKSPACE)
+                result = DOCTOR.check_audit(root, SUITE_ROOT)
         self.assertEqual(result.status, "PASS", result.details)
         self.assertEqual(len(seen_caches), 2)
         self.assertIs(seen_caches[0], seen_caches[1])
@@ -338,7 +339,7 @@ class NovaDoctorTests(unittest.TestCase):
                     "feat(delivery): 错误创建旧任务编号",
                 ),
             )
-            result = DOCTOR.check_governance_history(root, WORKSPACE)
+            result = DOCTOR.check_governance_history(root, SUITE_ROOT)
         self.assertEqual(result.status, "FAIL")
         self.assertIn("commit governance violations", result.message)
         self.assertIn("Work-Item does not match", result.details[0])
@@ -356,7 +357,7 @@ class NovaDoctorTests(unittest.TestCase):
             )
             self.commit_file(root, "value.txt", "one\n", commit_message)
             self.commit_file(root, "value.txt", "two\n", commit_message)
-            result = DOCTOR.check_governance_history(root, WORKSPACE)
+            result = DOCTOR.check_governance_history(root, SUITE_ROOT)
         self.assertEqual(result.status, "FAIL")
         self.assertIn("allow one implementation result commit", result.details[0])
 
@@ -386,7 +387,7 @@ class NovaDoctorTests(unittest.TestCase):
                     "legacy maintenance",
                 ),
             )
-            result = DOCTOR.check_governance_history(root, WORKSPACE)
+            result = DOCTOR.check_governance_history(root, SUITE_ROOT)
         self.assertEqual(result.status, "FAIL")
         self.assertIn("after schema 2 activation", result.details[0])
 
@@ -447,7 +448,7 @@ class NovaDoctorTests(unittest.TestCase):
                 check=True,
                 env=merge_environment,
             )
-            result = DOCTOR.check_governance_history(root, WORKSPACE)
+            result = DOCTOR.check_governance_history(root, SUITE_ROOT)
         self.assertEqual(result.status, "PASS", result.details)
         self.assertIn("schema 2 active", result.message)
 
@@ -478,7 +479,7 @@ class NovaDoctorTests(unittest.TestCase):
                     "fix(delivery): 恢复既有交付行为",
                 ),
             )
-            result = DOCTOR.check_governance_history(root, WORKSPACE)
+            result = DOCTOR.check_governance_history(root, SUITE_ROOT)
         self.assertEqual(result.status, "FAIL")
         self.assertIn("must not reuse a schema 1 work-item identity", result.details[0])
 
