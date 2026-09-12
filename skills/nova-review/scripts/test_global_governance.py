@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -135,17 +137,9 @@ class GlobalGovernanceTests(unittest.TestCase):
 
     def test_runtime_probe_requires_new_patch_uuid7_and_reuses_it_for_review(self) -> None:
         work_item = "PATCH-018f22e2-79b0-7abc-8123-456789abcdef"
-        transcript = json.dumps(
-            {
-                "type": "item.completed",
-                "item": {
-                    "type": "command_execution",
-                    "command": (
-                        "python3 nova-review/scripts/nova_review.py "
-                        "new-id --class patch"
-                    ),
-                },
-            }
+        transcript = self.command_event(
+            "python3 nova-review/scripts/nova_review.py new-id --class patch",
+            output=f"{work_item}\n",
         )
         metadata = {"Work-Item": work_item}
         self.assertEqual(PROBE.generated_patch_work_item(metadata, transcript), work_item)
@@ -153,8 +147,219 @@ class GlobalGovernanceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(PROBE.ProbeError, "PATCH UUIDv7"):
             PROBE.generated_patch_work_item({"Work-Item": "PATCH-001"}, transcript)
-        with self.assertRaisesRegex(PROBE.ProbeError, "new-id --class patch"):
+        with self.assertRaisesRegex(PROBE.ProbeError, "successfully generate"):
             PROBE.generated_patch_work_item(metadata, "")
+
+        failed = self.command_event(
+            "python3 nova-review/scripts/nova_review.py new-id --class patch",
+            output=f"{work_item}\n",
+            exit_code=1,
+        )
+        mentioned = self.command_event(
+            f"printf '{work_item} nova_review.py new-id --class patch'",
+            output=f"{work_item}\n",
+        )
+        different = self.command_event(
+            "python3 nova-review/scripts/nova_review.py new-id --class patch",
+            output="PATCH-018f22e2-79b0-7abc-8def-0123456789ab\n",
+        )
+        powershell_mentioned = self.command_event(
+            'powershell.exe -NoProfile -Command "Write-Output '
+            f"'python nova_review.py new-id --class patch {work_item}'\"",
+            output=f"{work_item}\n",
+        )
+        cmd_mentioned = self.command_event(
+            'cmd.exe /d /s /c "echo python nova_review.py new-id --class patch"',
+            output=f"{work_item}\n",
+        )
+        pwsh_mentioned = self.command_event(
+            'pwsh -NoProfile -Command "Write-Output '
+            f"'python nova_review.py new-id --class patch {work_item}'\"",
+            output=f"{work_item}\n",
+        )
+        windows_mentioned = self.command_event(
+            r'C:\tools\printf.exe "python nova_review.py new-id --class patch"',
+            output=f"{work_item}\n",
+        )
+        direct_controls = (
+            "python nova_review.py new-id --class patch;true",
+            "python nova_review.py new-id --class patch&&true",
+            "python nova_review.py new-id --class patch`true`",
+            "python nova_review.py new-id --class patch$(true)",
+            "python nova_review.py new-id --class patch\ntrue",
+            "python nova_review.py new-id --class patch\r\ntrue",
+        )
+        for invalid in (
+            failed,
+            mentioned,
+            different,
+            powershell_mentioned,
+            pwsh_mentioned,
+            cmd_mentioned,
+            windows_mentioned,
+            *(
+                self.command_event(command, output=f"{work_item}\n")
+                for command in direct_controls
+            ),
+        ):
+            with self.assertRaisesRegex(PROBE.ProbeError, "successfully generate"):
+                PROBE.generated_patch_work_item(metadata, invalid)
+
+        windows_commands = (
+            r"C:\Python311\python.exe C:\repo\nova_review.py new-id --class patch",
+            'powershell.exe -NoProfile -Command "python '
+            r'C:\repo\nova_review.py new-id --class patch"',
+            'pwsh -NoProfile -Command "python '
+            r'C:\repo\nova_review.py new-id --class patch"',
+            'cmd.exe /d /s /c "python '
+            r'C:\repo\nova_review.py new-id --class patch"',
+        )
+        for command in windows_commands:
+            self.assertEqual(
+                PROBE.generated_patch_work_item(
+                    metadata,
+                    self.command_event(command, output=f"{work_item}\n"),
+                ),
+                work_item,
+            )
+
+    @staticmethod
+    def command_event(command: str, *, output: str = "", exit_code: int = 0) -> str:
+        return json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "command": command,
+                    "aggregated_output": output,
+                    "exit_code": exit_code,
+                    "status": "completed",
+                },
+            }
+        )
+
+    def test_runtime_probe_requires_successful_exact_explicit_selection(self) -> None:
+        work_item = "PATCH-018f22e2-79b0-7abc-8123-456789abcdef"
+        selected = json.dumps([{"work_item": work_item}])
+        valid = self.command_event(
+            "python3 nova_review.py select --repo . --mode explicit "
+            f"--work-item {work_item}",
+            output=selected,
+        )
+        wrong_mode = self.command_event(
+            "python3 nova_review.py select --repo . --mode all",
+            output=selected,
+        )
+        wrong_item = self.command_event(
+            "python3 nova_review.py select --repo . --mode explicit "
+            "--work-item PATCH-018f22e2-79b0-7abc-8def-0123456789ab",
+            output=selected,
+        )
+        failed = self.command_event(
+            "python3 nova_review.py select --repo . --mode explicit "
+            f"--work-item {work_item}",
+            output=selected,
+            exit_code=1,
+        )
+        wrong_output = self.command_event(
+            "python3 nova_review.py select --repo . --mode explicit "
+            f"--work-item {work_item}",
+            output="[]",
+        )
+        extra_option = self.command_event(
+            "python3 nova_review.py select --repo . --mode explicit "
+            f"--work-item {work_item} --verbose true",
+            output=selected,
+        )
+        command_substitution = self.command_event(
+            "python3 nova_review.py select --repo=$(touch /tmp/probe-side-effect) "
+            f"--mode explicit --work-item {work_item}",
+            output=selected,
+        )
+        backtick_substitution = self.command_event(
+            "python3 nova_review.py select --repo=`pwd` "
+            f"--mode explicit --work-item {work_item}",
+            output=selected,
+        )
+        attached_control = self.command_event(
+            "python3 nova_review.py select --repo . --mode explicit "
+            f"--work-item {work_item};true",
+            output=selected,
+        )
+        newline_control = self.command_event(
+            "python3 nova_review.py select --repo . --mode explicit "
+            f"--work-item {work_item}\ntrue",
+            output=selected,
+        )
+        powershell_control = self.command_event(
+            'powershell.exe -NoProfile -Command "python '
+            r'C:\repo\nova_review.py select --repo . '
+            f'--mode explicit --work-item {work_item}; Write-Output done"',
+            output=selected,
+        )
+        cmd_control = self.command_event(
+            'cmd.exe /d /s /c "python '
+            r'C:\repo\nova_review.py select --repo . '
+            f'--mode explicit --work-item {work_item} & echo done"',
+            output=selected,
+        )
+        windows_valid = (
+            r"C:\Python311\python.exe C:\repo\nova_review.py select --repo . "
+            f"--mode explicit --work-item {work_item}"
+        )
+        powershell_valid = (
+            'powershell.exe -NoProfile -Command "python '
+            r'C:\repo\nova_review.py select --repo . '
+            f'--mode explicit --work-item {work_item}"'
+        )
+        cmd_valid = (
+            'cmd.exe /d /s /c "python '
+            r'C:\repo\nova_review.py select --repo . '
+            f'--mode explicit --work-item {work_item}"'
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Nova Probe"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "nova-probe@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            (repo / "value.txt").write_text("new\n", encoding="utf-8")
+            subprocess.run(["git", "add", "value.txt"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "test: selected"], cwd=repo, check=True)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            PROBE.assert_explicit_selection(repo, valid, head, work_item)
+            for command in (windows_valid, powershell_valid, cmd_valid):
+                PROBE.assert_explicit_selection(
+                    repo,
+                    self.command_event(command, output=selected),
+                    head,
+                    work_item,
+                )
+            for invalid in (
+                wrong_mode,
+                wrong_item,
+                failed,
+                wrong_output,
+                extra_option,
+                command_substitution,
+                backtick_substitution,
+                attached_control,
+                newline_control,
+                powershell_control,
+                cmd_control,
+            ):
+                with self.assertRaisesRegex(PROBE.ProbeError, "successfully select"):
+                    PROBE.assert_explicit_selection(repo, invalid, head, work_item)
 
     def test_runtime_probe_detects_collaboration_and_select_event_shapes(self) -> None:
         collaboration = json.dumps(

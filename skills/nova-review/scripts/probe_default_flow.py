@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -66,6 +68,167 @@ def event_values(transcript: str, keys: set[str]) -> list[str]:
     return values
 
 
+def completed_command_events(transcript: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for line in transcript.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if isinstance(item, dict) and item.get("type") == "command_execution":
+            events.append(item)
+    return events
+
+
+def split_command(command: str, *, posix: bool) -> list[str]:
+    try:
+        tokens = shlex.split(command, posix=posix)
+    except ValueError:
+        return []
+    if not posix:
+        tokens = [
+            token[1:-1]
+            if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}
+            else token
+            for token in tokens
+        ]
+    return tokens
+
+
+def executable_name(token: str) -> str:
+    return token.replace("\\", "/").rsplit("/", 1)[-1].lower()
+
+
+def is_python_executable(token: str) -> bool:
+    return (
+        re.fullmatch(
+            r"(?:python(?:\d+(?:\.\d+)*)?|py)(?:\.exe)?",
+            executable_name(token),
+        )
+        is not None
+    )
+
+
+def safe_tokens(tokens: list[str]) -> bool:
+    return not any(
+        token in {";", "&&", "||", "|", "&"}
+        or token.startswith((">", "<"))
+        or "\n" in token
+        or "\r" in token
+        for token in tokens
+    )
+
+
+def has_shell_control_syntax(command: str) -> bool:
+    if any(value in command for value in ("\r", "\n", "$(", "`")):
+        return True
+    quote: str | None = None
+    for character in command:
+        if quote is not None:
+            if character == quote:
+                quote = None
+            continue
+        if character in {'"', "'"}:
+            quote = character
+        elif character in {";", "|", "&", ">", "<"}:
+            return True
+    return False
+
+
+def is_nova_review_invocation(tokens: list[str]) -> bool:
+    return (
+        len(tokens) >= 3
+        and is_python_executable(tokens[0])
+        and executable_name(tokens[1]) == "nova_review.py"
+        and safe_tokens(tokens)
+    )
+
+
+def command_tokens(command: str) -> list[str]:
+    if has_shell_control_syntax(command):
+        return []
+    outer_variants = [
+        tokens
+        for tokens in (
+            split_command(command, posix=True),
+            split_command(command, posix=False),
+        )
+        if tokens
+    ]
+    for tokens in outer_variants:
+        if is_nova_review_invocation(tokens):
+            return tokens
+        executable = executable_name(tokens[0])
+        wrapper_flags: set[str] | None = None
+        if executable in {"bash", "sh", "zsh", "bash.exe", "sh.exe", "zsh.exe"}:
+            wrapper_flags = {"-c", "-lc", "-cl"}
+        elif executable in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+            wrapper_flags = {"-command", "-c"}
+        elif executable in {"cmd", "cmd.exe"}:
+            wrapper_flags = {"/c"}
+        if wrapper_flags is None:
+            continue
+        command_indexes = [
+            index
+            for index, token in enumerate(tokens[1:], start=1)
+            if token.lower() in wrapper_flags
+        ]
+        if len(command_indexes) != 1 or command_indexes[0] + 2 != len(tokens):
+            continue
+        nested = tokens[command_indexes[0] + 1]
+        if has_shell_control_syntax(nested):
+            continue
+        for posix in (True, False):
+            inner = split_command(nested, posix=posix)
+            if is_nova_review_invocation(inner):
+                return inner
+    return []
+
+
+def nova_review_arguments(command: str) -> list[str]:
+    tokens = command_tokens(command)
+    if len(tokens) < 3:
+        return []
+    script = executable_name(tokens[1])
+    if not is_python_executable(tokens[0]):
+        return []
+    if script != "nova_review.py":
+        return []
+    return tokens[2:]
+
+
+def command_output(item: dict[str, Any]) -> str | None:
+    for key in ("aggregated_output", "stdout"):
+        value = item.get(key)
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def exact_options(arguments: list[str], allowed: set[str]) -> dict[str, str] | None:
+    values: dict[str, str] = {}
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if "=" in argument:
+            flag, value = argument.split("=", 1)
+            consumed = 1
+        else:
+            flag = argument
+            if index + 1 >= len(arguments):
+                return None
+            value = arguments[index + 1]
+            consumed = 2
+        if flag not in allowed or flag in values or not value or value.startswith("--"):
+            return None
+        values[flag] = value
+        index += consumed
+    return values
+
+
 def event_strings(transcript: str) -> list[str]:
     values: list[str] = []
 
@@ -109,14 +272,24 @@ def generated_patch_work_item(metadata: dict[str, str], transcript: str) -> str:
         or uuid_part.isdigit()
     ):
         raise ProbeError("ordinary implementation did not create a PATCH UUIDv7 work item")
-    commands = event_values(transcript, {"command"})
-    if not any(
-        "nova_review.py" in command
-        and "new-id" in command
-        and "--class patch" in command
-        for command in commands
-    ):
-        raise ProbeError("ordinary implementation did not invoke new-id --class patch")
+    successful_generations: list[str] = []
+    for item in completed_command_events(transcript):
+        if item.get("exit_code") != 0:
+            continue
+        arguments = nova_review_arguments(str(item.get("command", "")))
+        if arguments != ["new-id", "--class", "patch"]:
+            continue
+        output = command_output(item)
+        if output is None:
+            continue
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        if len(lines) == 1 and NOVA_TOOL.WORK_ITEM_PATTERNS["patch"].fullmatch(lines[0]):
+            successful_generations.append(lines[0])
+    if successful_generations != [work_item]:
+        raise ProbeError(
+            "ordinary implementation did not successfully generate and reuse the committed "
+            f"PATCH work item: expected={work_item!r}; generated={successful_generations!r}"
+        )
     return work_item
 
 
@@ -182,11 +355,38 @@ def assert_explicit_selection(
         raise ProbeError("Review selection unexpectedly created a commit")
     if run(["git", "status", "--porcelain"], repo).strip():
         raise ProbeError("Review selection unexpectedly changed the worktree")
-    commands = event_values(transcript, {"command"})
-    if not any("nova_review.py" in command and "select" in command for command in commands):
-        raise ProbeError("explicit Review did not enter nova-review selection")
-    if work_item not in transcript:
-        raise ProbeError(f"explicit Review did not select {work_item}")
+    verified = False
+    for item in completed_command_events(transcript):
+        if item.get("exit_code") != 0:
+            continue
+        arguments = nova_review_arguments(str(item.get("command", "")))
+        if not arguments or arguments[0] != "select":
+            continue
+        options = exact_options(arguments[1:], {"--repo", "--mode", "--work-item"})
+        if options is None or set(options) != {"--repo", "--mode", "--work-item"}:
+            continue
+        if options["--mode"] != "explicit" or options["--work-item"] != work_item:
+            continue
+        output = command_output(item)
+        if output is None:
+            continue
+        try:
+            selected = json.loads(output)
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(selected, list)
+            and len(selected) == 1
+            and isinstance(selected[0], dict)
+            and selected[0].get("work_item") == work_item
+        ):
+            verified = True
+            break
+    if not verified:
+        raise ProbeError(
+            "explicit Review did not enter nova-review selection or did not successfully "
+            f"select exactly {work_item} with explicit mode"
+        )
 
 
 def probe(codex: str) -> None:

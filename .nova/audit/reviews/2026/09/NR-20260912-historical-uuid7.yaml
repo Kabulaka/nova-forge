@@ -1,0 +1,37 @@
+{
+  "batch_id": "NR-20260912-historical-uuid7",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "adhoc",
+      "commits": [
+        {
+          "commit": "d2142c92b20bb063cbdcfaba991895a8f5f6ffc5",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "nova-review Python suite 122/122 pass, 2 skipped; npm run check 120/120; package 84 files; git diff --check (pass)",
+      "work_item": "FIX-01a04738-8b4e-7989-8249-f470a4226d1b"
+    }
+  ],
+  "manifest_sha256": "34efc7f8e85697969b40dfbe493893f0302e3fdaee39b469002fb4f4e9b7ad3e",
+  "review_content_sha256": "0e8ff4f83b63e2c3bda055e4775849763dd71ecf97d2b01f009651f912aba533",
+  "review_fix_scope": [
+    "main:skills/nova-review/scripts/probe_default_flow.py",
+    "main:skills/nova-review/scripts/test_global_governance.py"
+  ],
+  "review_fix_sha256": "7e9603e251d62376ce20f9bc746aef0342f064b9c07afdc8f0a2a2534ad9b742",
+  "review_heads": {
+    "main": "ed73787f30d718d85601d43c8c6804b85946bff4"
+  },
+  "review_round": 3,
+  "review_scope": [
+    "main:nova-review/scripts/probe_default_flow.py",
+    "main:nova-review/scripts/test_global_governance.py"
+  ],
+  "reviewed_at": "2026-09-12T16:12:24+08:00",
+  "reviewer": "review_historical_uuid7",
+  "schema": 2
+}
