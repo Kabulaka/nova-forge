@@ -22,6 +22,9 @@ import {
 } from "../scripts/codex-dev-plugin-lib.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const packageVersionPattern = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+).version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 function createFakeCodex(root, initialState) {
   const stateFile = path.join(root, "codex-state.json");
@@ -192,11 +195,15 @@ test("development snapshot uses package contents, one hook manifest, and a fresh
 
     assert.match(
       manifest.version,
-      /^0\.2\.0\+codex\.local-20260911t123456000z-\d+-[0-9a-f]{8}$/,
+      new RegExp(
+        `^${packageVersionPattern}\\+codex\\.local-20260911t123456000z-\\d+-[0-9a-f]{8}$`,
+      ),
     );
     assert.match(
       claudeManifest.version,
-      /^0\.2\.0\+claude\.local-20260911t123456000z-\d+-[0-9a-f]{8}$/,
+      new RegExp(
+        `^${packageVersionPattern}\\+claude\\.local-20260911t123456000z-\\d+-[0-9a-f]{8}$`,
+      ),
     );
     assert.equal(snapshot.version, manifest.version);
     assert.equal(snapshot.codexVersion, manifest.version);

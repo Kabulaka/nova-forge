@@ -68,7 +68,7 @@
 Codex 可添加固定标签的仓库 marketplace，再从 `/plugins` 安装并启用 `nova-forge`：
 
 ```bash
-codex plugin marketplace add Kabulaka/nova-forge --ref v0.2.0
+codex plugin marketplace add Kabulaka/nova-forge --ref v0.3.0
 codex plugin add nova-forge@nova-forge
 ```
 
