@@ -1,6 +1,6 @@
 {
   "name": "nova-forge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Nova workflow skills and authority-safe degraded checkpoint recovery for Codex.",
   "author": {
     "name": "Nova Forge contributors",
