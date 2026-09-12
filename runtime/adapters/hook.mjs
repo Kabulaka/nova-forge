@@ -17,6 +17,7 @@ import {
   recordResumeInjection,
   startSession,
 } from "../core/state-machine.mjs";
+import { claimUncoveredStopNotice } from "../core/storage.mjs";
 import {
   NovaError,
   cwdKey,
@@ -218,7 +219,13 @@ export function handleHook(input, environment = process.env, options = {}) {
     }
     if (event === "Stop") {
       const { envelope } = getCheckpoint(dataRoot, binding, { now });
-      assertCovered(envelope);
+      try {
+        assertCovered(envelope);
+      } catch (error) {
+        if (error?.code !== "CHECKPOINT_NOT_COVERED") throw error;
+        if (!claimUncoveredStopNotice(dataRoot, binding, envelope, now)) return {};
+        throw error;
+      }
       return {};
     }
     if (event === "PreCompact") {

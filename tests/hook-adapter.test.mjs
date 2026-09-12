@@ -147,9 +147,18 @@ test("prompt and tool hooks mark dirty while the checkpoint MCP tool is excluded
     assert.equal(Object.hasOwn(stop, "continue"), false);
 
     const repeatedStop = handleHook(input("Stop", { stop_hook_active: true }), env);
-    assert.match(repeatedStop.systemMessage, /CHECKPOINT_NOT_COVERED/);
-    assert.equal(Object.hasOwn(repeatedStop, "decision"), false);
-    assert.equal(Object.hasOwn(repeatedStop, "continue"), false);
+    assert.deepEqual(repeatedStop, {});
+
+    saveCheckpoint(temp.directory, currentBinding(), "0.1.0", saveInput(3));
+    assert.deepEqual(handleHook(input("Stop"), env), {});
+    handleHook(input("UserPromptSubmit", { turn_id: "turn-3" }), env);
+    const nextUncoveredGeneration = handleHook(input("Stop"), env);
+    assert.match(nextUncoveredGeneration.systemMessage, /CHECKPOINT_NOT_COVERED/);
+    assert.deepEqual(handleHook(input("Stop", { stop_hook_active: true }), env), {});
+
+    handleHook(input("SessionStart", { source: "clear", turn_id: "turn-4" }), env);
+    const afterClear = handleHook(input("Stop"), env);
+    assert.match(afterClear.systemMessage, /CHECKPOINT_NOT_COVERED/);
   } finally {
     temp.cleanup();
   }

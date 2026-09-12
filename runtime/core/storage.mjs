@@ -18,7 +18,10 @@ import {
   stableStringify,
   utcIso,
   withOwnerLock,
+  writePrivateFile,
 } from "./util.mjs";
+
+const UNCOVERED_STOP_NOTICE_FILE = ".uncovered-stop-notice.json";
 
 function stateDirectory(dataRoot, binding) {
   return path.join(dataRoot, "state", binding.host, binding.sessionKey);
@@ -680,6 +683,44 @@ export function withScopeLock(dataRoot, binding, callback, timeoutMs = LOCK_TIME
   });
 }
 
+export function claimUncoveredStopNotice(dataRoot, binding, envelope, now = Date.now()) {
+  return withScopeLock(dataRoot, binding, () => {
+    const directory = stateDirectory(dataRoot, binding);
+    const noticeFile = path.join(directory, UNCOVERED_STOP_NOTICE_FILE);
+    const fingerprint = {
+      authorityGeneration: envelope.authorityGeneration,
+      coveredEventWatermark: envelope.coveredEventWatermark,
+    };
+    try {
+      const existing = JSON.parse(fs.readFileSync(noticeFile, "utf8"));
+      if (
+        existing.authorityGeneration === fingerprint.authorityGeneration &&
+        existing.coveredEventWatermark === fingerprint.coveredEventWatermark
+      ) {
+        return false;
+      }
+    } catch {
+      // A missing or malformed diagnostic notice must not affect checkpoint authority.
+    }
+
+    const temporary = path.join(
+      directory,
+      `.uncovered-stop-notice-${randomId(8)}.tmp`,
+    );
+    writePrivateFile(
+      temporary,
+      `${stableStringify({ ...fingerprint, reportedAt: utcIso(now) })}\n`,
+    );
+    try {
+      if (process.platform === "win32") tryRemove(noticeFile);
+      fs.renameSync(temporary, noticeFile);
+    } finally {
+      tryRemove(temporary);
+    }
+    return true;
+  });
+}
+
 function isCoveredAuthority(envelope) {
   return (
     envelope.taskCapsule !== null &&
@@ -737,6 +778,7 @@ export function resetEnvelope(dataRoot, binding, pluginVersion, now = Date.now()
     const directory = stateDirectory(dataRoot, binding);
     tryRemove(path.join(directory, "current.json"));
     tryRemove(path.join(directory, "backup.json"));
+    tryRemove(path.join(directory, UNCOVERED_STOP_NOTICE_FILE));
     const envelope = writeEnvelope(dataRoot, binding, initialEnvelope(binding, pluginVersion, now), {
       rotateCurrentToBackup: false,
       now,
