@@ -8,11 +8,12 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { main as runHookMain, readHookInput } from "../hooks/run.mjs";
 import { detectHost, handleHook, resolvePluginPaths } from "../runtime/adapters/hook.mjs";
-import { HOOK_INPUT_LIMIT } from "../runtime/core/constants.mjs";
+import { buildRecoveryContext } from "../runtime/core/capsule.mjs";
+import { HOOK_INPUT_LIMIT, INJECTION_CHARACTER_LIMIT } from "../runtime/core/constants.mjs";
 import { getCheckpoint, saveCheckpoint } from "../runtime/core/state-machine.mjs";
 import { cwdKey, scopeKey } from "../runtime/core/util.mjs";
 import { McpRuntime } from "../runtime/mcp/server.mjs";
-import { pluginRoot, saveInput, temporaryDirectory } from "./helpers.mjs";
+import { authority, capsule, pluginRoot, saveInput, temporaryDirectory } from "./helpers.mjs";
 
 function environment(dataRoot, host = "codex") {
   return {
@@ -38,6 +39,25 @@ function currentBinding(host = "codex") {
     sessionKey: scopeKey(host, "hook-session"),
     cwdHash: cwdKey(pluginRoot),
   };
+}
+
+function prepareCompletedClaudeCompaction(dataRoot, taskCapsule = capsule()) {
+  const env = environment(dataRoot, "claude-code");
+  handleHook(input("SessionStart", { source: "startup" }), env, { now: 1_000 });
+  handleHook(input("UserPromptSubmit", { turn_id: undefined }), env, { now: 2_000 });
+  saveCheckpoint(
+    dataRoot,
+    currentBinding("claude-code"),
+    "0.1.0",
+    saveInput(1, { taskCapsule }),
+    { now: 3_000 },
+  );
+  handleHook(input("PreCompact", { trigger: "manual" }), env, { now: 4_000 });
+  handleHook(input("SessionStart", { source: "compact", turn_id: "turn-compact" }), env, {
+    now: 5_000,
+  });
+  handleHook(input("PostCompact", { trigger: "manual" }), env, { now: 6_000 });
+  return env;
 }
 
 function runHookProcessWithLimit(dataRoot, host, inputValue, inputLimit) {
@@ -139,6 +159,10 @@ test("late plugin activation self-starts before the first prompt for both hosts"
       assert.match(
         output.hookSpecificOutput.additionalContext,
         /stageDecisions=delegated-ai-candidate/,
+      );
+      assert.match(
+        output.hookSpecificOutput.additionalContext,
+        /resolutionBasis is one of user-confirmed, verified-evidence, delegated-ai-candidate, or explicitly-excluded and never pending/,
       );
       if (host === "codex") {
         assert.match(
@@ -440,6 +464,95 @@ test("Claude Code early compact SessionStart waits for PostCompact and injects b
     assert.equal(injected.dirty, true);
   } finally {
     temp.cleanup();
+  }
+});
+
+test("Claude Code commits completed compaction injection only after the full context fits", () => {
+  const probe = temporaryDirectory();
+  const exact = temporaryDirectory();
+  const appendedOverflow = temporaryDirectory();
+  const recoveryOverflow = temporaryDirectory();
+  try {
+    const probeEnv = prepareCompletedClaudeCompaction(probe.directory);
+    const probeOutput = handleHook(
+      input("UserPromptSubmit", { prompt: "continue", turn_id: undefined }),
+      probeEnv,
+      { now: 8_000 },
+    );
+    const exactLimit = probeOutput.hookSpecificOutput.additionalContext.length;
+    assert.ok(exactLimit <= INJECTION_CHARACTER_LIMIT);
+
+    const exactEnv = prepareCompletedClaudeCompaction(exact.directory);
+    const exactOutput = handleHook(
+      input("UserPromptSubmit", { prompt: "continue", turn_id: undefined }),
+      exactEnv,
+      { now: 8_000, injectionLimit: exactLimit },
+    );
+    assert.equal(exactOutput.hookSpecificOutput.additionalContext.length, exactLimit);
+    assert.equal(
+      getCheckpoint(exact.directory, currentBinding("claude-code"), { now: 9_000 }).envelope
+        .compactionHandshake.status,
+      "injected",
+    );
+
+    const appendedEnv = prepareCompletedClaudeCompaction(appendedOverflow.directory);
+    const beforeAppendFailure = getCheckpoint(
+      appendedOverflow.directory,
+      currentBinding("claude-code"),
+      { now: 7_000 },
+    ).envelope;
+    const rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
+    const recoveryOnly = buildRecoveryContext(rules, {
+      authorityGeneration: beforeAppendFailure.authorityGeneration,
+      taskCapsule: beforeAppendFailure.taskCapsule,
+      controlDocuments: beforeAppendFailure.controlDocuments,
+    });
+    assert.ok(recoveryOnly.length < exactLimit - 1);
+    const appendFailure = handleHook(
+      input("UserPromptSubmit", { prompt: "continue", turn_id: undefined }),
+      appendedEnv,
+      { now: 8_000, injectionLimit: exactLimit - 1 },
+    );
+    assert.match(appendFailure.systemMessage, /INJECTION_LIMIT/);
+    const afterAppendFailure = getCheckpoint(
+      appendedOverflow.directory,
+      currentBinding("claude-code"),
+      { now: 9_000 },
+    ).envelope;
+    assert.equal(afterAppendFailure.compactionHandshake.status, "failed");
+    assert.equal(afterAppendFailure.compactionHandshake.failureCode, "COMPACTION_INJECTION_FAILED");
+    assert.equal(Object.hasOwn(afterAppendFailure.compactionHandshake, "injectedGeneration"), false);
+    assert.equal(afterAppendFailure.eventWatermark, 2);
+    assert.equal(afterAppendFailure.dirty, true);
+
+    const oversizedCapsule = capsule({
+      objective: authority("x".repeat(8_000)),
+    });
+    const recoveryEnv = prepareCompletedClaudeCompaction(
+      recoveryOverflow.directory,
+      oversizedCapsule,
+    );
+    const recoveryFailure = handleHook(
+      input("UserPromptSubmit", { prompt: "continue", turn_id: undefined }),
+      recoveryEnv,
+      { now: 8_000 },
+    );
+    assert.match(recoveryFailure.systemMessage, /INJECTION_LIMIT/);
+    const afterRecoveryFailure = getCheckpoint(
+      recoveryOverflow.directory,
+      currentBinding("claude-code"),
+      { now: 9_000 },
+    ).envelope;
+    assert.equal(afterRecoveryFailure.compactionHandshake.status, "failed");
+    assert.equal(afterRecoveryFailure.compactionHandshake.failureCode, "COMPACTION_INJECTION_FAILED");
+    assert.equal(Object.hasOwn(afterRecoveryFailure.compactionHandshake, "injectedGeneration"), false);
+    assert.equal(afterRecoveryFailure.eventWatermark, 2);
+    assert.equal(afterRecoveryFailure.dirty, true);
+  } finally {
+    probe.cleanup();
+    exact.cleanup();
+    appendedOverflow.cleanup();
+    recoveryOverflow.cleanup();
   }
 });
 

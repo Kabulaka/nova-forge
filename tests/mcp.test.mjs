@@ -57,6 +57,10 @@ test("MCP tools expose no selector or proof field and consume a proof for each c
     assert.match(saveTool.description, /delegatedScope, currentQuestion/);
     assert.match(saveTool.description, /never confirmed/);
     assert.match(saveTool.description, /stageDecisions=delegated-ai-candidate/);
+    assert.match(
+      saveTool.description,
+      /resolutionBasis accepts only user-confirmed, verified-evidence, delegated-ai-candidate, or explicitly-excluded; pending is not allowed/,
+    );
     assert.equal(saveTool.inputSchema.properties.taskCapsule.properties.objective.type, "object");
     assert.equal(
       saveTool.inputSchema.properties.taskCapsule.properties.stageProjection.properties
@@ -226,6 +230,10 @@ test("JSON-RPC initialize and tool errors follow MCP result shape", () => {
   assert.match(initialized.result.instructions, /delegatedScope, currentQuestion/);
   assert.match(initialized.result.instructions, /never eventWatermark/);
   assert.match(initialized.result.instructions, /stageDecisions only delegated-ai-candidate/);
+  assert.match(
+    initialized.result.instructions,
+    /resolutionBasis accepts only user-confirmed, verified-evidence, delegated-ai-candidate, or explicitly-excluded; pending is not allowed/,
+  );
   const future = handleRpc(runtime, {
     jsonrpc: "2.0",
     id: "future",

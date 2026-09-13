@@ -22,8 +22,9 @@ const SERVER_INSTRUCTIONS =
   "authorityState is one of user-confirmed, delegated-ai-candidate, verified-evidence, " +
   "explicitly-excluded, or pending. Projection item states are strict: inheritedContracts only " +
   "user-confirmed; stageEvidence only verified-evidence; stageDecisions only " +
-  "delegated-ai-candidate; unresolvedDeltas only pending; resolutionBasis accepts confirmed, " +
-  "evidence, candidate, or excluded states. stageProjection has exactly five array fields: " +
+  "delegated-ai-candidate; unresolvedDeltas only pending; resolutionBasis accepts only " +
+  "user-confirmed, verified-evidence, delegated-ai-candidate, or explicitly-excluded; pending " +
+  "is not allowed. stageProjection has exactly five array fields: " +
   "inheritedContracts, stageEvidence, stageDecisions, unresolvedDeltas, and resolutionBasis. " +
   "Do not invent authority, secrets, host, sessionId, or scopeProof.";
 
@@ -235,7 +236,7 @@ export class McpRuntime {
       {
         name: "nova_checkpoint_save",
         description:
-          "Persist a complete structured Nova task checkpoint. Top-level keys are exactly idempotencyKey, coveredEventWatermark, taskCapsule, controlDocuments; never eventWatermark. taskCapsule keys are exactly objective, stage, confirmedDecisions, exclusions, delegatedScope, currentQuestion, unresolvedDeltas, stageProjection, activeDeliveryScope, evidence, fileState, commitState, nextAction. Do not use delegationScope, candidateIdentities, currentQuestions, files, or commits. objective, stage, nextAction, currentQuestion (unless null), and every array item are {value, authorityState, source}; authorityState is user-confirmed, delegated-ai-candidate, verified-evidence, explicitly-excluded, or pending, never confirmed. Projection item states are strict: inheritedContracts=user-confirmed; stageEvidence=verified-evidence; stageDecisions=delegated-ai-candidate; unresolvedDeltas=pending; resolutionBasis accepts user-confirmed, verified-evidence, delegated-ai-candidate, or explicitly-excluded. Use [] when no correctly typed item exists. Every collection is an array. stageProjection has exactly inheritedContracts, stageEvidence, stageDecisions, unresolvedDeltas, resolutionBasis, all arrays.",
+          "Persist a complete structured Nova task checkpoint. Top-level keys are exactly idempotencyKey, coveredEventWatermark, taskCapsule, controlDocuments; never eventWatermark. taskCapsule keys are exactly objective, stage, confirmedDecisions, exclusions, delegatedScope, currentQuestion, unresolvedDeltas, stageProjection, activeDeliveryScope, evidence, fileState, commitState, nextAction. Do not use delegationScope, candidateIdentities, currentQuestions, files, or commits. objective, stage, nextAction, currentQuestion (unless null), and every array item are {value, authorityState, source}; authorityState is user-confirmed, delegated-ai-candidate, verified-evidence, explicitly-excluded, or pending, never confirmed. Projection item states are strict: inheritedContracts=user-confirmed; stageEvidence=verified-evidence; stageDecisions=delegated-ai-candidate; unresolvedDeltas=pending; resolutionBasis accepts only user-confirmed, verified-evidence, delegated-ai-candidate, or explicitly-excluded; pending is not allowed. Use [] when no correctly typed item exists. Every collection is an array. stageProjection has exactly inheritedContracts, stageEvidence, stageDecisions, unresolvedDeltas, resolutionBasis, all arrays.",
         inputSchema: SAVE_SCHEMA,
       },
     ];

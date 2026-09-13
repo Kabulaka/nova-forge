@@ -1,0 +1,58 @@
+{
+  "batch_id": "NR-20260913-dual-host-continuity-fix",
+  "conclusion": "PASS",
+  "items": [
+    {
+      "change_class": "fix",
+      "commits": [
+        {
+          "commit": "afa6628a5a9c22b08b6d38c596fee76ebae288ef",
+          "repository": "main"
+        }
+      ],
+      "design_ref": "none",
+      "package_ids": [],
+      "validation": "npm run check 129/129; governance 125 (2 skipped); architecture ready; Linux Codex and Claude Code host E2E (pass)",
+      "work_item": "FIX-01a095cb-d0ac-78f3-800d-65dbeadaac9b"
+    }
+  ],
+  "manifest_sha256": "144e944edf6652f97e7e67c2455bf410de38879505c101156ad12530d6c615bd",
+  "review_content_sha256": "79fe88131c8d106a85a19dee7582f3bb02cebd925213cb028d58dddb1e20b909",
+  "review_fix_scope": [
+    "main:runtime/adapters/hook.mjs",
+    "main:runtime/core/state-machine.mjs",
+    "main:runtime/mcp/server.mjs",
+    "main:skills/nova-review/scripts/nova_review.py",
+    "main:skills/nova-review/scripts/test_nova_review.py",
+    "main:tests/hook-adapter.test.mjs",
+    "main:tests/mcp.test.mjs"
+  ],
+  "review_fix_sha256": "3181f3b9ed82fee6691c2c5aeb303bcddac75d5c363c9741dc656ab9af87e054",
+  "review_heads": {
+    "main": "afa6628a5a9c22b08b6d38c596fee76ebae288ef"
+  },
+  "review_round": 2,
+  "review_scope": [
+    "main:.mcp.json",
+    "main:codex/AGENTS.global.md",
+    "main:codex/scripts/test_agents_global.py",
+    "main:runtime/adapters/hook.mjs",
+    "main:runtime/core/state-machine.mjs",
+    "main:runtime/core/storage.mjs",
+    "main:runtime/core/util.mjs",
+    "main:runtime/mcp/server.mjs",
+    "main:scripts/codex-dev-plugin-lib.mjs",
+    "main:scripts/validate-plugin.mjs",
+    "main:skills/nova-review/references/commit-contract.md",
+    "main:skills/nova-review/scripts/nova_review.py",
+    "main:skills/nova-review/scripts/test_nova_review.py",
+    "main:tests/codex-dev-plugin.test.mjs",
+    "main:tests/hook-adapter.test.mjs",
+    "main:tests/mcp.test.mjs",
+    "main:tests/plugin-structure.test.mjs",
+    "main:tests/schema-state.test.mjs"
+  ],
+  "reviewed_at": "2026-09-13T14:35:43+08:00",
+  "reviewer": "Codex independent reviewers: runtime, installer, governance",
+  "schema": 2
+}

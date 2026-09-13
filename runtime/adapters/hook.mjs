@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildRecoveryContext } from "../core/capsule.mjs";
+import { INJECTION_CHARACTER_LIMIT } from "../core/constants.mjs";
 import { issueScopeProof } from "../core/scope-proof.mjs";
 import {
   bootstrapStateRoot,
@@ -133,7 +134,9 @@ function checkpointTurnContext(host) {
     "commits. authorityState is exactly one of user-confirmed, delegated-ai-candidate, " +
     "verified-evidence, explicitly-excluded, or pending; never use confirmed. Projection item " +
     "states are strict: inheritedContracts=user-confirmed, stageEvidence=verified-evidence, " +
-    "stageDecisions=delegated-ai-candidate, unresolvedDeltas=pending; use [] when no correctly " +
+    "stageDecisions=delegated-ai-candidate, unresolvedDeltas=pending; resolutionBasis is one of " +
+    "user-confirmed, verified-evidence, delegated-ai-candidate, or explicitly-excluded and never " +
+    "pending; use [] when no correctly " +
     "typed item exists. stageProjection " +
     "contains exactly the five " +
     "array fields inheritedContracts, stageEvidence, stageDecisions, unresolvedDeltas, and " +
@@ -143,6 +146,24 @@ function checkpointTurnContext(host) {
     "incomplete state visible; do not loop, fabricate coverage, or rely on the Stop hook to repair it.\n" +
     "</nova-checkpoint-turn>"
   );
+}
+
+function completedCompactionContext(
+  rules,
+  recoveryEnvelope,
+  host,
+  limit = INJECTION_CHARACTER_LIMIT,
+) {
+  const suffix = `\n\n${checkpointTurnContext(host)}`;
+  const recoveryLimit = limit - suffix.length;
+  if (recoveryLimit < 0) {
+    throw new NovaError("INJECTION_LIMIT", "checkpoint turn instructions exceed host injection limit");
+  }
+  const context = `${buildRecoveryContext(rules, recoveryEnvelope, recoveryLimit)}${suffix}`;
+  if (context.length > limit) {
+    throw new NovaError("INJECTION_LIMIT", "completed compaction context exceeds host injection limit");
+  }
+  return context;
 }
 
 function uncoveredResumeContext(rules, envelope) {
@@ -319,12 +340,18 @@ export function handleHook(input, environment = process.env, options = {}) {
             binding,
             readPluginVersion(pluginRoot),
             promptEventId,
-            { now },
+            {
+              now,
+              prepareInjection: (recoveryEnvelope) =>
+                completedCompactionContext(
+                  rules,
+                  recoveryEnvelope,
+                  host,
+                  options.injectionLimit ?? INJECTION_CHARACTER_LIMIT,
+                ),
+            },
           );
-          return contextOutput(
-            event,
-            `${buildRecoveryContext(rules, injected.result.recoveryEnvelope)}\n\n${checkpointTurnContext(host)}`,
-          );
+          return contextOutput(event, injected.result.preparedContext);
         }
       }
       const latePluginRoot = markLifecycleEvent(

@@ -2544,6 +2544,95 @@ class NovaReviewTests(unittest.TestCase):
             self.assertEqual(selected.returncode, 0, selected.stderr)
             self.assertEqual(json.loads(selected.stdout)[0]["commits"], [commit_hash])
 
+    def test_one_detached_claude_provenance_block_accepts_multiple_co_authors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work_item = NOVA_TOOL.new_work_item("fix")
+            commit_message = (
+                message(
+                    work_item,
+                    "fix",
+                    policy="exempt",
+                    exemption="EX-FIX",
+                    schema="2",
+                    subject="fix(delivery): 保留多个 Claude 提交归属",
+                ).rstrip()
+                + "\n\nCo-Authored-By: Claude One <one@anthropic.com>\n"
+                + "Co-Authored-By: Claude Two <two@anthropic.com>\n"
+            )
+
+            accepted = self.validate(root, commit_message)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            repo = root / "repo"
+            self.init_repo(repo)
+            commit_hash = self.commit(repo, "fix.py", "fixed\n", commit_message)
+            selected = self.run_tool(
+                "select", "--repo", str(repo), "--mode", "explicit",
+                "--work-item", work_item,
+            )
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(json.loads(selected.stdout)[0]["commits"], [commit_hash])
+
+    def test_detached_provenance_rejects_ambiguous_or_malformed_trailer_boundaries(self) -> None:
+        cases = {
+            "unknown middle block": lambda base: (
+                base
+                + "\n\nSigned-Off-By: Other Host <other@example.com>"
+                + "\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n"
+            ),
+            "body example": lambda base: (
+                base
+                + "\nThis Nova block is documentation, not final metadata."
+                + "\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n"
+            ),
+            "two detached provenance blocks": lambda base: (
+                base
+                + "\n\nCo-Authored-By: Claude One <one@anthropic.com>"
+                + "\n\nCo-Authored-By: Claude Two <two@anthropic.com>\n"
+            ),
+            "mixed provenance block": lambda base: (
+                base
+                + "\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+                + "\nReviewed-By: Reviewer <reviewer@example.com>\n"
+            ),
+            "case variant": lambda base: (
+                base + "\n\nco-authored-by: Claude <noreply@anthropic.com>\n"
+            ),
+            "continued value": lambda base: (
+                base
+                + "\n\nCo-Authored-By: Claude"
+                + "\n noreply@anthropic.com\n"
+            ),
+            "empty value": lambda base: base + "\n\nCo-Authored-By:\n",
+        }
+
+        for label, build_message in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work_item = NOVA_TOOL.new_work_item("fix")
+                base = message(
+                    work_item,
+                    "fix",
+                    policy="exempt",
+                    exemption="EX-FIX",
+                    schema="2",
+                    subject="fix(delivery): 拒绝歧义 Claude 提交归属",
+                ).rstrip()
+                commit_message = build_message(base)
+
+                rejected = self.validate(root, commit_message)
+                self.assertNotEqual(rejected.returncode, 0)
+
+                repo = root / "repo"
+                self.init_repo(repo)
+                self.commit(repo, "fix.py", "fixed\n", commit_message)
+                selected = self.run_tool(
+                    "select", "--repo", str(repo), "--mode", "explicit",
+                    "--work-item", work_item,
+                )
+                self.assertNotEqual(selected.returncode, 0)
+
     def test_git_c_quoted_utf8_paths_are_decoded_and_invalid_bytes_rejected(self) -> None:
         relative = ".nova/design/中文路径.md"
 

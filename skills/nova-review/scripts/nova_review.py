@@ -415,7 +415,10 @@ def trailing_fields(text: str) -> list[tuple[str, str]]:
         return fields, index
 
     fields, index = collect(len(lines) - 1)
-    if fields and all(key in HOST_PROVENANCE_TRAILERS for key, _ in fields):
+    if fields and all(
+        key in HOST_PROVENANCE_TRAILERS and bool(value.strip())
+        for key, value in fields
+    ):
         while index >= 0 and not lines[index].strip():
             index -= 1
         managed_fields, _ = collect(index)

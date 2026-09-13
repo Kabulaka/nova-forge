@@ -297,12 +297,18 @@ export function injectCompletedCompactionBeforePrompt(
   binding,
   pluginVersion,
   eventId,
-  { now = Date.now() } = {},
+  { now = Date.now(), prepareInjection } = {},
 ) {
   if (typeof eventId !== "string" || eventId.length === 0) {
     throw new NovaError("INVALID_EVENT_ID", "trusted hook event id is required");
   }
-  return mutateEnvelope(
+  if (typeof prepareInjection !== "function") {
+    throw new NovaError(
+      "INJECTION_PREPARER_UNAVAILABLE",
+      "completed compaction injection requires a trusted context preparer",
+    );
+  }
+  const outcome = mutateEnvelope(
     dataRoot,
     binding,
     pluginVersion,
@@ -324,6 +330,24 @@ export function injectCompletedCompactionBeforePrompt(
         taskCapsule: draft.taskCapsule,
         controlDocuments: draft.controlDocuments,
       });
+      let preparedContext;
+      try {
+        preparedContext = prepareInjection(recoveryEnvelope);
+        if (typeof preparedContext !== "string") {
+          throw new NovaError(
+            "INVALID_INJECTION_CONTEXT",
+            "trusted context preparer must return a string",
+          );
+        }
+      } catch (error) {
+        draft.compactionHandshake = {
+          status: "failed",
+          failureCode: "COMPACTION_INJECTION_FAILED",
+          failedAt: utcIso(now),
+        };
+        const event = markEventOnDraft(draft, eventId);
+        return { failed: true, error, ...event };
+      }
       draft.compactionHandshake = {
         ...handshake,
         status: "injected",
@@ -334,10 +358,12 @@ export function injectCompletedCompactionBeforePrompt(
       const event = markEventOnDraft(draft, eventId);
       return {
         authorityGeneration: draft.authorityGeneration,
-        recoveryEnvelope,
+        preparedContext,
         ...event,
       };
     },
     { now, create: false },
   );
+  if (outcome.result?.failed) throw outcome.result.error;
+  return outcome;
 }
