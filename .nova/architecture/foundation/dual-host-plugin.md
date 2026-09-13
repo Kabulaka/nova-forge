@@ -40,11 +40,11 @@
 |----------|-------|-------------|----------|
 | 会话启动或恢复 | `SessionStart` 的 `startup`、`resume` | `SessionStart` 的 `startup`、`resume` | 从宿主事件建立不可由模型选择的当前会话作用域；加载静态规则，且仅 `resume` 查询该作用域检查点并记录 `injectedGeneration` |
 | 检查点工具调用前 | 匹配本插件 `nova_checkpoint_get/save` 的 `PreToolUse`，使用 `updatedInput` 覆盖内部字段 | 匹配本插件 `nova_checkpoint_get/save` 的 `PreToolUse`，使用 `updatedInput` 覆盖内部字段 | 从可信 `session_id`、目录、工具名和调用 ID 创建短期一次性不透明 `scopeProof`；完整保留模型业务参数并覆盖任何同名内部字段，Hook 失败或未运行时 MCP 因缺少有效证明失败封闭 |
-| 输入与工具事件 | `UserPromptSubmit`、`PostToolUse` | `UserPromptSubmit`、`PostToolUse` | 不分析自然语言，按可信宿主事件递增 `eventWatermark` 并置 dirty；检查点 MCP 自身事件不重复置 dirty |
+| 输入与工具事件 | `UserPromptSubmit`、`PostToolUse` | `UserPromptSubmit`、`PostToolUse`；若此前存在匹配且已完成、尚未注入的压缩握手，则在处理新提示前注入该代胶囊 | 不分析自然语言；压缩胶囊注入和 `injectedGeneration` 记录必须先于新提示事件，随后按可信宿主事件递增 `eventWatermark` 并置 dirty；检查点 MCP 自身事件不重复置 dirty |
 | 回合结束 | `Stop` | `Stop` | dirty 未被当前检查点覆盖时报告降级但放行宿主回答；不得依赖 Stop 阻断后由 AI 自救，也不得把旧代冒充最新权威 |
 | 压缩前 | `PreCompact` 的 `manual`、`auto` | `PreCompact` 的 `manual`、`auto` | 只有检查点 `coveredEventWatermark` 等于当前水位且 dirty=false 时才冻结 `attemptId + generation + watermark`；缺失、未覆盖或状态故障时不冻结 Nova authority，报告降级并放行宿主原生压缩 |
-| 压缩完成 | `PostCompact` | `PostCompact` | 匹配已冻结 attempt 时记录 completed generation/watermark；无冻结、错配或重复冲突时不得提升宿主摘要或写入 `injectedGeneration`，但必须放行宿主完成压缩 |
-| 压缩后续接 | `SessionStart` 的 `compact` | `SessionStart` 的 `compact` | 匹配已完成 attempt 时注入同一 generation 的有界胶囊并原子记录 `injectedGeneration`；缺少有效完成记录时只注入静态规则和降级上下文，不得阻断宿主会话 |
+| 压缩完成 | `PostCompact` | `PostCompact`，宿主真实顺序允许晚于 `SessionStart(compact)` | 匹配已冻结 attempt 时原子记录 completed generation/watermark；无冻结、触发类型错配、generation/watermark 变化或重复冲突时不得提升宿主摘要或写入 `injectedGeneration`，但必须放行宿主完成压缩 |
+| 压缩后续接 | `SessionStart` 的 `compact`，仅在 PostCompact 已完成后注入 | `SessionStart` 的 `compact` 早到 PostCompact 时只确认仍为同一冻结代，不注入权威胶囊、不写 `injectedGeneration` 且不报告错序；PostCompact 完成后由下一次可信 `UserPromptSubmit` 注入 | 只有匹配的 completed generation/watermark 才能注入同一 generation 的有界胶囊并原子记录 `injectedGeneration`；PostCompact 缺失或错配不得提升 authority，真实错误保持可见且不得阻断宿主会话 |
 | 权威状态变化 | AI 调用插件 MCP 工具 | AI 调用插件 MCP 工具 | MCP 原子消费与当前工具调用绑定的一次性 `scopeProof`，取得隐式可信作用域后以明确字段和 authority 类型绑定当前 `eventWatermark` 创建新 authority generation；持久化成功后才清除 dirty |
 
 生命周期 Hook 遵循“宿主可用性放行、checkpoint 权威性失败封闭”：首次安装、从无检查点版本升级、老会话恢复、MCP 不可用、状态根不可写、状态缺失/损坏/schema 不兼容、`PreToolUse` 证明签发失败或 Hook 输入异常，均不得锁死普通对话与原生压缩；检查点工具在缺少有效证明时自身拒绝且零状态访问，其他失败只允许注入静态规则、无权威恢复提示或可见诊断，任何无效状态仍不得成为恢复 authority。

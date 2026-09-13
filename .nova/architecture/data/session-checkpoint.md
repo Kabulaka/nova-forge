@@ -28,7 +28,7 @@
 | authorityState | `user-confirmed`、`delegated-ai-candidate`、`verified-evidence`、`explicitly-excluded`、`pending` | 每项状态保留来源类别，候选与 pending 不得作为确认项注入 | 新类别需要 schema 升级和正反用例 |
 | taskCapsule | 目标、阶段、确认决定、排除、委托范围、当前问题、未决差量、`stageProjection`、活动交付范围、证据、文件与提交状态、下一动作 | 必填集合通过 schema 校验；`stageProjection` 必须按下表从同一权威快照生成，空数组与未知不能互相替代 | 缺失必填字段或无法无损重建完整 `stageProjection` 使整代无效，不用默认值猜测 |
 | controlDocuments | 绝对路径、SHA-256、加载状态 | 不保存正文；路径与指纹共同决定是否复用已有理解 | 指纹变化时只标记需精确重载受影响文档 |
-| compactionHandshake | attemptId、frozenGeneration、frozenWatermark、completedGeneration、injectedGeneration | 有覆盖检查点时由 `PreCompact` 冻结、`PostCompact` 完成、`SessionStart(compact)` 注入并记录；三者必须同作用域且 generation/watermark 相等 | 重复同事件幂等；错序、缺失或冲突事件停止 Nova authority 续接并降级为无权威上下文，但不停止宿主原生续接 |
+| compactionHandshake | attemptId、trigger、frozenGeneration、frozenWatermark、completedGeneration、completedWatermark、injectedGeneration | 有覆盖检查点时由 `PreCompact` 冻结；Codex 由 `PostCompact` 完成并在随后 `SessionStart(compact)` 注入，Claude Code 允许早到的 `SessionStart(compact)` 保持 frozen、由随后的 `PostCompact` 完成、再由下一次可信 `UserPromptSubmit` 在递增水位前注入；所有阶段必须同作用域且 generation/watermark 相等 | 重复同事件幂等；合法的 Claude pending 不产生降级；缺失/错配 PostCompact、状态变化或冲突停止 Nova authority 续接并保留可见诊断，但不停止宿主原生续接 |
 | resourceLimits | JSON-RPC frame 320 KiB；规范化 checkpoint payload 256 KiB；字符串 8 KiB；每数组 128 项；嵌套深度 4；每宿主 512 MiB/2000 会话，全局 1 GiB | frame 超限在完整读取/JSON 解析前终止；字段和 payload 超限在规范化、哈希、临时文件前拒绝；当前代与备份均计入配额 | 先清理过期且未加锁作用域；未过期状态不逐出，仍不足则拒绝新写入或新会话 |
 | checksum | 覆盖规范化 authority、租约及握手 envelope 的 SHA-256 | 写入完成前计算，读取不一致则拒绝该 envelope | 算法变化需要 schema 升级 |
 | secretScan | 禁止字段名、令牌形态和调用方显式敏感标记 | 命中即拒绝整次写入且不产生新代 | 规则更新不追溯解密或上传历史状态 |
@@ -73,4 +73,4 @@
 | 当前代损坏 | 拒绝当前代并记录校验失败 | 仅在备份同宿主、同会话、未过期且校验通过时恢复 | 状态核心 |
 | 检查点缺失、过期、schema 不兼容或 `stageProjection` 不可完整重建 | 不注入权威状态，不宣称安全恢复 | 从当前会话与工作区事实定向恢复；仍缺失时只询问具体差量，禁止以默认值补齐五字段或提升 authorityState | 恢复流程 |
 | `SessionStart` 注入超限 | 不截断单个权威字段后伪装完整 | 按固定优先级生成有界胶囊并显式列出未注入字段定位，必要时阻止推进 | 状态核心 |
-| 压缩握手错序、缺失或 generation/watermark 不一致 | 显式报告 Nova 连续性核验失败，不写 `injectedGeneration`，但放行宿主续接 | 停止把 Nova checkpoint 续接视为权威，只注入静态规则和降级上下文；后续可从当前可见事实创建新检查点 | 宿主适配器 |
+| 压缩握手缺失、PostCompact 触发类型错配或 generation/watermark 不一致 | 显式报告 Nova 连续性核验失败，不写 `injectedGeneration`，但放行宿主续接；Claude Code 的 `SessionStart(compact)` 在匹配 frozen 之后、PostCompact 之前属于合法 pending，不报告失败且不注入权威状态 | 停止把无效 Nova checkpoint 续接视为权威，只注入静态规则和降级上下文；合法 pending 等待 PostCompact 原子完成，并仅由下一次可信 `UserPromptSubmit` 在水位递增前完成注入；后续新提示仍必须递增水位并置 dirty | 宿主适配器 |
