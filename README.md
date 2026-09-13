@@ -89,7 +89,7 @@ export NOVA_HOME=/absolute/path/to/nova-state
 
 安装器可执行时会尽力预建状态根；无论安装阶段是否能够写入，首次 Hook `SessionStart` 和 MCP `initialize` 都会再次幂等创建，并通过实际写入、同步、原子替换和删除探针确认可用。旧插件数据只作为当前宿主的迁移来源：有效检查点按 `host → scopeKey` 非破坏复制，旧根不会被删除，rendezvous、锁和能力文件不会迁移。相对 `NOVA_HOME`、不可写目录或迁移冲突会明确失败并提示目标路径，不会改用工作区或 `/tmp`。
 
-动态检查点把一个宿主进程的首个可信 `SessionStart` 作为唯一会话 owner；同一进程若出现第二个会话或第二个 MCP instance，会持久撤销该进程的 Nova MCP 绑定并让后续状态调用失败封闭，普通对话仍可继续。当前宿主没有向 Hook 与 stdio MCP 同时提供会话 nonce，因此同一长生命周期宿主进程内的 Nova 多会话并发不受支持；应为每个需要动态检查点的会话启动独立 Codex/Claude Code 进程。
+动态检查点不把宿主 PID、目录或 MCP instance 数量作为会话绑定依据。每次 `nova_checkpoint_get/save` 调用前，宿主 `PreToolUse` 都会根据可信会话、目录、工具名和调用 ID 覆盖式注入一次性 `scopeProof`；MCP 原子消费并校验证明后，才按 `host → scopeKey` 路由当前会话状态。同一 PID、同一目录或单个 MCP runtime 中的多个会话继续按逐调用证明隔离；证明缺失、错配、伪造、过期或重放会在访问检查点前失败封闭，普通对话仍可继续。
 
 #### 从旧版兼容链接迁移
 
