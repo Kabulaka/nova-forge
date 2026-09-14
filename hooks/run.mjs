@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const HOOK_INPUT_LIMIT = 256 * 1024;
 const SESSION_SOURCES = new Set(["startup", "resume", "clear", "compact"]);
@@ -87,7 +87,14 @@ export async function main({
   }
 }
 
-const isMain =
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+function isMainModule(moduleUrl, argument) {
+  if (!argument) return false;
+  try {
+    return fs.realpathSync(fileURLToPath(moduleUrl)) === fs.realpathSync(path.resolve(argument));
+  } catch {
+    return moduleUrl === pathToFileURL(path.resolve(argument)).href;
+  }
+}
+
+const isMain = isMainModule(import.meta.url, process.argv[1]);
 if (isMain) await main();

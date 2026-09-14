@@ -1,4 +1,4 @@
 interface:
   display_name: "Nova Review"
-  short_description: "人工触发的独立审查、修复与最多三轮复审"
+  short_description: "人工触发，初审与复审总计最多三次结论"
   default_prompt: "Use $nova-review to review only the Git range or changes I explicitly select."
