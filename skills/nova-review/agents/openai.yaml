@@ -1,4 +1,4 @@
 interface:
   display_name: "Nova Review"
-  short_description: "人工触发的多工作项 Review 与审计闭环"
-  default_prompt: "Use $nova-review to review the explicitly selected Nova work items and record only an evidence-backed conclusion."
+  short_description: "人工触发的独立审查、修复与最多三轮复审"
+  default_prompt: "Use $nova-review to review only the Git range or changes I explicitly select."

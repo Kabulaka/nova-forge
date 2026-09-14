@@ -1,7 +1,7 @@
 {
   "name": "nova-forge",
   "version": "0.3.2",
-  "description": "Nova workflow skills and authority-safe degraded checkpoint recovery for Codex.",
+  "description": "Lightweight architecture, development, and human-triggered review SOPs for Codex.",
   "author": {
     "name": "Nova Forge contributors",
     "url": "https://github.com/Kabulaka/nova-forge"
@@ -10,25 +10,23 @@
   "repository": "https://github.com/Kabulaka/nova-forge",
   "keywords": [
     "nova",
+    "development",
     "workflow",
-    "checkpoint",
-    "compaction"
+    "review"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Nova Forge",
-    "shortDescription": "Structured Nova delivery with safe compaction recovery",
-    "longDescription": "Five Nova workflow skills plus local, structured, same-session checkpoint recovery for Codex and Claude Code.",
+    "shortDescription": "Low-overhead development SOP",
+    "longDescription": "Three focused skills for project architecture, direct development, and explicitly requested review.",
     "developerName": "Nova Forge contributors",
     "category": "Productivity",
     "capabilities": [
       "Write",
-      "Hooks",
-      "MCP"
+      "Hooks"
     ],
     "defaultPrompt": [
-      "Use Nova to clarify and implement this request."
+      "Use Nova to implement this request with minimal process overhead."
     ]
   }
 }

@@ -1,8 +1,0 @@
-{
-  "_contract": "../api/openapi.yaml",
-  "_contractVersion": "1.0.0",
-  "payload": {
-    "orderId": "order-001",
-    "status": "CREATED"
-  }
-}

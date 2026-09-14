@@ -1,7 +1,7 @@
 {
   "name": "nova-forge",
   "version": "0.3.2",
-  "description": "Nova workflow skills and authority-safe degraded checkpoint recovery for Claude Code.",
+  "description": "Lightweight architecture, development, and human-triggered review SOPs for Claude Code.",
   "author": {
     "name": "Nova Forge contributors",
     "url": "https://github.com/Kabulaka/nova-forge"
@@ -10,23 +10,9 @@
   "repository": "https://github.com/Kabulaka/nova-forge",
   "keywords": [
     "nova",
+    "development",
     "workflow",
-    "checkpoint",
-    "compaction"
+    "review"
   ],
-  "skills": "./skills/",
-  "mcpServers": {
-    "nova-checkpoint": {
-      "command": "node",
-      "args": [
-        "${CLAUDE_PLUGIN_ROOT}/runtime/mcp/server.mjs",
-        "--host",
-        "claude-code"
-      ],
-      "env": {
-        "NOVA_LEGACY_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}",
-        "NOVA_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
-      }
-    }
-  }
+  "skills": "./skills/"
 }

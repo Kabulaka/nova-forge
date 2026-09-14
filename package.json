@@ -3,7 +3,7 @@
   "version": "0.3.2",
   "private": true,
   "type": "module",
-  "description": "Versioned Nova workflow plugin for Codex and Claude Code with authority-safe degraded checkpoint recovery.",
+  "description": "Lightweight development SOP skills for Codex and Claude Code.",
   "author": "Nova Forge contributors",
   "repository": {
     "type": "git",
@@ -17,13 +17,9 @@
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
     ".codex-plugin/plugin.json",
-    ".mcp.json",
     "codex/AGENTS.global.md",
     "hooks/",
-    "runtime/",
-    "skills/",
-    "!skills/**/__pycache__/**",
-    "!skills/**/*.py[cod]"
+    "skills/"
   ],
   "scripts": {
     "dev:install": "node scripts/install-dev-plugin.mjs",

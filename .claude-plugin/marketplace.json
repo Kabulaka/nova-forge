@@ -4,14 +4,14 @@
     "name": "Nova Forge contributors"
   },
   "metadata": {
-    "description": "Versioned Nova workflow plugins",
+    "description": "Versioned Nova Forge development SOP plugin",
     "version": "0.3.2"
   },
   "plugins": [
     {
       "name": "nova-forge",
       "source": "./",
-      "description": "Nova workflows with local same-session compaction recovery.",
+      "description": "Low-overhead architecture, development, and review skills.",
       "version": "0.3.2",
       "author": {
         "name": "Nova Forge contributors"
@@ -19,9 +19,9 @@
       "category": "development",
       "keywords": [
         "nova",
+        "development",
         "workflow",
-        "checkpoint",
-        "compaction"
+        "review"
       ]
     }
   ]

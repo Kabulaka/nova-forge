@@ -1,4 +1,4 @@
 interface:
   display_name: "Nova Development"
-  short_description: "功能澄清、实现、测试与本地提交"
-  default_prompt: "Use $nova-development to clarify and implement one feature or fix with limited context loading and no automatic Review."
+  short_description: "低干扰的功能开发、修复、测试与本地提交"
+  default_prompt: "Use $nova-development to implement this request directly, asking only when a behavior-changing ambiguity remains."

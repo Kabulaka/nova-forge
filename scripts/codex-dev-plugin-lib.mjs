@@ -3,7 +3,6 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { withOwnerLock } from "../runtime/core/util.mjs";
 
 export const DEV_MARKETPLACE_NAME = "nova-forge-dev";
 export const PLUGIN_NAME = "nova-forge";
@@ -11,6 +10,57 @@ export const DEV_PLUGIN_ID = `${PLUGIN_NAME}@${DEV_MARKETPLACE_NAME}`;
 export const HOST_CODEX = "codex";
 export const HOST_CLAUDE_CODE = "claude-code";
 export const SUPPORTED_HOSTS = [HOST_CODEX, HOST_CLAUDE_CODE];
+
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function withOwnerLock(lockFile, callback, { timeoutMs, timeoutCode, timeoutMessage }) {
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true, mode: 0o700 });
+  const owner = JSON.stringify({
+    pid: process.pid,
+    token: crypto.randomBytes(16).toString("hex"),
+  });
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      fs.writeFileSync(lockFile, owner, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      try {
+        const observed = fs.readFileSync(lockFile, "utf8");
+        const parsed = JSON.parse(observed);
+        if (!processIsAlive(parsed.pid) && fs.readFileSync(lockFile, "utf8") === observed) {
+          fs.unlinkSync(lockFile);
+          continue;
+        }
+      } catch (lockError) {
+        if (lockError?.code === "ENOENT") continue;
+      }
+      if (Date.now() >= deadline) {
+        const timeoutError = new Error(timeoutMessage);
+        timeoutError.code = timeoutCode;
+        throw timeoutError;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+  try {
+    return callback();
+  } finally {
+    if (fs.readFileSync(lockFile, "utf8") !== owner) {
+      throw new Error(`development lock ownership changed: ${lockFile}`);
+    }
+    fs.unlinkSync(lockFile);
+  }
+}
 
 function executable(name, override) {
   if (override) return override;
@@ -286,7 +336,7 @@ function writeClaudeMarketplace(stageRoot, version) {
       {
         name: PLUGIN_NAME,
         source: `./plugins/${PLUGIN_NAME}`,
-        description: "Nova workflows with authority-safe checkpoint recovery.",
+        description: "Lightweight Nova development SOP skills.",
         version,
         category: "development",
       },
@@ -299,14 +349,11 @@ function writeClaudeMarketplace(stageRoot, version) {
 function validateSnapshot(pluginRoot) {
   const required = [
     ".codex-plugin/plugin.json",
-    ".mcp.json",
     "hooks/hooks.json",
     "hooks/run.mjs",
-    "runtime/mcp/server.mjs",
-    "skills/nova-requirements/SKILL.md",
+    "codex/AGENTS.global.md",
     "skills/nova-architecture/SKILL.md",
     "skills/nova-development/SKILL.md",
-    "skills/nova-doctor/SKILL.md",
     "skills/nova-review/SKILL.md",
   ];
   const missing = required.filter((relative) => !fs.existsSync(path.join(pluginRoot, relative)));
@@ -531,7 +578,7 @@ function installDevelopmentPluginUnlocked({
   for (const plugin of novaPlugins) output.write(`Will uninstall conflict: ${plugin.pluginId}\n`);
   if (priorDevMarketplace) output.write(`Will replace marketplace: ${DEV_MARKETPLACE_NAME}\n`);
   if (dryRun) {
-    output.write("DRY-RUN: no plugin, marketplace, or Nova state was changed.\n");
+    output.write("DRY-RUN: no plugin, marketplace, or development snapshot was changed.\n");
     return { dryRun: true, targetRoot, conflicts: novaPlugins.map((plugin) => plugin.pluginId) };
   }
 
@@ -584,7 +631,7 @@ function installDevelopmentPluginUnlocked({
     if (backupRoot) fs.rmSync(backupRoot, { recursive: true, force: true });
     output.write(`Installed: ${DEV_PLUGIN_ID} ${snapshot.version}\n`);
     output.write(`Snapshot SHA-256: ${snapshot.digest}\n`);
-    output.write(`Nova state preserved at: ${novaHome}\n`);
+    output.write(`Development marketplace root preserved at: ${novaHome}\n`);
     output.write(`Retained old Codex cache versions for live sessions: ${restoredCacheVersions}\n`);
     output.write("Existing sessions remain executable; start a new session to load the new snapshot.\n");
     return { ...snapshot, targetRoot, removedPluginIds, restoredCacheVersions };
@@ -653,9 +700,9 @@ function uninstallDevelopmentPluginUnlocked({
   output.write(`${hasPlugin ? "Will uninstall" : "Not installed"}: ${DEV_PLUGIN_ID}\n`);
   output.write(`${hasMarketplace ? "Will remove" : "Not configured"}: ${DEV_MARKETPLACE_NAME}\n`);
   output.write(`${preserveSnapshot ? "Will preserve shared" : "Will remove development"} snapshot: ${targetRoot}\n`);
-  output.write(`Will preserve Nova state: ${novaHome}\n`);
+  output.write(`Will preserve development marketplace root: ${novaHome}\n`);
   if (dryRun) {
-    output.write("DRY-RUN: no plugin, marketplace, or Nova state was changed.\n");
+    output.write("DRY-RUN: no plugin, marketplace, or development snapshot was changed.\n");
     return { dryRun: true, targetRoot, hasPlugin, hasMarketplace };
   }
 
@@ -681,7 +728,7 @@ function uninstallDevelopmentPluginUnlocked({
     throw new Error("Codex still reports the development plugin or marketplace after uninstall");
   }
   output.write(`Uninstalled: ${DEV_PLUGIN_ID}\n`);
-  output.write(`Nova state preserved at: ${novaHome}\n`);
+  output.write(`Development marketplace root preserved at: ${novaHome}\n`);
   output.write(`Retained old Codex cache versions for live sessions: ${restoredCacheVersions}\n`);
   return { targetRoot, removed: true, restoredCacheVersions };
 }
@@ -716,7 +763,7 @@ function installClaudeDevelopmentPluginUnlocked({
   output.write(`Claude development marketplace: ${targetRoot}\n`);
   for (const plugin of novaPlugins) output.write(`Will replace Claude plugin: ${plugin.id}\n`);
   if (dryRun) {
-    output.write("DRY-RUN: no Claude plugin, marketplace, or Nova state was changed.\n");
+    output.write("DRY-RUN: no Claude plugin, marketplace, or development snapshot was changed.\n");
     return { dryRun: true, targetRoot, conflicts: novaPlugins.map((plugin) => plugin.id) };
   }
 
@@ -779,7 +826,7 @@ function installClaudeDevelopmentPluginUnlocked({
     if (backupRoot) fs.rmSync(backupRoot, { recursive: true, force: true });
     output.write(`Installed for Claude Code: ${DEV_PLUGIN_ID} ${snapshot.claudeVersion}\n`);
     output.write(`Snapshot SHA-256: ${snapshot.digest}\n`);
-    output.write(`Nova state preserved at: ${novaHome}\n`);
+    output.write(`Development marketplace root preserved at: ${novaHome}\n`);
     output.write(`Retained old Claude cache versions for live sessions: ${restoredCacheVersions}\n`);
     output.write("Existing sessions remain executable; start a new session to load the new snapshot.\n");
     return { ...snapshot, targetRoot, removedPluginIds, restoredCacheVersions };
@@ -848,9 +895,9 @@ function uninstallClaudeDevelopmentPluginUnlocked({
   output.write(`${hasPlugin ? "Will uninstall" : "Not installed"}: ${DEV_PLUGIN_ID}\n`);
   output.write(`${hasMarketplace ? "Will remove" : "Not configured"}: ${DEV_MARKETPLACE_NAME}\n`);
   output.write(`${preserveSnapshot ? "Will preserve shared" : "Will remove"} snapshot: ${targetRoot}\n`);
-  output.write(`Will preserve Nova state: ${novaHome}\n`);
+  output.write(`Will preserve development marketplace root: ${novaHome}\n`);
   if (dryRun) {
-    output.write("DRY-RUN: no Claude plugin, marketplace, or Nova state was changed.\n");
+    output.write("DRY-RUN: no Claude plugin, marketplace, or development snapshot was changed.\n");
     return { dryRun: true, targetRoot, hasPlugin, hasMarketplace };
   }
 
@@ -876,7 +923,7 @@ function uninstallClaudeDevelopmentPluginUnlocked({
     throw new Error("Claude still reports the development plugin or marketplace after uninstall");
   }
   output.write(`Uninstalled from Claude Code: ${DEV_PLUGIN_ID}\n`);
-  output.write(`Nova state preserved at: ${novaHome}\n`);
+  output.write(`Development marketplace root preserved at: ${novaHome}\n`);
   output.write(`Retained old Claude cache versions for live sessions: ${restoredCacheVersions}\n`);
   return { targetRoot, removed: true, restoredCacheVersions };
 }

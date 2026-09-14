@@ -4,153 +4,98 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const skillNames = [
-  "nova-requirements",
-  "nova-architecture",
-  "nova-development",
-  "nova-doctor",
-  "nova-review",
-];
-
-function readJson(relative) {
-  return JSON.parse(fs.readFileSync(path.join(root, relative), "utf8"));
-}
-
-function requireValue(condition, message, errors) {
-  if (!condition) errors.push(message);
-}
-
+const skills = ["nova-architecture", "nova-development", "nova-review"];
+const removed = ["nova-requirements", "nova-doctor"];
 const errors = [];
+
+const readJson = (relative) =>
+  JSON.parse(fs.readFileSync(path.join(root, relative), "utf8"));
+const requireValue = (condition, message) => {
+  if (!condition) errors.push(message);
+};
+
 const packageJson = readJson("package.json");
 const codex = readJson(".codex-plugin/plugin.json");
-const codexMcp = readJson(".mcp.json");
 const claude = readJson(".claude-plugin/plugin.json");
 const codexMarketplace = readJson(".agents/plugins/marketplace.json");
 const claudeMarketplace = readJson(".claude-plugin/marketplace.json");
 const hooks = readJson("hooks/hooks.json");
 
-requireValue(packageJson.name === "nova-forge", "package name must be nova-forge", errors);
-requireValue(/^\d+\.\d+\.\d+$/.test(packageJson.version), "package version must be stable SemVer", errors);
-requireValue(packageJson.type === "module", "package type must be module", errors);
-requireValue(packageJson.engines?.node === ">=22.5.0", "Node engine must be >=22.5.0", errors);
-requireValue(!packageJson.dependencies, "runtime dependencies are forbidden", errors);
-requireValue(!packageJson.devDependencies, "development dependencies are forbidden", errors);
+requireValue(packageJson.name === "nova-forge", "package name must be nova-forge");
+requireValue(/^\d+\.\d+\.\d+$/.test(packageJson.version), "package version must be stable SemVer");
+requireValue(packageJson.type === "module", "package type must be module");
+requireValue(packageJson.engines?.node === ">=22.5.0", "Node engine must be >=22.5.0");
+requireValue(!packageJson.dependencies && !packageJson.devDependencies, "dependencies are forbidden");
 
-for (const [label, manifest] of [
-  ["Codex", codex],
-  ["Claude Code", claude],
-]) {
-  requireValue(manifest.name === packageJson.name, `${label} manifest name mismatch`, errors);
-  requireValue(manifest.version === packageJson.version, `${label} manifest version mismatch`, errors);
-  requireValue(manifest.skills === "./skills/", `${label} skills path mismatch`, errors);
-  requireValue(!Object.hasOwn(manifest, "hooks"), `${label} manifest must use default hooks/hooks.json discovery`, errors);
+for (const [label, manifest] of [["Codex", codex], ["Claude Code", claude]]) {
+  requireValue(manifest.name === packageJson.name, `${label} manifest name mismatch`);
+  requireValue(manifest.version === packageJson.version, `${label} manifest version mismatch`);
+  requireValue(manifest.skills === "./skills/", `${label} skills path mismatch`);
+  requireValue(!Object.hasOwn(manifest, "mcpServers"), `${label} manifest must not register MCP`);
+  requireValue(!Object.hasOwn(manifest, "hooks"), `${label} must use hooks/hooks.json discovery`);
 }
 
-requireValue(codex.mcpServers === "./.mcp.json", "Codex MCP config must use ./.mcp.json", errors);
-const codexServer = codexMcp.mcpServers?.["nova-checkpoint"];
-requireValue(codexServer?.command === "node", "Codex MCP command must use node", errors);
-requireValue(codexServer?.args?.includes("codex"), "Codex MCP host binding mismatch", errors);
 requireValue(
-  codexServer?.args?.[0] === "./runtime/mcp/server.mjs" && codexServer?.cwd === ".",
-  "Codex MCP must resolve its executable from the plugin-root cwd",
-  errors,
-);
-requireValue(
-  !Object.hasOwn(codexServer, "env"),
-  "Codex MCP must not pass unsupported plugin path placeholders through env",
-  errors,
-);
-requireValue(
-  JSON.stringify(codexServer?.env_vars) === JSON.stringify(["NOVA_HOME"]),
-  "Codex MCP must whitelist NOVA_HOME for the shared hook/MCP state root",
-  errors,
-);
-requireValue(
-  codexServer?.default_tools_approval_mode === "approve",
-  "Codex checkpoint tools must be approved for noninteractive lifecycle use",
-  errors,
-);
-const claudeServer = claude.mcpServers?.["nova-checkpoint"];
-requireValue(claudeServer?.command === "node", "Claude Code MCP command must use node", errors);
-requireValue(
-  claudeServer?.args?.includes("claude-code"),
-  "Claude Code MCP host binding mismatch",
-  errors,
-);
-requireValue(
-  claudeServer?.env?.NOVA_LEGACY_PLUGIN_DATA === "${CLAUDE_PLUGIN_DATA}" &&
-    !Object.hasOwn(claudeServer?.env || {}, "NOVA_PLUGIN_DATA"),
-  "Claude Code plugin data must be migration-only",
-  errors,
-);
-
-requireValue(
-  codexMarketplace.plugins?.[0]?.source?.source === "url" &&
-    codexMarketplace.plugins?.[0]?.source?.url === "https://github.com/Kabulaka/nova-forge.git" &&
+  codexMarketplace.plugins?.[0]?.source?.url === "https://github.com/Kabulaka/nova-forge.git" &&
     codexMarketplace.plugins?.[0]?.source?.ref === `v${packageJson.version}`,
   "Codex marketplace source mismatch",
-  errors,
 );
 requireValue(
   claudeMarketplace.metadata?.version === packageJson.version &&
-    claudeMarketplace.plugins?.[0]?.version === packageJson.version,
-  "Claude Code marketplace version mismatch",
-  errors,
-);
-requireValue(
-  claudeMarketplace.plugins?.[0]?.source === "./",
-  "Claude Code marketplace must install from its cloned repository",
-  errors,
+    claudeMarketplace.plugins?.[0]?.version === packageJson.version &&
+    claudeMarketplace.plugins?.[0]?.source === "./",
+  "Claude Code marketplace mismatch",
 );
 
-const expectedEvents = [
-  "SessionStart",
-  "UserPromptSubmit",
-  "PreToolUse",
-  "PostToolUse",
-  "Stop",
-  "PreCompact",
-  "PostCompact",
-];
 requireValue(
-  JSON.stringify(Object.keys(hooks.hooks || {}).sort()) === JSON.stringify(expectedEvents.sort()),
-  "hook event set mismatch",
-  errors,
+  JSON.stringify(Object.keys(hooks.hooks || {})) === JSON.stringify(["SessionStart"]),
+  "only SessionStart hook is allowed",
+);
+const session = hooks.hooks?.SessionStart?.[0];
+requireValue(session?.matcher === "startup|resume|clear|compact", "SessionStart matcher mismatch");
+requireValue(session?.hooks?.length === 1, "SessionStart must have one command");
+requireValue(
+  session?.hooks?.[0]?.command === 'node "${CLAUDE_PLUGIN_ROOT}/hooks/run.mjs"',
+  "SessionStart command mismatch",
 );
 
-for (const name of skillNames) {
-  const rootAlias = path.join(root, name);
-  requireValue(
-    fs.lstatSync(rootAlias, { throwIfNoEntry: false }) === undefined,
-    `legacy root skill alias must be absent: ${name}`,
-    errors,
-  );
+for (const name of skills) {
   const skillFile = path.join(root, "skills", name, "SKILL.md");
-  requireValue(fs.existsSync(skillFile), `missing skill ${name}`, errors);
+  requireValue(fs.existsSync(skillFile), `missing skill ${name}`);
   if (fs.existsSync(skillFile)) {
     const text = fs.readFileSync(skillFile, "utf8");
-    requireValue(new RegExp(`^name:\\s*["']?${name}["']?\\s*$`, "m").test(text), `skill name mismatch ${name}`, errors);
+    requireValue(new RegExp(`^name:\\s*${name}\\s*$`, "m").test(text), `skill name mismatch ${name}`);
   }
 }
-
+for (const name of removed) {
+  requireValue(!fs.existsSync(path.join(root, "skills", name)), `removed skill still exists: ${name}`);
+}
+for (const relative of [".mcp.json", "runtime", "codex/scripts"]) {
+  requireValue(!fs.existsSync(path.join(root, relative)), `removed component still exists: ${relative}`);
+}
 for (const relative of [
   "codex/AGENTS.global.md",
   "hooks/run.mjs",
-  "runtime/adapters/hook.mjs",
-  "runtime/core/schema.mjs",
-  "runtime/core/scope-proof.mjs",
-  "runtime/core/storage.mjs",
-  "runtime/core/rendezvous.mjs",
-  "runtime/core/state-root.mjs",
-  "runtime/bootstrap.mjs",
-  "runtime/mcp/server.mjs",
+  "skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md",
+  "skills/nova-development/assets/DESIGN.template.md",
 ]) {
-  requireValue(fs.existsSync(path.join(root, relative)), `missing plugin component ${relative}`, errors);
+  requireValue(fs.existsSync(path.join(root, relative)), `missing component ${relative}`);
+}
+
+const rules = fs.readFileSync(path.join(root, "codex", "AGENTS.global.md"), "utf8");
+for (const phrase of [
+  "nova-architecture",
+  "蓝图存在后，只有用户主动调用",
+  "不主动扫描、枚举、通配匹配或索引",
+  "只有用户明确要求 Review",
+  "Conventional Commit",
+]) {
+  requireValue(rules.includes(phrase), `global rules missing: ${phrase}`);
 }
 
 if (errors.length) {
   errors.forEach((error) => process.stderr.write(`ERROR: ${error}\n`));
   process.exitCode = 1;
 } else {
-  process.stdout.write("PASS: dual-host plugin structure\n");
+  process.stdout.write("PASS: lightweight dual-host plugin structure\n");
 }

@@ -1,7 +1,0 @@
-{
-  "feature_year": 2026,
-  "review_batch": "NR-20260913-dual-host-continuity-fix",
-  "review_path": ".nova/audit/reviews/2026/09/NR-20260913-dual-host-continuity-fix.yaml",
-  "schema": 1,
-  "work_item": "FIX-01a095cb-d0ac-78f3-800d-65dbeadaac9b"
-}
