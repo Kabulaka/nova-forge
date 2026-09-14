@@ -77,7 +77,14 @@ for (const relative of [
   "codex/AGENTS.global.md",
   "hooks/run.mjs",
   "skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md",
+  "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
+  "skills/nova-architecture/references/architecture-standard.md",
   "skills/nova-development/assets/DESIGN.template.md",
+  "skills/nova-development/references/conversation-sop.md",
+  "skills/nova-development/references/design-document-standard.md",
+  "skills/nova-development/references/implementation-sop.md",
+  "skills/nova-development/references/reference-research-sop.md",
+  "skills/nova-review/references/review-sop.md",
 ]) {
   requireValue(fs.existsSync(path.join(root, relative)), `missing component ${relative}`);
 }

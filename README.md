@@ -1,6 +1,6 @@
 # Nova Forge
 
-Nova Forge 是面向 Codex 和 Claude Code 的轻量开发辅助 SOP。它只保留项目架构、直接开发和人工 Review 三项能力，不再运行需求访谈流水线、审计台账或会话状态框架。
+Nova Forge 是面向 Codex 和 Claude Code 的高效率开发辅助 SOP。它保留项目架构、证据先行的必要澄清、直接开发和严格人工 Review，不再运行需求访谈流水线、审计台账或会话状态框架。
 
 ## 核心技能
 
@@ -10,7 +10,7 @@ Nova Forge 是面向 Codex 和 Claude Code 的轻量开发辅助 SOP。它只保
 | `nova-development` | 普通功能、修复和维护 | 必要澄清、编码、测试、本地提交 |
 | `nova-review` | 用户明确要求 Review | 独立审查、统一修复、复测复审 |
 
-普通开发不会自动创建设计、启动 Review、push 或发布。只有影响行为的真实歧义才会触发单问题澄清。
+普通开发不会自动创建设计、启动 Review、push 或发布。只有影响当前交付并阻塞实现的真实歧义才会触发 Architecture 与 Development 共用的单问题澄清；Review 仍保留独立 reviewer、显式思考度、七维检查、问题分级、证据复用和最多三轮规则。
 
 ## 最小项目约定
 
@@ -38,7 +38,7 @@ codex plugin add nova-forge@nova-forge
 /plugin install nova-forge@nova-forge
 ```
 
-插件只在 `SessionStart` 的 `startup`、`resume`、`clear` 和 `compact` 事件注入精简版 `codex/AGENTS.global.md`。没有 MCP 服务、后台状态或其他生命周期 Hook。
+插件只在 `SessionStart` 的 `startup`、`resume`、`clear` 和 `compact` 事件注入核心 `codex/AGENTS.global.md`。没有 MCP 服务、后台状态或其他生命周期 Hook。
 
 ## 本地开发安装
 

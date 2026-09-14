@@ -106,7 +106,7 @@ test("real hook entrypoint works through a filesystem alias", {
     assert.equal(result.stderr, "");
     assert.match(
       JSON.parse(result.stdout).hookSpecificOutput.additionalContext,
-      /Nova Forge 开发辅助约定/,
+      /全局工作约定/,
     );
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });

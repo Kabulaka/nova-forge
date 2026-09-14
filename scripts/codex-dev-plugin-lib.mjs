@@ -353,8 +353,15 @@ function validateSnapshot(pluginRoot) {
     "hooks/run.mjs",
     "codex/AGENTS.global.md",
     "skills/nova-architecture/SKILL.md",
+    "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
+    "skills/nova-architecture/references/architecture-standard.md",
     "skills/nova-development/SKILL.md",
+    "skills/nova-development/references/conversation-sop.md",
+    "skills/nova-development/references/design-document-standard.md",
+    "skills/nova-development/references/implementation-sop.md",
+    "skills/nova-development/references/reference-research-sop.md",
     "skills/nova-review/SKILL.md",
+    "skills/nova-review/references/review-sop.md",
   ];
   const missing = required.filter((relative) => !fs.existsSync(path.join(pluginRoot, relative)));
   if (missing.length) throw new Error(`development snapshot is missing: ${missing.join(", ")}`);
