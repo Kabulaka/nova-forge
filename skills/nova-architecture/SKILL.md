@@ -48,7 +48,7 @@ description: 项目蓝图缺失时负责初始化；蓝图存在后，仅当用�
 5. `.nova/SHARED_CAPABILITIES.md` 是可选的已实现能力复用目录，新建时使用 [共享能力目录模板](assets/SHARED_CAPABILITIES.template.md)。它不是架构索引，不替代代码和测试；没有已实现能力时不创建。
 6. 只有用户明确要求规划或沉淀待办时才在蓝图增加待开发工作；完成后删除条目，设计文档保留，不记录 Review 状态。
 
-写入前向用户展示本次架构摘要、取舍、影响和目标文件并取得明确确认。写入后运行与项目相称的结构、链接和项目验证，检查 diff，并创建一个普通 Conventional Commit；不得添加专有编号或 trailers，不得自动 Review、push 或发布。
+写入前向用户展示本次架构摘要、取舍、影响和目标文件并取得明确确认。写入后运行与项目相称的结构、链接和项目验证，检查 diff，并按全局 `type(scope): 中文结果摘要` 规则创建 Conventional Commit；type 必须反映实际变更性质，不得使用流程型 `arch` 代替；不得添加专有编号或 trailers，不得自动 Review、push 或发布。
 
 ## 完成报告
 

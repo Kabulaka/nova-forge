@@ -46,7 +46,7 @@ REJECT 后主代理统一修复全部 Blocker 和 Observation-Fix，不借机重
 ## 5. PASS 后提交与报告
 
 - PASS 或合法 PASS WITH NOTES 后结束审查，不生成审计、manifest、closure transaction、工作项编号、Review 状态或 Nova trailers。
-- 确有 Review 修正且复审通过时，创建一个普通 Conventional Commit；只有安全且未共享历史时才 amend。
+- 确有 Review 修正且复审通过时，按全局 `type(scope): 中文结果摘要` 规则创建 Conventional Commit；type 反映实际修正性质，不使用流程型 `review`；只有安全且未共享历史时才 amend。
 - 没有修正时不创建空提交；不修改蓝图或设计记录 Review。
 - 不自动 push、发布、修改远程或提交 SVN。
 - 完成报告逐轮列出范围与内容标识、结论、全部问题和修正、验证证据、实际修改路径、提交、刻意未改范围、延期项和遗留风险；不运行报告校验器。

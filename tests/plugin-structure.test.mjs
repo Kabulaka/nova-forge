@@ -44,7 +44,11 @@ test("global rules preserve core governance and low-overhead routing", () => {
   assert.match(rules, /不主动扫描、枚举、通配匹配或索引/);
   assert.match(rules, /只有用户明确要求 Review/);
   assert.match(rules, /显式思考度/);
-  assert.match(rules, /Conventional Commit/);
+  assert.match(rules, /type\(scope\): 中文结果摘要/);
+  for (const type of ["feat", "fix", "refactor", "perf", "test", "docs", "build", "ci", "chore", "revert"]) {
+    assert.equal(rules.includes("`" + type + "`"), true, `missing commit type: ${type}`);
+  }
+  assert.match(rules, /all\/misc\/core/);
 });
 
 test("architecture and development share one complete clarification SOP", () => {
@@ -123,4 +127,30 @@ test("architecture preserves shared capability and protocol contracts", () => {
     assert.equal(standard.includes(phrase), true, `missing architecture rule: ${phrase}`);
   }
   assert.match(development, /目录缺失或未命中不能直接断言不存在/);
+});
+
+test("development preserves Conventional Commit classification without Nova trailers", () => {
+  const implementation = fs.readFileSync(
+    path.join(
+      pluginRoot,
+      "skills",
+      "nova-development",
+      "references",
+      "implementation-sop.md",
+    ),
+    "utf8",
+  );
+  for (const phrase of [
+    "type(scope): 中文结果摘要",
+    "| `feat` |",
+    "| `fix` |",
+    "| `refactor` |",
+    "| `perf` |",
+    "小写 kebab-case",
+    "BREAKING CHANGE:",
+  ]) {
+    assert.equal(implementation.includes(phrase), true, `missing commit rule: ${phrase}`);
+  }
+  assert.match(implementation, /不添加 FEAT\/FIX\/MAINT 编号、Nova trailers/);
+  assert.doesNotMatch(implementation, /Work-Item:|Review-Policy:|Nova-Schema:/);
 });
