@@ -7,7 +7,7 @@ Nova Forge 是面向 Codex 和 Claude Code 的高效率开发辅助 SOP。它保
 | 技能 | 何时使用 | 默认结果 |
 |---|---|---|
 | `nova-architecture` | 项目没有蓝图，或用户主动要求修改共享架构 | 创建或更新蓝图及必要架构文档 |
-| `nova-development` | 普通功能、修复和维护 | 必要澄清、编码、测试、本地提交 |
+| `nova-development` | 真实歧义、设计、复杂跨模块/高风险实施，或用户主动调用 | 必要澄清、编码、测试、本地提交 |
 | `nova-review` | 用户明确要求 Review | 独立审查、统一修复、复测复审 |
 
 普通开发不会自动创建设计、启动 Review、push 或发布。只有影响当前交付并阻塞实现的真实歧义才会触发 Architecture 与 Development 共用的单问题澄清；Review 仍保留独立 reviewer、显式思考度、七维检查、问题分级、证据复用和最多三轮规则。
@@ -58,7 +58,8 @@ npm run claude:dev:uninstall
 
 ## 使用
 
-- 普通请求：调用 `$nova-forge:nova-development`。
+- 蓝图存在且架构不变的明确单范围请求：直接描述需求，由全局快速路径完成，不必调用技能。
+- 真实歧义、设计、复杂跨模块/高风险实施，或主动需要完整开发 SOP：调用 `$nova-forge:nova-development`。
 - 初始化蓝图或主动调整共享架构：调用 `$nova-forge:nova-architecture`。
 - 人工审查指定 Git 范围：调用 `$nova-forge:nova-review`。
 

@@ -154,3 +154,69 @@ test("development preserves Conventional Commit classification without Nova trai
   assert.match(implementation, /不添加 FEAT\/FIX\/MAINT 编号、Nova trailers/);
   assert.doesNotMatch(implementation, /Work-Item:|Review-Policy:|Nova-Schema:/);
 });
+
+test("explicit development uses one bounded fast path without weakening fallbacks", () => {
+  const rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
+  const development = fs.readFileSync(
+    path.join(pluginRoot, "skills", "nova-development", "SKILL.md"),
+    "utf8",
+  );
+  const implementation = fs.readFileSync(
+    path.join(
+      pluginRoot,
+      "skills",
+      "nova-development",
+      "references",
+      "implementation-sop.md",
+    ),
+    "utf8",
+  );
+
+  for (const phrase of [
+    "明确开发快速路径",
+    "资格在首次准备批次中一次判定",
+    "完整加载实施 SOP",
+    "验证批次",
+    "提交批次",
+    "五至七个执行项",
+  ]) {
+    assert.equal(
+      rules.includes(phrase) || development.includes(phrase) || implementation.includes(phrase),
+      true,
+      `missing fast-path contract: ${phrase}`,
+    );
+  }
+
+  for (const phrase of [
+    "真实歧义使用共享澄清 SOP",
+    "蓝图缺失或共享架构不足进入 Architecture",
+    "用户明确要求时才进入设计、Plan mode、参考研究或 Review",
+    "不得为了留在快速路径而推断用户决定",
+  ]) {
+    assert.equal(development.includes(phrase), true, `missing fast-path fallback: ${phrase}`);
+  }
+
+  assert.match(implementation, /不是正确性门禁/);
+  assert.match(implementation, /不得为满足数量目标少读必要事实、跳过测试或隐瞒失败/);
+  assert.doesNotMatch(development, /自动启动 Review|自动扫描.*\.nova\/design/);
+});
+
+test("clear single-scope development stays on the global path without loading a skill", () => {
+  const readme = fs.readFileSync(path.join(pluginRoot, "README.md"), "utf8");
+  const rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
+  const development = fs.readFileSync(
+    path.join(pluginRoot, "skills", "nova-development", "SKILL.md"),
+    "utf8",
+  );
+
+  assert.match(rules, /请求明确、单一范围且不改变共享架构/);
+  assert.match(rules, /直接检查固定路径.*PROJECT_BLUEPRINT\.md/);
+  assert.match(rules, /禁止用.*rg --files.*代替存在性检查/);
+  assert.match(rules, /不加载技能或实施 SOP/);
+  assert.match(rules, /不加载 `nova-development` 或其实施 SOP/);
+  assert.match(rules, /存在真实歧义、用户要求设计或沉淀待办/);
+  assert.match(development, /明确单范围请求由全局快速路径直接处理/);
+  assert.match(development, /不应自动加载本技能/);
+  assert.match(readme, /明确单范围请求：直接描述需求/);
+  assert.doesNotMatch(readme, /普通请求：调用.*nova-development/);
+});

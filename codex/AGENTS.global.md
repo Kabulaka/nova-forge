@@ -13,8 +13,9 @@
 ## 技能路由
 
 - 项目不存在 `.nova/PROJECT_BLUEPRINT.md` 时，由 `nova-architecture` 负责初始化；蓝图存在后，只有用户主动调用 `nova-architecture` 或明确要求修改共享架构时才修改架构。
-- 普通开发先只读蓝图，复用其中的技术栈、模块、目录、公共契约和精确链接；已有架构足以约束目标功能时直接使用 `nova-development`。
-- 普通功能、局部调整、缺陷恢复和维护使用 `nova-development`；实施时必须完整读取其 `references/implementation-sop.md`。
+- 判断蓝图是否存在时直接检查固定路径 `.nova/PROJECT_BLUEPRINT.md`（如 `test -f`）；禁止用会忽略隐藏目录的 `rg --files`、目录扫描或索引结果代替存在性检查。
+- 普通开发先只读蓝图，复用其中的技术栈、模块、目录、公共契约和精确链接；蓝图存在、请求明确、单一范围且不改变共享架构时，直接按本文件“默认快速开发”执行，不加载技能或实施 SOP。
+- 存在真实歧义、用户要求设计或沉淀待办、需要跨回合跟踪多个独立交付物、高风险外部研究、复杂跨模块实施，或用户主动调用时，使用 `nova-development`；实施前完整读取其 `references/implementation-sop.md`。
 - 普通开发不自动读取设计目录；无法判定是否改变用户可见行为、数据、公共契约或架构时，只按共享澄清协议问一个路由问题。
 - Architecture 与 Development 发生真实歧义时共同使用 `skills/nova-development/references/conversation-sop.md`，不得各自维护不同的澄清协议。
 - 只有用户明确要求 Review、审查、复审或补审时使用 `nova-review`。
@@ -56,10 +57,12 @@
 ## 默认快速开发
 
 1. 实现事实以代码、测试和配置为准；蓝图/设计只定义公共约束与目标。同一失败三次未解决即停止并报告。
-2. 默认流程：固定差异与验收 → 编码 → 测试 → 精确本地提交；只有真实歧义阻塞实现时才进入共享澄清，明确请求直接开发，且不得自动启动 Review。
-3. 本文件代表用户对最低验收通过且无阻断后的精确范围本地 Git commit 的持续授权；Git push、远程配置、发布和 SVN commit 仍需独立授权。
-4. 不创建需求块、工作项编号、交付台账、审计、检查点、迁移状态、Review 状态或 Nova commit trailers。
-5. 完整范围、契约、证据、依赖、门禁、plan mode 与报告要求见 `skills/nova-development/references/implementation-sop.md`。
+2. 蓝图存在、行为与验收明确、不改变共享架构且用户未要求其他流程时，走明确开发快速路径；资格随首次准备一次判定，不拆成检查或汇报。
+3. 快速路径把项目规则、蓝图精确链接、Git 基线、目标代码和测试合为一个准备批次，随后集中编辑、一次验证、一次提交；不加载 `nova-development` 或其实施 SOP，只有当前结果会改变下一动作时才增加模型—工具往返。
+4. 默认流程仍是固定差异与验收 → 编码 → 测试 → 精确本地提交；条件不成立时回退对应的共享澄清、Architecture、设计、Plan mode、研究或 Review 分支，不得少读必要事实或自动启动 Review。
+5. 本文件代表用户对最低验收通过且无阻断后的精确范围本地 Git commit 的持续授权；Git push、远程配置、发布和 SVN commit 仍需独立授权。
+6. 不创建需求块、工作项编号、交付台账、审计、检查点、迁移状态、Review 状态或 Nova commit trailers。
+7. 完整范围、契约、证据、依赖、门禁、plan mode 与报告要求见 `skills/nova-development/references/implementation-sop.md`。
 
 ## 工作树与提交
 
