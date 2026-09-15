@@ -4,8 +4,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const skills = ["nova-architecture", "nova-development", "nova-review"];
+const skills = ["nova-architecture", "nova-development", "nova-review", "nova-commit"];
 const removed = ["nova-requirements", "nova-doctor"];
+const removedReferences = [
+  "skills/nova-architecture/references/architecture-standard.md",
+  "skills/nova-development/references/implementation-sop.md",
+  "skills/nova-review/references/review-sop.md",
+];
 const errors = [];
 
 const readJson = (relative) =>
@@ -67,10 +72,19 @@ for (const name of skills) {
     requireValue(new RegExp(`^name:\\s*${name}\\s*$`, "m").test(text), `skill name mismatch ${name}`);
   }
 }
+const actualSkills = fs
+  .readdirSync(path.join(root, "skills"), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort();
+requireValue(
+  JSON.stringify(actualSkills) === JSON.stringify([...skills].sort()),
+  `skills must be exactly ${skills.join(", ")}; found ${actualSkills.join(", ")}`,
+);
 for (const name of removed) {
   requireValue(!fs.existsSync(path.join(root, "skills", name)), `removed skill still exists: ${name}`);
 }
-for (const relative of [".mcp.json", "runtime", "codex/scripts"]) {
+for (const relative of [".mcp.json", "runtime", "codex/scripts", ...removedReferences]) {
   requireValue(!fs.existsSync(path.join(root, relative)), `removed component still exists: ${relative}`);
 }
 for (const relative of [
@@ -78,13 +92,10 @@ for (const relative of [
   "hooks/run.mjs",
   "skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md",
   "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
-  "skills/nova-architecture/references/architecture-standard.md",
   "skills/nova-development/assets/DESIGN.template.md",
   "skills/nova-development/references/conversation-sop.md",
   "skills/nova-development/references/design-document-standard.md",
-  "skills/nova-development/references/implementation-sop.md",
   "skills/nova-development/references/reference-research-sop.md",
-  "skills/nova-review/references/review-sop.md",
 ]) {
   requireValue(fs.existsSync(path.join(root, relative)), `missing component ${relative}`);
 }
@@ -95,7 +106,7 @@ for (const phrase of [
   "蓝图存在后，只有用户主动调用",
   "不主动扫描、枚举、通配匹配或索引",
   "只有用户明确要求 Review",
-  "Conventional Commit",
+  "只有用户明确要求创建本地提交",
 ]) {
   requireValue(rules.includes(phrase), `global rules missing: ${phrase}`);
 }

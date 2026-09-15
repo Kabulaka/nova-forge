@@ -2,7 +2,7 @@
 
 ## 目标
 
-同一发布包为 Codex 和 Claude Code 提供相同的三个 Nova 技能与 SessionStart 规则注入，不引入常驻服务或项目状态。
+同一发布包为 Codex 和 Claude Code 提供相同的四个 Nova 技能与 SessionStart 规则注入，不引入常驻服务或项目状态。
 
 ## 组件
 

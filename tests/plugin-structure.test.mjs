@@ -6,6 +6,7 @@ import { pluginRoot } from "./helpers.mjs";
 
 const readJson = (relative) =>
   JSON.parse(fs.readFileSync(path.join(pluginRoot, relative), "utf8"));
+const read = (relative) => fs.readFileSync(path.join(pluginRoot, relative), "utf8");
 
 test("marketplaces use host-native versioned sources", () => {
   const version = readJson("package.json").version;
@@ -19,8 +20,15 @@ test("marketplaces use host-native versioned sources", () => {
   assert.equal(claude.plugins[0].version, version);
 });
 
-test("plugin exposes exactly three skills, one hook event, and no MCP", () => {
-  for (const name of ["nova-architecture", "nova-development", "nova-review"]) {
+test("plugin exposes exactly four skills, one hook event, and no MCP", () => {
+  const expectedSkills = ["nova-architecture", "nova-commit", "nova-development", "nova-review"];
+  const actualSkills = fs
+    .readdirSync(path.join(pluginRoot, "skills"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(actualSkills, expectedSkills);
+  for (const name of expectedSkills) {
     assert.equal(fs.existsSync(path.join(pluginRoot, "skills", name, "SKILL.md")), true);
   }
   for (const name of ["nova-requirements", "nova-doctor"]) {
@@ -35,41 +43,29 @@ test("plugin exposes exactly three skills, one hook event, and no MCP", () => {
   assert.equal(Object.hasOwn(readJson(".claude-plugin/plugin.json"), "mcpServers"), false);
 });
 
-test("global rules preserve core governance and low-overhead routing", () => {
-  const rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
-  assert.match(rules, /行为准则（强制）/);
-  assert.match(rules, /技能控制文档加载/);
-  assert.match(rules, /上下文压缩与续接/);
-  assert.match(rules, /蓝图存在后，只有用户主动调用/);
-  assert.match(rules, /不主动扫描、枚举、通配匹配或索引/);
-  assert.match(rules, /只有用户明确要求 Review/);
-  assert.match(rules, /显式思考度/);
-  assert.match(rules, /type\(scope\): 中文结果摘要/);
-  for (const type of ["feat", "fix", "refactor", "perf", "test", "docs", "build", "ci", "chore", "revert"]) {
-    assert.equal(rules.includes("`" + type + "`"), true, `missing commit type: ${type}`);
+test("global rules are a compact router rather than duplicated skill SOPs", () => {
+  const rules = read("codex/AGENTS.global.md");
+  for (const phrase of [
+    "任何代码、配置或测试",
+    "只有用户明确要求 Review",
+    "只有用户明确要求创建本地提交",
+    "不主动扫描、枚举、通配匹配或索引",
+    "直接检查固定路径",
+    "Architecture、Development 与 Review 不得创建提交",
+    "只能消费进入技能前已有且有效的验证证据",
+    "不得自行调用其他技能制造证据后继续提交",
+  ]) {
+    assert.equal(rules.includes(phrase), true, `missing global boundary: ${phrase}`);
   }
-  assert.match(rules, /all\/misc\/core/);
+  assert.doesNotMatch(rules, /行为准则（强制）|Context-mode 可选路由|显式思考度/);
+  assert.doesNotMatch(rules, /type\(scope\)|BREAKING CHANGE:|`feat`|`fix`|all\/misc\/core/);
+  assert.doesNotMatch(rules, /默认快速开发|implementation-sop|五至七个执行项/);
 });
 
 test("architecture and development share one complete clarification SOP", () => {
-  const architecture = fs.readFileSync(
-    path.join(pluginRoot, "skills", "nova-architecture", "SKILL.md"),
-    "utf8",
-  );
-  const development = fs.readFileSync(
-    path.join(pluginRoot, "skills", "nova-development", "SKILL.md"),
-    "utf8",
-  );
-  const conversation = fs.readFileSync(
-    path.join(
-      pluginRoot,
-      "skills",
-      "nova-development",
-      "references",
-      "conversation-sop.md",
-    ),
-    "utf8",
-  );
+  const architecture = read("skills/nova-architecture/SKILL.md");
+  const development = read("skills/nova-development/SKILL.md");
+  const conversation = read("skills/nova-development/references/conversation-sop.md");
   assert.match(architecture, /\.\.\/nova-development\/references\/conversation-sop\.md/);
   assert.match(development, /references\/conversation-sop\.md/);
   for (const phrase of [
@@ -83,64 +79,77 @@ test("architecture and development share one complete clarification SOP", () => 
   }
 });
 
-test("review preserves the accumulated independent-review rules", () => {
-  const skill = fs.readFileSync(
-    path.join(pluginRoot, "skills", "nova-review", "SKILL.md"),
-    "utf8",
-  );
-  const review = fs.readFileSync(
-    path.join(pluginRoot, "skills", "nova-review", "references", "review-sop.md"),
-    "utf8",
-  );
-  for (const phrase of [
-    "显式 `reasoning_effort`",
-    "默认与主代理当前思考度一致",
-    "七个维度",
-    "Observation-Defer",
-    "followup_task",
-    "初审 + 两次复审",
-    "第 3 轮仍 REJECT",
-    "不得创建空提交",
-  ]) {
-    assert.equal(review.includes(phrase), true, `missing review rule: ${phrase}`);
-  }
-  assert.match(skill, /\.\.\/nova-development\/references\/conversation-sop\.md/);
-  assert.doesNotMatch(review, /允许进入关闭|closure commit|closure transaction/);
-});
-
-test("architecture preserves shared capability and protocol contracts", () => {
-  const standard = fs.readFileSync(
-    path.join(pluginRoot, "skills", "nova-architecture", "references", "architecture-standard.md"),
-    "utf8",
-  );
-  const development = fs.readFileSync(
-    path.join(pluginRoot, "skills", "nova-development", "SKILL.md"),
-    "utf8",
-  );
+test("architecture keeps its full contract in one skill and leaves changes uncommitted", () => {
+  const architecture = read("skills/nova-architecture/SKILL.md");
   for (const phrase of [
     "OpenAPI 3.0.x/3.1.x",
     "AsyncAPI 2.x/3.x",
     "必须与契约的 `info.version` 一致",
     ".nova/SHARED_CAPABILITIES.md",
-    "不是架构索引",
+    "七章完整有序",
+    "结果保持未提交",
+    "简单示例",
   ]) {
-    assert.equal(standard.includes(phrase), true, `missing architecture rule: ${phrase}`);
+    assert.equal(architecture.includes(phrase), true, `missing architecture contract: ${phrase}`);
   }
-  assert.match(development, /目录缺失或未命中不能直接断言不存在/);
+  assert.equal(
+    fs.existsSync(path.join(pluginRoot, "skills/nova-architecture/references/architecture-standard.md")),
+    false,
+  );
+  assert.doesNotMatch(architecture, /创建 Conventional Commit|type\(scope\)/);
 });
 
-test("development preserves Conventional Commit classification without Nova trailers", () => {
-  const implementation = fs.readFileSync(
-    path.join(
-      pluginRoot,
-      "skills",
-      "nova-development",
-      "references",
-      "implementation-sop.md",
-    ),
-    "utf8",
-  );
+test("development owns all implementation constraints in one skill without committing", () => {
+  const development = read("skills/nova-development/SKILL.md");
   for (const phrase of [
+    "所有具体功能、局部调整、缺陷恢复和维护",
+    "接口契约",
+    "核心不变量",
+    "失败语义",
+    "测试与证据复用",
+    "一个准备批次",
+    "一个失败即停的验证批次",
+    "不暂存、不提交",
+    "简单示例",
+  ]) {
+    assert.equal(development.includes(phrase), true, `missing development contract: ${phrase}`);
+  }
+  assert.equal(
+    fs.existsSync(path.join(pluginRoot, "skills/nova-development/references/implementation-sop.md")),
+    false,
+  );
+  assert.doesNotMatch(development, /提交首行|提交批次|五至七个执行项|本地提交 hash/);
+});
+
+test("review keeps accumulated rules in one skill and never commits", () => {
+  const review = read("skills/nova-review/SKILL.md");
+  for (const phrase of [
+    "显式 `reasoning_effort`",
+    "默认与主代理当前思考度一致",
+    "七维检查清单",
+    "Observation-Defer",
+    "followup_task",
+    "初审 + 两次复审",
+    "第 3 轮仍 REJECT",
+    "等待超时只表示等待窗口结束",
+    "复审通过后仍保持未提交",
+  ]) {
+    assert.equal(review.includes(phrase), true, `missing review rule: ${phrase}`);
+  }
+  assert.equal(
+    fs.existsSync(path.join(pluginRoot, "skills/nova-review/references/review-sop.md")),
+    false,
+  );
+  assert.doesNotMatch(
+    review,
+    /创建 Conventional Commit|创建一个普通.*提交|git commit|closure commit|closure transaction/,
+  );
+});
+
+test("commit is the sole owner of local commit behavior", () => {
+  const commit = read("skills/nova-commit/SKILL.md");
+  for (const phrase of [
+    "只有用户明确",
     "type(scope): 中文结果摘要",
     "| `feat` |",
     "| `fix` |",
@@ -148,75 +157,35 @@ test("development preserves Conventional Commit classification without Nova trai
     "| `perf` |",
     "小写 kebab-case",
     "BREAKING CHANGE:",
+    "git diff --cached --check",
+    "禁止 `git add .`",
+    "不得自行测试、修复或放宽门禁",
+    "进入本技能之前已经存在",
+    "当前 Commit 调用立即结束",
+    "不得自动调用 `nova-development`",
+    "新的明确 Commit 请求",
+    "候选提交内容标识",
+    "最终 staged 内容",
+    "即使路径集合不变",
+    "不添加工作项、Review、审计或其他流程 trailers",
+    "宿主自身的提交归属信息服从宿主设置",
   ]) {
-    assert.equal(implementation.includes(phrase), true, `missing commit rule: ${phrase}`);
+    assert.equal(commit.includes(phrase), true, `missing commit rule: ${phrase}`);
   }
-  assert.match(implementation, /不添加 FEAT\/FIX\/MAINT 编号、Nova trailers/);
-  assert.doesNotMatch(implementation, /Work-Item:|Review-Policy:|Nova-Schema:/);
+  assert.match(commit, /不得 amend/);
+  assert.match(commit, /不得修改代码或文档、运行测试、启动 Review/);
+  assert.doesNotMatch(commit, /返回 Development/);
 });
 
-test("explicit development uses one bounded fast path without weakening fallbacks", () => {
-  const rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
-  const development = fs.readFileSync(
-    path.join(pluginRoot, "skills", "nova-development", "SKILL.md"),
-    "utf8",
-  );
-  const implementation = fs.readFileSync(
-    path.join(
-      pluginRoot,
-      "skills",
-      "nova-development",
-      "references",
-      "implementation-sop.md",
-    ),
-    "utf8",
-  );
-
-  for (const phrase of [
-    "明确开发快速路径",
-    "资格在首次准备批次中一次判定",
-    "完整加载实施 SOP",
-    "验证批次",
-    "提交批次",
-    "五至七个执行项",
-  ]) {
-    assert.equal(
-      rules.includes(phrase) || development.includes(phrase) || implementation.includes(phrase),
-      true,
-      `missing fast-path contract: ${phrase}`,
-    );
-  }
-
-  for (const phrase of [
-    "真实歧义使用共享澄清 SOP",
-    "蓝图缺失或共享架构不足进入 Architecture",
-    "用户明确要求时才进入设计、Plan mode、参考研究或 Review",
-    "不得为了留在快速路径而推断用户决定",
-  ]) {
-    assert.equal(development.includes(phrase), true, `missing fast-path fallback: ${phrase}`);
-  }
-
-  assert.match(implementation, /不是正确性门禁/);
-  assert.match(implementation, /不得为满足数量目标少读必要事实、跳过测试或隐瞒失败/);
-  assert.doesNotMatch(development, /自动启动 Review|自动扫描.*\.nova\/design/);
-});
-
-test("clear single-scope development stays on the global path without loading a skill", () => {
-  const readme = fs.readFileSync(path.join(pluginRoot, "README.md"), "utf8");
-  const rules = fs.readFileSync(path.join(pluginRoot, "codex", "AGENTS.global.md"), "utf8");
-  const development = fs.readFileSync(
-    path.join(pluginRoot, "skills", "nova-development", "SKILL.md"),
-    "utf8",
-  );
-
-  assert.match(rules, /请求明确、单一范围且不改变共享架构/);
-  assert.match(rules, /直接检查固定路径.*PROJECT_BLUEPRINT\.md/);
-  assert.match(rules, /禁止用.*rg --files.*代替存在性检查/);
-  assert.match(rules, /不加载技能或实施 SOP/);
-  assert.match(rules, /不加载 `nova-development` 或其实施 SOP/);
-  assert.match(rules, /存在真实歧义、用户要求设计或沉淀待办/);
-  assert.match(development, /明确单范围请求由全局快速路径直接处理/);
-  assert.match(development, /不应自动加载本技能/);
-  assert.match(readme, /明确单范围请求：直接描述需求/);
-  assert.doesNotMatch(readme, /普通请求：调用.*nova-development/);
+test("obsolete workflow identifiers and report validators stay removed", () => {
+  const controls = [
+    "codex/AGENTS.global.md",
+    "skills/nova-architecture/SKILL.md",
+    "skills/nova-development/SKILL.md",
+    "skills/nova-review/SKILL.md",
+    "skills/nova-commit/SKILL.md",
+  ].map(read).join("\n");
+  assert.doesNotMatch(controls, /FEAT-|FIX-|PATCH-|MAINT-|Work-Item:|Review-Policy:|Nova-Schema:/);
+  assert.doesNotMatch(controls, /validate-report|report-template|Schema 校验器/);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "skills/nova-commit/references")), false);
 });

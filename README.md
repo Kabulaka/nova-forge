@@ -1,16 +1,17 @@
 # Nova Forge
 
-Nova Forge 是面向 Codex 和 Claude Code 的高效率开发辅助 SOP。它保留项目架构、证据先行的必要澄清、直接开发和严格人工 Review，不再运行需求访谈流水线、审计台账或会话状态框架。
+Nova Forge 是面向 Codex 和 Claude Code 的高效率开发辅助 SOP。它保留项目架构、证据先行的必要澄清、直接开发、严格人工 Review 和人工发起的精确提交，不再运行需求访谈流水线、审计台账或会话状态框架。
 
 ## 核心技能
 
 | 技能 | 何时使用 | 默认结果 |
 |---|---|---|
-| `nova-architecture` | 项目没有蓝图，或用户主动要求修改共享架构 | 创建或更新蓝图及必要架构文档 |
-| `nova-development` | 真实歧义、设计、复杂跨模块/高风险实施，或用户主动调用 | 必要澄清、编码、测试、本地提交 |
-| `nova-review` | 用户明确要求 Review | 独立审查、统一修复、复测复审 |
+| `nova-architecture` | 项目没有蓝图，或用户主动要求修改共享架构 | 创建或更新蓝图及必要架构文档，保持未提交 |
+| `nova-development` | 任何具体功能、调整、修复或维护 | 必要澄清、编码和测试，保持未提交 |
+| `nova-review` | 用户明确要求 Review | 独立审查、统一修复和复测复审，保持未提交 |
+| `nova-commit` | 用户明确要求创建本地提交 | 精确暂存并创建 Conventional Commit |
 
-普通开发不会自动创建设计、启动 Review、push 或发布。只有影响当前交付并阻塞实现的真实歧义才会触发 Architecture 与 Development 共用的单问题澄清；Review 仍保留独立 reviewer、显式思考度、七维检查、问题分级、证据复用和最多三轮规则。
+普通开发不会自动创建设计、启动 Review、Commit、push 或发布。只有影响当前交付并阻塞实现的真实歧义才会触发 Architecture 与 Development 共用的单问题澄清；Review 仍保留独立 reviewer、显式思考度、七维检查、问题分级、证据复用和最多三轮规则。Commit 只消费进入技能前已有的有效验证证据；证据缺失时拒绝提交，不代跑 Development 或测试。
 
 ## 最小项目约定
 
@@ -58,10 +59,10 @@ npm run claude:dev:uninstall
 
 ## 使用
 
-- 蓝图存在且架构不变的明确单范围请求：直接描述需求，由全局快速路径完成，不必调用技能。
-- 真实歧义、设计、复杂跨模块/高风险实施，或主动需要完整开发 SOP：调用 `$nova-forge:nova-development`。
+- 具体功能、调整、修复或维护：直接描述需求，由 `$nova-forge:nova-development` 承接；明确时直接开发，只有真实歧义才提问。
 - 初始化蓝图或主动调整共享架构：调用 `$nova-forge:nova-architecture`。
 - 人工审查指定 Git 范围：调用 `$nova-forge:nova-review`。
+- 开发或 Review 修改完善后创建本地提交：调用 `$nova-forge:nova-commit`。
 
 ## 验证
 
@@ -69,4 +70,4 @@ npm run claude:dev:uninstall
 npm run check
 ```
 
-该命令检查版本同步、三技能结构、单 Hook 清单、发布工作流、测试和最终 npm 包内容。报告文本不参与代码校验。
+该命令检查版本同步、四技能结构、单 Hook 清单、发布工作流、测试和最终 npm 包内容。报告文本不参与代码校验。

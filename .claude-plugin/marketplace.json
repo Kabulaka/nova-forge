@@ -11,7 +11,7 @@
     {
       "name": "nova-forge",
       "source": "./",
-      "description": "Low-overhead architecture, development, and review skills.",
+      "description": "Low-overhead architecture, development, review, and explicit local commit skills.",
       "version": "0.3.2",
       "author": {
         "name": "Nova Forge contributors"
@@ -21,7 +21,8 @@
         "nova",
         "development",
         "workflow",
-        "review"
+        "review",
+        "commit"
       ]
     }
   ]

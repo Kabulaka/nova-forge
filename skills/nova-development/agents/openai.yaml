@@ -1,4 +1,4 @@
 interface:
   display_name: "Nova Development"
-  short_description: "低干扰的功能开发、修复、测试与本地提交"
+  short_description: "低干扰的功能开发、修复与测试"
   default_prompt: "Use $nova-development to implement this request directly, asking only when a behavior-changing ambiguity remains."

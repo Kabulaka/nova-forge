@@ -18,6 +18,7 @@ import {
   restoreHostCaches,
   uninstallClaudeDevelopmentPlugin,
   uninstallDevelopmentPlugin,
+  validateSnapshot,
   windowsCommandInvocation,
 } from "../scripts/codex-dev-plugin-lib.mjs";
 
@@ -239,6 +240,36 @@ test("development snapshot uses package contents, one hook manifest, and a fresh
     assert.equal(pairedSnapshot.codexVersion, snapshot.codexVersion);
     assert.equal(pairedSnapshot.claudeVersion, snapshot.claudeVersion);
     assert.equal(pairedSnapshot.digest, snapshot.digest);
+  } finally {
+    fs.rmSync(novaHome, { recursive: true, force: true });
+  }
+});
+
+test("development snapshot rejects removed references and unexpected skills", () => {
+  const novaHome = fs.mkdtempSync(path.join(os.tmpdir(), "nova-dev-negative-snapshot-"));
+  try {
+    const snapshot = buildSnapshot(
+      repoRoot,
+      novaHome,
+      process.env,
+      new Date("2026-09-11T12:34:56.000Z"),
+    );
+    const unexpectedSkill = path.join(snapshot.pluginRoot, "skills", "nova-extra", "SKILL.md");
+    fs.mkdirSync(path.dirname(unexpectedSkill), { recursive: true });
+    fs.writeFileSync(unexpectedSkill, "---\nname: nova-extra\n---\n");
+    assert.throws(() => validateSnapshot(snapshot.pluginRoot), /skills must be exactly/);
+    fs.rmSync(path.dirname(unexpectedSkill), { recursive: true, force: true });
+
+    const removedReference = path.join(
+      snapshot.pluginRoot,
+      "skills",
+      "nova-review",
+      "references",
+      "review-sop.md",
+    );
+    fs.mkdirSync(path.dirname(removedReference), { recursive: true });
+    fs.writeFileSync(removedReference, "removed\n");
+    assert.throws(() => validateSnapshot(snapshot.pluginRoot), /contains removed references/);
   } finally {
     fs.rmSync(novaHome, { recursive: true, force: true });
   }

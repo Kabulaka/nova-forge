@@ -10,6 +10,12 @@ export const DEV_PLUGIN_ID = `${PLUGIN_NAME}@${DEV_MARKETPLACE_NAME}`;
 export const HOST_CODEX = "codex";
 export const HOST_CLAUDE_CODE = "claude-code";
 export const SUPPORTED_HOSTS = [HOST_CODEX, HOST_CLAUDE_CODE];
+const EXPECTED_SKILLS = ["nova-architecture", "nova-development", "nova-review", "nova-commit"];
+const REMOVED_REFERENCES = [
+  "skills/nova-architecture/references/architecture-standard.md",
+  "skills/nova-development/references/implementation-sop.md",
+  "skills/nova-review/references/review-sop.md",
+];
 
 function processIsAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -346,7 +352,7 @@ function writeClaudeMarketplace(stageRoot, version) {
   fs.writeFileSync(marketplacePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
-function validateSnapshot(pluginRoot) {
+export function validateSnapshot(pluginRoot) {
   const required = [
     ".codex-plugin/plugin.json",
     "hooks/hooks.json",
@@ -354,17 +360,34 @@ function validateSnapshot(pluginRoot) {
     "codex/AGENTS.global.md",
     "skills/nova-architecture/SKILL.md",
     "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
-    "skills/nova-architecture/references/architecture-standard.md",
     "skills/nova-development/SKILL.md",
     "skills/nova-development/references/conversation-sop.md",
     "skills/nova-development/references/design-document-standard.md",
-    "skills/nova-development/references/implementation-sop.md",
     "skills/nova-development/references/reference-research-sop.md",
     "skills/nova-review/SKILL.md",
-    "skills/nova-review/references/review-sop.md",
+    "skills/nova-commit/SKILL.md",
+    "skills/nova-commit/agents/openai.yaml",
   ];
   const missing = required.filter((relative) => !fs.existsSync(path.join(pluginRoot, relative)));
   if (missing.length) throw new Error(`development snapshot is missing: ${missing.join(", ")}`);
+  const actualSkills = fs
+    .readdirSync(path.join(pluginRoot, "skills"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  if (JSON.stringify(actualSkills) !== JSON.stringify([...EXPECTED_SKILLS].sort())) {
+    throw new Error(
+      `development snapshot skills must be exactly ${EXPECTED_SKILLS.join(", ")}; found ${actualSkills.join(", ")}`,
+    );
+  }
+  const removedReferences = REMOVED_REFERENCES.filter((relative) =>
+    fs.existsSync(path.join(pluginRoot, relative)),
+  );
+  if (removedReferences.length) {
+    throw new Error(
+      `development snapshot contains removed references: ${removedReferences.join(", ")}`,
+    );
+  }
   const duplicateHook = path.join(pluginRoot, ".codex-plugin", "hooks.json");
   if (fs.existsSync(duplicateHook)) {
     throw new Error("development snapshot contains forbidden duplicate .codex-plugin/hooks.json");

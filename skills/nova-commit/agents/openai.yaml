@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nova Commit"
+  short_description: "仅在明确要求时精确创建本地提交"
+  default_prompt: "Use $nova-commit to create one exact local Conventional Commit from the validated changes I selected."

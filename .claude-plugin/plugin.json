@@ -1,7 +1,7 @@
 {
   "name": "nova-forge",
   "version": "0.3.2",
-  "description": "Lightweight architecture, development, and human-triggered review SOPs for Claude Code.",
+  "description": "Lightweight architecture, development, review, and explicit local commit SOPs for Claude Code.",
   "author": {
     "name": "Nova Forge contributors",
     "url": "https://github.com/Kabulaka/nova-forge"
@@ -12,7 +12,8 @@
     "nova",
     "development",
     "workflow",
-    "review"
+    "review",
+    "commit"
   ],
   "skills": "./skills/"
 }
