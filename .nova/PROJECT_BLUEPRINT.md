@@ -44,10 +44,14 @@ Nova Forge 是面向 Codex 与 Claude Code 的低干扰开发辅助 SOP。它帮
 - 完成报告由提示词约束，不通过程序或 Schema 校验。
 - Review、Commit、push、发布和远程写操作都不会由普通开发自动触发。
 
-## 6. 待开发工作
+## 6. 开发导航
+
+| 开发触发条件 | 名称 | 类别 | 精确入口 | 复用或遵循边界 | 验证入口 |
+|---|---|---|---|---|---|
+| 修改 Codex/Claude Code 插件结构、manifest 或宿主差异 | 双宿主插件边界 | 详细共享契约 | [双宿主插件边界](architecture/foundation/dual-host-plugin.md)、`.codex-plugin/`、`.claude-plugin/` | 两个宿主共享同一份 skills、hooks 与规则，不复制流程语义 | `scripts/validate-plugin.mjs`、`tests/plugin-structure.test.mjs` |
+| 修改 SessionStart 规则注入或 Hook 失败语义 | 双宿主插件边界 | 详细共享契约 | [双宿主插件边界](architecture/foundation/dual-host-plugin.md)、`hooks/run.mjs` | 只处理四个 SessionStart 来源；无效输入或规则不可读时受控 fail open | `tests/hook-adapter.test.mjs` |
+| 修改开发安装、快照、包内容或双宿主分发 | 双宿主插件边界 | 详细共享契约 | [双宿主插件边界](architecture/foundation/dual-host-plugin.md)、`scripts/codex-dev-plugin-lib.mjs`、`scripts/check-package.mjs` | 不引入常驻服务或项目状态，开发快照与发布包必须包含完整权威资源 | `tests/codex-dev-plugin.test.mjs`、`scripts/check-package.mjs` |
+
+## 7. 待开发工作
 
 当前无待开发工作。
-
-## 7. 架构文档
-
-- [双宿主插件边界](architecture/foundation/dual-host-plugin.md)

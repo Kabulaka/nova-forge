@@ -20,6 +20,7 @@ const expectedSkills = new Set([
 ]);
 const removedReferences = new Set([
   "skills/nova-architecture/references/architecture-standard.md",
+  "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
   "skills/nova-development/references/implementation-sop.md",
   "skills/nova-review/references/review-sop.md",
 ]);
@@ -32,7 +33,6 @@ const required = [
   "codex/AGENTS.global.md",
   "skills/nova-architecture/SKILL.md",
   "skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md",
-  "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
   "skills/nova-development/SKILL.md",
   "skills/nova-development/assets/DESIGN.template.md",
   "skills/nova-development/references/conversation-sop.md",

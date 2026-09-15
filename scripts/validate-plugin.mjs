@@ -8,6 +8,7 @@ const skills = ["nova-architecture", "nova-development", "nova-review", "nova-co
 const removed = ["nova-requirements", "nova-doctor"];
 const removedReferences = [
   "skills/nova-architecture/references/architecture-standard.md",
+  "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
   "skills/nova-development/references/implementation-sop.md",
   "skills/nova-review/references/review-sop.md",
 ];
@@ -84,14 +85,18 @@ requireValue(
 for (const name of removed) {
   requireValue(!fs.existsSync(path.join(root, "skills", name)), `removed skill still exists: ${name}`);
 }
-for (const relative of [".mcp.json", "runtime", "codex/scripts", ...removedReferences]) {
+for (const relative of [
+  ".mcp.json",
+  "runtime",
+  "codex/scripts",
+  ...removedReferences,
+]) {
   requireValue(!fs.existsSync(path.join(root, relative)), `removed component still exists: ${relative}`);
 }
 for (const relative of [
   "codex/AGENTS.global.md",
   "hooks/run.mjs",
   "skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md",
-  "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
   "skills/nova-development/assets/DESIGN.template.md",
   "skills/nova-development/references/conversation-sop.md",
   "skills/nova-development/references/design-document-standard.md",

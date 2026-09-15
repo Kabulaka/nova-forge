@@ -54,6 +54,7 @@ test("global rules are a compact router rather than duplicated skill SOPs", () =
     "Architecture、Development 与 Review 不得创建提交",
     "只能消费进入技能前已有且有效的验证证据",
     "不得自行调用其他技能制造证据后继续提交",
+    "蓝图“开发导航”是唯一发现入口",
   ]) {
     assert.equal(rules.includes(phrase), true, `missing global boundary: ${phrase}`);
   }
@@ -81,11 +82,14 @@ test("architecture and development share one complete clarification SOP", () => 
 
 test("architecture keeps its full contract in one skill and leaves changes uncommitted", () => {
   const architecture = read("skills/nova-architecture/SKILL.md");
+  const blueprint = read("skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md");
   for (const phrase of [
     "OpenAPI 3.0.x/3.1.x",
     "AsyncAPI 2.x/3.x",
     "必须与契约的 `info.version` 一致",
-    ".nova/SHARED_CAPABILITIES.md",
+    "开发触发条件",
+    "维护多人长期并行开发共同遵守的主体技术架构",
+    "架构决定与蓝图影响闭包",
     "七章完整有序",
     "结果保持未提交",
     "简单示例",
@@ -96,6 +100,22 @@ test("architecture keeps its full contract in one skill and leaves changes uncom
     fs.existsSync(path.join(pluginRoot, "skills/nova-architecture/references/architecture-standard.md")),
     false,
   );
+  assert.match(blueprint, /## 6\. 开发导航/);
+  assert.match(blueprint, /## 7\. 待开发工作/);
+  assert.ok(
+    blueprint.indexOf("## 6. 开发导航") < blueprint.indexOf("## 7. 待开发工作"),
+    "development navigation must precede pending work",
+  );
+  assert.match(blueprint, /开发触发条件 \| 名称 \| 类别 \| 精确入口 \| 复用或遵循边界 \| 验证入口/);
+  assert.match(blueprint, /开发触发条件 \| 待开发内容 \| 交付结果 \| 设计入口/);
+  assert.match(blueprint, /没有条目时删除表格并写“当前无待开发工作”/);
+  assert.equal(
+    fs.existsSync(
+      path.join(pluginRoot, "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md"),
+    ),
+    false,
+  );
+  assert.match(architecture, /旧蓝图缺少“开发导航”.*\.nova\/SHARED_CAPABILITIES\.md/);
   assert.doesNotMatch(architecture, /创建 Conventional Commit|type\(scope\)/);
 });
 
@@ -107,6 +127,11 @@ test("development owns all implementation constraints in one skill without commi
     "核心不变量",
     "失败语义",
     "测试与证据复用",
+    "第六章“开发导航”的触发条件",
+    "命中 / 不命中 / 未知",
+    "不得以“当前没有第二个消费者”",
+    "不得为此新增目录扫描、MCP、外部研究或独立技能调用",
+    "涉及持久化时从最终生效配置解析存储位置",
     "一个准备批次",
     "一个失败即停的验证批次",
     "不暂存、不提交",
@@ -118,6 +143,9 @@ test("development owns all implementation constraints in one skill without commi
     fs.existsSync(path.join(pluginRoot, "skills/nova-development/references/implementation-sop.md")),
     false,
   );
+  assert.match(development, /固定旧入口 `\.nova\/SHARED_CAPABILITIES\.md`/);
+  assert.doesNotMatch(development, /Development 更新导航/);
+  assert.doesNotMatch(development, /^## Plan mode$/m);
   assert.doesNotMatch(development, /提交首行|提交批次|五至七个执行项|本地提交 hash/);
 });
 

@@ -13,6 +13,7 @@ export const SUPPORTED_HOSTS = [HOST_CODEX, HOST_CLAUDE_CODE];
 const EXPECTED_SKILLS = ["nova-architecture", "nova-development", "nova-review", "nova-commit"];
 const REMOVED_REFERENCES = [
   "skills/nova-architecture/references/architecture-standard.md",
+  "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
   "skills/nova-development/references/implementation-sop.md",
   "skills/nova-review/references/review-sop.md",
 ];
@@ -359,7 +360,7 @@ export function validateSnapshot(pluginRoot) {
     "hooks/run.mjs",
     "codex/AGENTS.global.md",
     "skills/nova-architecture/SKILL.md",
-    "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
+    "skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md",
     "skills/nova-development/SKILL.md",
     "skills/nova-development/references/conversation-sop.md",
     "skills/nova-development/references/design-document-standard.md",

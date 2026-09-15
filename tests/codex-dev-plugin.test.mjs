@@ -245,7 +245,7 @@ test("development snapshot uses package contents, one hook manifest, and a fresh
   }
 });
 
-test("development snapshot rejects removed references and unexpected skills", () => {
+test("development snapshot rejects missing authority, removed references, and unexpected skills", () => {
   const novaHome = fs.mkdtempSync(path.join(os.tmpdir(), "nova-dev-negative-snapshot-"));
   try {
     const snapshot = buildSnapshot(
@@ -260,6 +260,26 @@ test("development snapshot rejects removed references and unexpected skills", ()
     assert.throws(() => validateSnapshot(snapshot.pluginRoot), /skills must be exactly/);
     fs.rmSync(path.dirname(unexpectedSkill), { recursive: true, force: true });
 
+    const requiredBlueprintTemplate = path.join(
+      snapshot.pluginRoot,
+      "skills",
+      "nova-architecture",
+      "assets",
+      "PROJECT_BLUEPRINT.template.md",
+    );
+    fs.rmSync(requiredBlueprintTemplate);
+    assert.throws(() => validateSnapshot(snapshot.pluginRoot), /development snapshot is missing/);
+    fs.copyFileSync(
+      path.join(
+        repoRoot,
+        "skills",
+        "nova-architecture",
+        "assets",
+        "PROJECT_BLUEPRINT.template.md",
+      ),
+      requiredBlueprintTemplate,
+    );
+
     const removedReference = path.join(
       snapshot.pluginRoot,
       "skills",
@@ -269,6 +289,17 @@ test("development snapshot rejects removed references and unexpected skills", ()
     );
     fs.mkdirSync(path.dirname(removedReference), { recursive: true });
     fs.writeFileSync(removedReference, "removed\n");
+    assert.throws(() => validateSnapshot(snapshot.pluginRoot), /contains removed references/);
+    fs.rmSync(removedReference);
+
+    const removedSharedCapabilitiesTemplate = path.join(
+      snapshot.pluginRoot,
+      "skills",
+      "nova-architecture",
+      "assets",
+      "SHARED_CAPABILITIES.template.md",
+    );
+    fs.writeFileSync(removedSharedCapabilitiesTemplate, "removed\n");
     assert.throws(() => validateSnapshot(snapshot.pluginRoot), /contains removed references/);
   } finally {
     fs.rmSync(novaHome, { recursive: true, force: true });
