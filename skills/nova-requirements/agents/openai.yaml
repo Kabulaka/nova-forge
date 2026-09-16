@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nova Requirements"
+  short_description: "澄清和维护系统业务需求"
+  default_prompt: "Use $nova-requirements to clarify or maintain the system business requirements."

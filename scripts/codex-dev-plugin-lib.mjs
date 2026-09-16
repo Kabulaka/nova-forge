@@ -10,7 +10,13 @@ export const DEV_PLUGIN_ID = `${PLUGIN_NAME}@${DEV_MARKETPLACE_NAME}`;
 export const HOST_CODEX = "codex";
 export const HOST_CLAUDE_CODE = "claude-code";
 export const SUPPORTED_HOSTS = [HOST_CODEX, HOST_CLAUDE_CODE];
-const EXPECTED_SKILLS = ["nova-architecture", "nova-development", "nova-review", "nova-commit"];
+const EXPECTED_SKILLS = [
+  "nova-requirements",
+  "nova-architecture",
+  "nova-development",
+  "nova-review",
+  "nova-commit",
+];
 const REMOVED_REFERENCES = [
   "skills/nova-architecture/references/architecture-standard.md",
   "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
@@ -359,6 +365,10 @@ export function validateSnapshot(pluginRoot) {
     "hooks/hooks.json",
     "hooks/run.mjs",
     "codex/AGENTS.global.md",
+    "skills/nova-requirements/SKILL.md",
+    "skills/nova-requirements/agents/openai.yaml",
+    "skills/nova-requirements/assets/PRODUCT_REQUIREMENTS.template.md",
+    "skills/nova-requirements/references/examples/AI_GATEWAY_REQUIREMENTS.md",
     "skills/nova-architecture/SKILL.md",
     "skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md",
     "skills/nova-development/SKILL.md",

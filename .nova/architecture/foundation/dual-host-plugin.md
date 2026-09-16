@@ -2,13 +2,13 @@
 
 ## 目标
 
-同一发布包为 Codex 和 Claude Code 提供相同的四个 Nova 技能与 SessionStart 规则注入，不引入常驻服务或项目状态。
+同一发布包为 Codex 和 Claude Code 提供相同的五个 Nova 技能与 SessionStart 规则注入，不引入常驻服务或项目状态。Requirements、Architecture、Development、Review 与 Commit 只按用户当前明确意图工作，彼此不自动调用。
 
 ## 组件
 
 | 组件 | 权威入口 | 约束 |
 |---|---|---|
-| 技能 | `skills/nova-*/SKILL.md` | 两个宿主共享，不复制规则正文 |
+| 技能 | `skills/nova-*/SKILL.md` | 两个宿主共享，不复制规则正文；技能集合、对外能力或职责变化先由 Architecture 确认共享边界，再由 Development 实现 |
 | 全局规则 | `codex/AGENTS.global.md` | 由 Hook 读取并原样注入 |
 | Hook | `hooks/hooks.json`、`hooks/run.mjs` | 只处理 SessionStart 的四个来源 |
 | Codex 分发 | `.codex-plugin/plugin.json`、`.agents/plugins/marketplace.json` | 使用版本化 Git URL |

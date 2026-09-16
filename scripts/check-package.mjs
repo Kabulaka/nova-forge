@@ -13,6 +13,7 @@ if (result.status !== 0) {
 const report = JSON.parse(result.stdout)[0];
 const files = new Set(report.files.map((entry) => entry.path));
 const expectedSkills = new Set([
+  "nova-requirements",
   "nova-architecture",
   "nova-development",
   "nova-review",
@@ -31,6 +32,10 @@ const required = [
   "hooks/hooks.json",
   "hooks/run.mjs",
   "codex/AGENTS.global.md",
+  "skills/nova-requirements/SKILL.md",
+  "skills/nova-requirements/agents/openai.yaml",
+  "skills/nova-requirements/assets/PRODUCT_REQUIREMENTS.template.md",
+  "skills/nova-requirements/references/examples/AI_GATEWAY_REQUIREMENTS.md",
   "skills/nova-architecture/SKILL.md",
   "skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md",
   "skills/nova-development/SKILL.md",
@@ -59,7 +64,6 @@ const forbidden = [...files].filter(
     file.startsWith("runtime/") ||
     file.startsWith("tests/") ||
     file.startsWith("scripts/") ||
-    file.startsWith("skills/nova-requirements/") ||
     file.startsWith("skills/nova-doctor/") ||
     file.includes("/__pycache__/") ||
     /\.py[cod]$/.test(file),

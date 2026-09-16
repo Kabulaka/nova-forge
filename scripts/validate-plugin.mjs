@@ -4,8 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const skills = ["nova-architecture", "nova-development", "nova-review", "nova-commit"];
-const removed = ["nova-requirements", "nova-doctor"];
+const skills = [
+  "nova-requirements",
+  "nova-architecture",
+  "nova-development",
+  "nova-review",
+  "nova-commit",
+];
+const removed = ["nova-doctor"];
 const removedReferences = [
   "skills/nova-architecture/references/architecture-standard.md",
   "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md",
@@ -96,6 +102,9 @@ for (const relative of [
 for (const relative of [
   "codex/AGENTS.global.md",
   "hooks/run.mjs",
+  "skills/nova-requirements/assets/PRODUCT_REQUIREMENTS.template.md",
+  "skills/nova-requirements/agents/openai.yaml",
+  "skills/nova-requirements/references/examples/AI_GATEWAY_REQUIREMENTS.md",
   "skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md",
   "skills/nova-development/assets/DESIGN.template.md",
   "skills/nova-development/references/conversation-sop.md",
@@ -107,6 +116,8 @@ for (const relative of [
 
 const rules = fs.readFileSync(path.join(root, "codex", "AGENTS.global.md"), "utf8");
 for (const phrase of [
+  "nova-requirements",
+  "不得主动发现、读取、索引、校验或同步需求文档",
   "nova-architecture",
   "蓝图存在后，只有用户主动调用",
   "不主动扫描、枚举、通配匹配或索引",

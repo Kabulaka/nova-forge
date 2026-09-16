@@ -1,7 +1,7 @@
 {
   "name": "nova-forge",
   "version": "0.5.0",
-  "description": "Lightweight architecture, development, review, and explicit local commit SOPs for Codex.",
+  "description": "Lightweight requirements, architecture, development, review, and explicit local commit SOPs for Codex.",
   "author": {
     "name": "Nova Forge contributors",
     "url": "https://github.com/Kabulaka/nova-forge"
@@ -10,6 +10,7 @@
   "repository": "https://github.com/Kabulaka/nova-forge",
   "keywords": [
     "nova",
+    "requirements",
     "development",
     "workflow",
     "review",
@@ -19,7 +20,7 @@
   "interface": {
     "displayName": "Nova Forge",
     "shortDescription": "Low-overhead development SOP",
-    "longDescription": "Four focused skills for project architecture, direct development, explicitly requested review, and explicit local commits.",
+    "longDescription": "Five focused skills for user-requested business requirements, project architecture, direct development, explicitly requested review, and explicit local commits.",
     "developerName": "Nova Forge contributors",
     "category": "Productivity",
     "capabilities": [

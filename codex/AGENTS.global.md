@@ -2,10 +2,12 @@
 
 ## 技能路由
 
+- 只有用户明确要求澄清、新增、查看、修改或删除业务需求时才使用 `nova-requirements`；其他技能不得自动转入本技能，也不得主动发现、读取、索引、校验或同步需求文档。
 - 判断蓝图是否存在时直接检查固定路径 `.nova/PROJECT_BLUEPRINT.md`（如 `test -f`）；禁止用会忽略隐藏目录的 `rg --files`、目录扫描或索引结果代替存在性检查。
 - 项目不存在蓝图时，由 `nova-architecture` 负责初始化；蓝图存在后，只有用户主动调用该技能或明确要求设计、修改共享架构时才修改架构。
+- 用户请求明确新增或删除项目级模块或技能、改变模块职责、依赖方向、公共 API、数据、事件、基础设施或其他共享边界时，该部分直接属于 `nova-architecture`；同一请求还包含具体实现时，先完成架构决定，再由 `nova-development` 实现。Development 不得自行判定后修改蓝图或共享架构。
 - 任何代码、配置或测试的实现、调整、修复和维护均使用 `nova-development`；请求明确时直接实施，只有真实歧义才澄清。
-- Architecture 与 Development 发生真实歧义时共同使用 `skills/nova-development/references/conversation-sop.md`，不得各自维护不同的澄清协议。
+- Requirements 在用户明确要求需求澄清或创建、修改内容不足时使用 `skills/nova-development/references/conversation-sop.md`；Architecture 与 Development 在发生真实歧义时使用同一文件，不得各自维护不同的澄清协议。
 - 只有用户明确要求 Review、审查、复审或补审时才使用 `nova-review`；加载技能本身不代表获得审查授权。
 - 只有用户明确要求创建本地提交时才使用 `nova-commit`；Architecture、Development 与 Review 不得创建提交或自动转交 Commit。
 - `nova-commit` 只能消费进入技能前已有且有效的验证证据；准入失败立即结束，不得自行调用其他技能制造证据后继续提交。
@@ -33,7 +35,7 @@
 ## 流程边界
 
 - Nova 不维护需求块、交付台账、审计、检查点、迁移或 Review 状态。
-- Architecture、Development 与 Review 的结果均保持未提交；只有用户明确发起 Commit 后才创建本地提交。
+- Requirements、Architecture、Development 与 Review 的结果均保持未提交；只有用户明确发起 Commit 后才创建本地提交。
 - Plan mode 只由用户启用，方案批准前不得编码；Plan mode 不自动启动 Review 或 Commit。
 - Git push、远程配置、发布和 SVN commit 必须取得独立明确授权。
 - 始终服从“当前用户明确指令 > 项目规则 > 本文件默认规则”。
