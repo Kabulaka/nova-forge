@@ -95,6 +95,7 @@ test("requirements remains a standalone manually requested business-outline skil
     "不得为了保留模板章节而制造能力分组",
     "不拆成编号化需求块",
     "不记录实现状态",
+    "用户未指定目标文件时，需求文档默认保存到目标项目的 `.nova/PRODUCT_REQUIREMENTS.md`",
     "不得建议或自动启动后续架构、开发、Review 或提交",
   ]) {
     assert.equal(requirements.includes(phrase), true, `missing requirements boundary: ${phrase}`);

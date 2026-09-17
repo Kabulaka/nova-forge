@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Versioned Nova Forge development SOP plugin",
-    "version": "0.6.1"
+    "version": "0.6.2"
   },
   "plugins": [
     {
       "name": "nova-forge",
       "source": "./",
       "description": "Low-overhead architecture, development, review, and explicit local commit skills.",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "author": {
         "name": "Nova Forge contributors"
       },
