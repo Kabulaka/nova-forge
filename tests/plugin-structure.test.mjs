@@ -51,12 +51,16 @@ test("plugin exposes exactly five skills, one hook event, and no MCP", () => {
 
 test("global rules are a compact router rather than duplicated skill SOPs", () => {
   const rules = read("codex/AGENTS.global.md");
+  const projectRules = read("AGENTS.md");
   for (const phrase of [
     "nova-requirements",
     "不得主动发现、读取、索引、校验或同步需求文档",
-    "新增或删除项目级模块或技能",
-    "先完成架构决定，再由 `nova-development` 实现",
-    "Development 不得自行判定后修改蓝图或共享架构",
+    "明确要求改变技术栈、运行形态、基础设施职责",
+    "业务 API、业务 schema、DTO、数据库表、业务事件和端到端功能流程",
+    "只有其中确实改变系统骨架的最小差量",
+    "Architecture 只维护系统骨架",
+    "Development 在当前任务实际交付并验证通用组件时",
+    "Review 只在最终结论后登记符合准入的技术债务",
     "任何代码、配置或测试",
     "只有用户明确要求 Review",
     "只有用户明确要求创建本地提交",
@@ -65,7 +69,8 @@ test("global rules are a compact router rather than duplicated skill SOPs", () =
     "Architecture、Development 与 Review 不得创建提交",
     "只能消费进入技能前已有且有效的验证证据",
     "不得自行调用其他技能制造证据后继续提交",
-    "蓝图“开发导航”是唯一发现入口",
+    "蓝图“已实现可复用能力”是通用组件的唯一发现入口",
+    "兼容旧标题“开发导航”",
     "每次新的用户请求均重新判断技能路由",
     "同一内聚任务再次命中同一技能",
     "项目根目录之外",
@@ -73,6 +78,8 @@ test("global rules are a compact router rather than duplicated skill SOPs", () =
   ]) {
     assert.equal(rules.includes(phrase), true, `missing global boundary: ${phrase}`);
   }
+  assert.match(projectRules, /系统骨架、已实现可复用能力和待开发工作同处一份文件/);
+  assert.match(projectRules, /业务 schema、业务接口和端到端功能流程不得借“跨模块”或“共享”/);
   assert.doesNotMatch(rules, /行为准则（强制）|Context-mode 可选路由|显式思考度/);
   assert.doesNotMatch(rules, /type\(scope\)|BREAKING CHANGE:|`feat`|`fix`|all\/misc\/core/);
   assert.doesNotMatch(rules, /默认快速开发|implementation-sop|五至七个执行项/);
@@ -178,16 +185,16 @@ test("clarification and architecture gates distinguish the three observed behavi
   assert.match(development, /符合这些条件的差量一律阻塞首次编辑/);
   assert.match(development, /不得以仍可先写脚手架、局部代码或测试为由继续/);
 
-  // Shared-boundary change: reversibility does not let Development bypass Architecture.
-  assert.match(architecture, /新增、删除项目级模块或技能/);
-  assert.match(architecture, /改变项目级模块或技能的对外暴露集合/);
-  assert.match(architecture, /即使改动较小或可逆，也不得降级为普通实现/);
-  assert.match(architecture, /单一模块内新增普通用户功能且不改变共享边界/);
-  assert.match(development, /改变项目级模块或技能的对外暴露集合/);
-  assert.match(development, /单一模块内新增普通用户功能且不改变共享边界时仍由 Development 直接实现/);
-  assert.match(development, /不得由 Development 自行修改蓝图或共享架构/);
-  assert.doesNotMatch(architecture, /改变对外能力集合/);
-  assert.doesNotMatch(development, /改变对外能力集合/);
+  // Only a system-skeleton change can stop Development; business contracts stay local.
+  assert.match(architecture, /稳定服务及项目级模块的新增、删除、拆分、合并/);
+  assert.match(architecture, /任一普通开发任务不能在局部实现中自行改变/);
+  assert.match(architecture, /业务 API、OpenAPI 业务字段、DTO、schema 和数据库表/);
+  assert.match(architecture, /不能单独构成架构准入/);
+  assert.match(development, /目标必然改变技术栈、运行\/部署形态、基础设施选型或介质职责/);
+  assert.match(development, /业务 API、schema、DTO、数据库表、业务事件和端到端功能流程.*仍由 Development 直接处理/);
+  assert.match(development, /不得由 Development 自行修改蓝图第一至第五章/);
+  assert.doesNotMatch(architecture, /两个以上能够独立变化的项目内参与方/);
+  assert.doesNotMatch(development, /两个以上能够独立变化的当前参与方/);
 
   // Explicit requirement clarification loads the SOP before discovering the first question.
   assert.match(requirements, /在判断第一个待确认差量或首次提问前完整读取/);
@@ -214,64 +221,36 @@ test("clarification and architecture gates distinguish the three observed behavi
   assert.match(conversation, /只返回空答案或 `0\/1 answered`、没有成功呈现标记/);
 });
 
-test("architecture keeps its full contract in one skill and leaves changes uncommitted", () => {
+test("architecture owns only the lightweight system skeleton", () => {
   const architecture = read("skills/nova-architecture/SKILL.md");
   const blueprint = read("skills/nova-architecture/assets/PROJECT_BLUEPRINT.template.md");
   for (const phrase of [
-    "OpenAPI 3.0.x/3.1.x",
-    "AsyncAPI 2.x/3.x",
-    "必须与契约的 `info.version` 一致",
-    "开发触发条件",
-    "维护多人长期并行开发共同遵守的主体技术架构",
-    "架构事实准入",
-    "两个以上能够独立变化的项目内参与方",
-    "功能同时调用多个模块",
-    "仅由一个模块通过私有适配器调用的上游服务不算第二个架构参与方",
-    "例如价格来源及其回退属于 `pricing` 功能",
-    "空白项目或尚无实现契约的蓝图初始化默认只创建 `.nova/PROJECT_BLUEPRINT.md`",
-    "不得为了让第六章有条目而提前创建详细架构文档",
+    "轻量系统骨架",
+    "架构不是“重要设计”的集合",
+    "只有系统骨架属于 Architecture",
+    "不创建 ADR、索引、审计、状态机",
+    "系统骨架准入",
+    "只有下列封闭集合",
+    "业务 API、OpenAPI 业务字段、DTO、schema 和数据库表",
+    "业务事件及其载荷",
+    "端到端工作流",
+    "不能单独构成架构准入",
+    "保存用户提交或确认的权威事实、当前有效结果",
+    "缓存丢失、过期或清空不得改变业务结果",
+    "日志与指标",
+    "Architecture 维护第一至第五章",
+    "第六章由 Development",
+    "第七章由 Architecture、Development 和 Review",
+    "不创建新的详细架构文档",
+    "潜在复用、单一业务工作流、业务 API/schema/事件",
+    "旧蓝图标题“开发导航”在读取时保持兼容",
     "用户明确要求升级、迁移或整体精简",
-    "完整语义审计”只表示逐条判断整份蓝图，不是全仓库审计",
-    "导航迁移不追求穷举现有能力",
-    "禁止为迁移枚举 `.nova`、源码目录或测试目录",
-    "禁止主动发现或读取需求文档",
-    "相对 `.nova/PROJECT_BLUEPRINT.md` 所在的 `.nova/` 目录解析",
-    "权限与对象隔离、共享数据所有权、蓝图已经精确登记的版本化公共契约",
-    "各用一次有界关键词查询",
-    "不为寻找版本而扫描或把框架生成文档的 `info.version` 当成版本化公共契约",
-    "旧台账中的需求链接和需求来源列不属于 Architecture 迁移输入",
-    "不检查存在性、不读取内容",
-    "证据足以决定保留、合并、替换或删除后立即停止研究",
-    "普通架构修改只检查新增或修改内容",
-    "轻量写入准入",
-    "删除该内容后",
-    "相同事实更新原条目",
-    "第 5 章不是资源、失败模式或治理清单",
-    "不得改名或移动到“全局契约”后继续保留",
-    "不复述本技能的通用规则",
-    "写入前确认是本技能已经定义的固定授权门",
-    "不触发读取澄清 SOP",
-    "不得为此增加独立审计阶段",
-    "混合请求中的开发交接",
-    "用户本次明确提供并要求作为架构输入的需求文档",
-    "按可独立交付的内聚开发任务分组",
-    "澄清、设计和登记，不编码",
-    "控制权都回到 Architecture",
-    "Development 的返回只是候选，不构成架构判定",
-    "直接把该内容连同既有边界退回同一 Development 任务",
-    "不得声称“本次只初始化架构”",
-    "能够直接作为某个功能的实现说明或验收清单",
-    "不记录请求或业务生命周期、跨模块编排",
-    "验证入口指向现有契约、Schema 或可执行校验",
-    "实现文件、启动脚本或配置本身不能同时充当验证入口",
-    "事实而找到的代码、配置和测试只是证据，不得自动晋升为新导航",
-    "架构决定与蓝图影响闭包",
-    "不得用“相关模块”“相关代码”等模糊占位代替实现映射",
-    "合并到已经确认的更大稳定代码区域",
-    "新增、删除项目级模块或技能",
-    "七章完整有序",
+    "旧待开发工作原样保留",
+    "设计入口为“无”表示尚未沉淀设计",
+    "不自动调用或制造额外技能往返",
+    "业务设计差量不由 Architecture 澄清",
+    "用户已经批准覆盖同一范围的具体方案时不重复确认",
     "结果保持未提交",
-    "简单示例",
   ]) {
     assert.equal(architecture.includes(phrase), true, `missing architecture contract: ${phrase}`);
   }
@@ -279,41 +258,34 @@ test("architecture keeps its full contract in one skill and leaves changes uncom
     fs.existsSync(path.join(pluginRoot, "skills/nova-architecture/references/architecture-standard.md")),
     false,
   );
-  assert.match(blueprint, /## 6\. 开发导航/);
+  assert.match(blueprint, /## 2\. 技术栈与系统形态/);
+  assert.match(blueprint, /## 4\. 服务与模块骨架/);
+  assert.match(blueprint, /## 5\. 系统基础边界/);
+  assert.match(blueprint, /## 6\. 已实现可复用能力/);
   assert.match(blueprint, /## 7\. 待开发工作/);
   assert.ok(
-    blueprint.indexOf("## 6. 开发导航") < blueprint.indexOf("## 7. 待开发工作"),
-    "development navigation must precede pending work",
+    blueprint.indexOf("## 6. 已实现可复用能力") < blueprint.indexOf("## 7. 待开发工作"),
+    "reusable capabilities must precede pending work",
   );
-  assert.match(blueprint, /开发触发条件 \| 名称 \| 类别 \| 精确入口 \| 复用或遵循边界 \| 验证入口/);
-  assert.match(blueprint, /开发触发条件 \| 待开发内容 \| 交付结果 \| 设计入口/);
-  assert.match(blueprint, /不能直接作为某个功能的实现说明、恢复矩阵或未来测试清单/);
-  assert.match(blueprint, /事实核验过程中发现的代码、配置和测试不得自动晋升为导航/);
-  assert.match(blueprint, /框架生成文档的 `info.version` 本身不构成版本化公共契约/);
-  assert.match(blueprint, /空白项目不得为了填充本章而创建详细架构文档/);
-  assert.match(blueprint, /无法映射到实现的人工编号/);
-  assert.match(blueprint, /不得用“相关模块”“相关代码”等模糊占位/);
-  assert.match(blueprint, /无法确认细分目录时合并到已知的更大稳定代码区域/);
-  assert.match(blueprint, /真实依赖方向/);
-  assert.match(blueprint, /唯一权威位置更新而不是追加同义或历史版本/);
-  assert.match(blueprint, /通用工程规范留在项目规则、代码或测试/);
-  assert.match(blueprint, /不能由所有者模块自行封装的跨参与方不变量/);
-  assert.match(blueprint, /不得把这些内容改名后移入“全局契约”/);
-  assert.match(blueprint, /不复述 Architecture 或 Development 技能的通用职责与路由规则/);
-  assert.match(blueprint, /Architecture 将用户明确提出的具体功能限域交给 Development/);
-  assert.match(blueprint, /Architecture 返回后继续完成架构工作/);
+  assert.match(blueprint, /复用时机 \| 能力 \| 实现入口 \| 复用边界 \| 验证入口/);
+  assert.match(blueprint, /何时处理 \| 待开发工作 \| 交付结果 \| 设计入口/);
+  assert.match(blueprint, /不能只写“业务状态”或“临时状态”/);
+  assert.match(blueprint, /缓存丢失不得改变业务结果/);
+  assert.match(blueprint, /单一业务工作流.*不得登记/);
+  assert.match(blueprint, /“无”表示尚未沉淀设计/);
   assert.match(blueprint, /没有条目时删除表格并写“当前无待开发工作”/);
+  assert.doesNotMatch(blueprint, /详细共享契约|OpenAPI 3\.0|AsyncAPI|info\.version/);
   assert.equal(
     fs.existsSync(
       path.join(pluginRoot, "skills/nova-architecture/assets/SHARED_CAPABILITIES.template.md"),
     ),
     false,
   );
-  assert.match(architecture, /直接检查固定旧入口 `\.nova\/SHARED_CAPABILITIES\.md`/);
+  assert.match(architecture, /才检查固定旧入口 `\.nova\/SHARED_CAPABILITIES\.md`/);
   assert.doesNotMatch(architecture, /创建 Conventional Commit|type\(scope\)/);
 });
 
-test("development owns all implementation constraints in one skill without committing", () => {
+test("development keeps business work local and synchronizes only proven reusable capabilities", () => {
   const development = read("skills/nova-development/SKILL.md");
   for (const phrase of [
     "所有具体功能、局部调整、缺陷恢复和维护",
@@ -321,14 +293,19 @@ test("development owns all implementation constraints in one skill without commi
     "核心不变量",
     "失败语义",
     "测试与证据复用",
-    "第六章“开发导航”的触发条件",
-    "不得再读取开发导航、设计、代码或测试来堆叠同一结论的证据",
+    "兼容新标题“已实现可复用能力”和旧标题“开发导航”",
+    "普通 Development 不因旧标题停止或强制迁移",
+    "业务 API、schema、DTO、数据库表、业务事件和端到端功能流程",
+    "首次编辑前，使用已经读取的蓝图和本次定向研究结果完成一次封闭判断",
+    "跨模块、公共、共享、版本化、多个消费者或可能不兼容",
     "不得在结论已由蓝图确定后读取设计以补充说明",
-    "当前具体共享边界",
-    "两个以上能够独立变化的当前参与方",
-    "可选架构收益只作非阻塞建议",
-    "潜在复用场景本身不触发 Architecture",
-    "不要求 Development 证明未来绝对不会复用",
+    "Development 不修改蓝图第一至第五章",
+    "蓝图同步",
+    "不得为此扫描仓库、调用 Architecture、增加用户确认轮次或运行额外全量测试",
+    "离开当前单一业务工作流后仍能被无关功能直接复用",
+    "证据不明确时默认不登记，也不询问用户",
+    "设计入口写“无”",
+    "无设计链接表示尚未持久化设计",
     "必要事实未知",
     "不得为此新增目录扫描、MCP、外部研究或独立技能调用",
     "涉及持久化时从最终生效配置解析存储位置",
@@ -349,7 +326,7 @@ test("development owns all implementation constraints in one skill without commi
     false,
   );
   assert.match(development, /普通 Development 不检查 `\.nova\/SHARED_CAPABILITIES\.md`/);
-  assert.doesNotMatch(development, /Development 更新导航/);
+  assert.doesNotMatch(development, /Development 更新导航|两个以上能够独立变化的当前参与方/);
   assert.doesNotMatch(development, /命中或未知都必须在编码前中断/);
   assert.doesNotMatch(development, /潜在复用场景.*必须.*中断/);
   assert.doesNotMatch(development, /^## Plan mode$/m);
@@ -368,6 +345,12 @@ test("review keeps accumulated rules in one skill and never commits", () => {
     "第 3 轮仍 REJECT",
     "等待超时只表示等待窗口结束",
     "复审通过后仍保持未提交",
+    "技术债务登记",
+    "不影响本次任务的正确性、数据安全或必要验收",
+    "不能以债务逃避修复",
+    "不是所有合法 Observation-Defer 都是技术债务",
+    "设计入口写“无”",
+    "不触发新的 Reviewer 轮次或业务测试",
   ]) {
     assert.equal(review.includes(phrase), true, `missing review rule: ${phrase}`);
   }
@@ -379,6 +362,7 @@ test("review keeps accumulated rules in one skill and never commits", () => {
     review,
     /创建 Conventional Commit|创建一个普通.*提交|git commit|closure commit|closure transaction/,
   );
+  assert.doesNotMatch(review, /Observation-Defer.*不自动扩展当前任务或创建待办/);
 });
 
 test("commit is the sole owner of local commit behavior", () => {
