@@ -230,6 +230,28 @@ test("architecture keeps its full contract in one skill and leaves changes uncom
     "例如价格来源及其回退属于 `pricing` 功能",
     "空白项目或尚无实现契约的蓝图初始化默认只创建 `.nova/PROJECT_BLUEPRINT.md`",
     "不得为了让第六章有条目而提前创建详细架构文档",
+    "用户明确要求升级、迁移或整体精简",
+    "完整语义审计”只表示逐条判断整份蓝图，不是全仓库审计",
+    "导航迁移不追求穷举现有能力",
+    "禁止为迁移枚举 `.nova`、源码目录或测试目录",
+    "禁止主动发现或读取需求文档",
+    "相对 `.nova/PROJECT_BLUEPRINT.md` 所在的 `.nova/` 目录解析",
+    "权限与对象隔离、共享数据所有权、蓝图已经精确登记的版本化公共契约",
+    "各用一次有界关键词查询",
+    "不为寻找版本而扫描或把框架生成文档的 `info.version` 当成版本化公共契约",
+    "旧台账中的需求链接和需求来源列不属于 Architecture 迁移输入",
+    "不检查存在性、不读取内容",
+    "证据足以决定保留、合并、替换或删除后立即停止研究",
+    "普通架构修改只检查新增或修改内容",
+    "轻量写入准入",
+    "删除该内容后",
+    "相同事实更新原条目",
+    "第 5 章不是资源、失败模式或治理清单",
+    "不得改名或移动到“全局契约”后继续保留",
+    "不复述本技能的通用规则",
+    "写入前确认是本技能已经定义的固定授权门",
+    "不触发读取澄清 SOP",
+    "不得为此增加独立审计阶段",
     "混合请求中的开发交接",
     "用户本次明确提供并要求作为架构输入的需求文档",
     "按可独立交付的内聚开发任务分组",
@@ -241,7 +263,11 @@ test("architecture keeps its full contract in one skill and leaves changes uncom
     "能够直接作为某个功能的实现说明或验收清单",
     "不记录请求或业务生命周期、跨模块编排",
     "验证入口指向现有契约、Schema 或可执行校验",
+    "实现文件、启动脚本或配置本身不能同时充当验证入口",
+    "事实而找到的代码、配置和测试只是证据，不得自动晋升为新导航",
     "架构决定与蓝图影响闭包",
+    "不得用“相关模块”“相关代码”等模糊占位代替实现映射",
+    "合并到已经确认的更大稳定代码区域",
     "新增、删除项目级模块或技能",
     "七章完整有序",
     "结果保持未提交",
@@ -262,7 +288,18 @@ test("architecture keeps its full contract in one skill and leaves changes uncom
   assert.match(blueprint, /开发触发条件 \| 名称 \| 类别 \| 精确入口 \| 复用或遵循边界 \| 验证入口/);
   assert.match(blueprint, /开发触发条件 \| 待开发内容 \| 交付结果 \| 设计入口/);
   assert.match(blueprint, /不能直接作为某个功能的实现说明、恢复矩阵或未来测试清单/);
+  assert.match(blueprint, /事实核验过程中发现的代码、配置和测试不得自动晋升为导航/);
+  assert.match(blueprint, /框架生成文档的 `info.version` 本身不构成版本化公共契约/);
   assert.match(blueprint, /空白项目不得为了填充本章而创建详细架构文档/);
+  assert.match(blueprint, /无法映射到实现的人工编号/);
+  assert.match(blueprint, /不得用“相关模块”“相关代码”等模糊占位/);
+  assert.match(blueprint, /无法确认细分目录时合并到已知的更大稳定代码区域/);
+  assert.match(blueprint, /真实依赖方向/);
+  assert.match(blueprint, /唯一权威位置更新而不是追加同义或历史版本/);
+  assert.match(blueprint, /通用工程规范留在项目规则、代码或测试/);
+  assert.match(blueprint, /不能由所有者模块自行封装的跨参与方不变量/);
+  assert.match(blueprint, /不得把这些内容改名后移入“全局契约”/);
+  assert.match(blueprint, /不复述 Architecture 或 Development 技能的通用职责与路由规则/);
   assert.match(blueprint, /Architecture 将用户明确提出的具体功能限域交给 Development/);
   assert.match(blueprint, /Architecture 返回后继续完成架构工作/);
   assert.match(blueprint, /没有条目时删除表格并写“当前无待开发工作”/);
@@ -272,7 +309,7 @@ test("architecture keeps its full contract in one skill and leaves changes uncom
     ),
     false,
   );
-  assert.match(architecture, /旧蓝图缺少“开发导航”.*\.nova\/SHARED_CAPABILITIES\.md/);
+  assert.match(architecture, /直接检查固定旧入口 `\.nova\/SHARED_CAPABILITIES\.md`/);
   assert.doesNotMatch(architecture, /创建 Conventional Commit|type\(scope\)/);
 });
 
@@ -285,8 +322,14 @@ test("development owns all implementation constraints in one skill without commi
     "失败语义",
     "测试与证据复用",
     "第六章“开发导航”的触发条件",
-    "命中 / 不命中 / 未知",
-    "不得以“当前没有第二个消费者”",
+    "不得再读取开发导航、设计、代码或测试来堆叠同一结论的证据",
+    "不得在结论已由蓝图确定后读取设计以补充说明",
+    "当前具体共享边界",
+    "两个以上能够独立变化的当前参与方",
+    "可选架构收益只作非阻塞建议",
+    "潜在复用场景本身不触发 Architecture",
+    "不要求 Development 证明未来绝对不会复用",
+    "必要事实未知",
     "不得为此新增目录扫描、MCP、外部研究或独立技能调用",
     "涉及持久化时从最终生效配置解析存储位置",
     "一个准备批次",
@@ -305,8 +348,10 @@ test("development owns all implementation constraints in one skill without commi
     fs.existsSync(path.join(pluginRoot, "skills/nova-development/references/implementation-sop.md")),
     false,
   );
-  assert.match(development, /固定旧入口 `\.nova\/SHARED_CAPABILITIES\.md`/);
+  assert.match(development, /普通 Development 不检查 `\.nova\/SHARED_CAPABILITIES\.md`/);
   assert.doesNotMatch(development, /Development 更新导航/);
+  assert.doesNotMatch(development, /命中或未知都必须在编码前中断/);
+  assert.doesNotMatch(development, /潜在复用场景.*必须.*中断/);
   assert.doesNotMatch(development, /^## Plan mode$/m);
   assert.doesNotMatch(development, /提交首行|提交批次|五至七个执行项|本地提交 hash/);
 });
