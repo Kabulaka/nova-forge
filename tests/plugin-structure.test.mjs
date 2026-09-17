@@ -66,6 +66,10 @@ test("global rules are a compact router rather than duplicated skill SOPs", () =
     "只能消费进入技能前已有且有效的验证证据",
     "不得自行调用其他技能制造证据后继续提交",
     "蓝图“开发导航”是唯一发现入口",
+    "每次新的用户请求均重新判断技能路由",
+    "同一内聚任务再次命中同一技能",
+    "项目根目录之外",
+    "原生只读方式",
   ]) {
     assert.equal(rules.includes(phrase), true, `missing global boundary: ${phrase}`);
   }
@@ -287,6 +291,11 @@ test("development owns all implementation constraints in one skill without commi
     "涉及持久化时从最终生效配置解析存储位置",
     "一个准备批次",
     "一个失败即停的验证批次",
+    "同任务续改",
+    "原任务范围",
+    "不重建任务基线",
+    "只更新本轮差量",
+    "从最早受影响环节恢复正常 Development",
     "不暂存、不提交",
     "简单示例",
   ]) {
