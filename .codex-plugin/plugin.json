@@ -1,6 +1,6 @@
 {
   "name": "nova-forge",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Lightweight requirements, architecture, development, review, and explicit local commit SOPs for Codex.",
   "author": {
     "name": "Nova Forge contributors",

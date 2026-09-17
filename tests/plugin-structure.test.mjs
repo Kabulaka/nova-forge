@@ -218,6 +218,24 @@ test("architecture keeps its full contract in one skill and leaves changes uncom
     "必须与契约的 `info.version` 一致",
     "开发触发条件",
     "维护多人长期并行开发共同遵守的主体技术架构",
+    "架构事实准入",
+    "两个以上能够独立变化的项目内参与方",
+    "功能同时调用多个模块",
+    "仅由一个模块通过私有适配器调用的上游服务不算第二个架构参与方",
+    "例如价格来源及其回退属于 `pricing` 功能",
+    "空白项目或尚无实现契约的蓝图初始化默认只创建 `.nova/PROJECT_BLUEPRINT.md`",
+    "不得为了让第六章有条目而提前创建详细架构文档",
+    "混合请求中的开发交接",
+    "用户本次明确提供并要求作为架构输入的需求文档",
+    "按可独立交付的内聚开发任务分组",
+    "澄清、设计和登记，不编码",
+    "控制权都回到 Architecture",
+    "Development 的返回只是候选，不构成架构判定",
+    "直接把该内容连同既有边界退回同一 Development 任务",
+    "不得声称“本次只初始化架构”",
+    "能够直接作为某个功能的实现说明或验收清单",
+    "不记录请求或业务生命周期、跨模块编排",
+    "验证入口指向现有契约、Schema 或可执行校验",
     "架构决定与蓝图影响闭包",
     "新增、删除项目级模块或技能",
     "七章完整有序",
@@ -238,6 +256,10 @@ test("architecture keeps its full contract in one skill and leaves changes uncom
   );
   assert.match(blueprint, /开发触发条件 \| 名称 \| 类别 \| 精确入口 \| 复用或遵循边界 \| 验证入口/);
   assert.match(blueprint, /开发触发条件 \| 待开发内容 \| 交付结果 \| 设计入口/);
+  assert.match(blueprint, /不能直接作为某个功能的实现说明、恢复矩阵或未来测试清单/);
+  assert.match(blueprint, /空白项目不得为了填充本章而创建详细架构文档/);
+  assert.match(blueprint, /Architecture 将用户明确提出的具体功能限域交给 Development/);
+  assert.match(blueprint, /Architecture 返回后继续完成架构工作/);
   assert.match(blueprint, /没有条目时删除表格并写“当前无待开发工作”/);
   assert.equal(
     fs.existsSync(

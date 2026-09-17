@@ -28,7 +28,7 @@ Nova Forge 是面向 Codex 和 Claude Code 的高效率开发辅助 SOP。它保
 ### Codex
 
 ```bash
-codex plugin marketplace add Kabulaka/nova-forge --ref v0.6.0
+codex plugin marketplace add Kabulaka/nova-forge --ref v0.6.1
 codex plugin add nova-forge@nova-forge
 ```
 
