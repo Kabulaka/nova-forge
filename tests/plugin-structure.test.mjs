@@ -190,7 +190,7 @@ test("clarification and architecture gates distinguish the three observed behavi
   assert.match(architecture, /任一普通开发任务不能在局部实现中自行改变/);
   assert.match(architecture, /业务 API、OpenAPI 业务字段、DTO、schema 和数据库表/);
   assert.match(architecture, /不能单独构成架构准入/);
-  assert.match(development, /目标必然改变技术栈、运行\/部署形态、基础设施选型或介质职责/);
+  assert.match(development, /当前需求是否必然改变：技术栈、运行\/部署形态、基础设施选型或介质职责/);
   assert.match(development, /业务 API、schema、DTO、数据库表、业务事件和端到端功能流程.*仍由 Development 直接处理/);
   assert.match(development, /不得由 Development 自行修改蓝图第一至第五章/);
   assert.doesNotMatch(architecture, /两个以上能够独立变化的项目内参与方/);
@@ -310,7 +310,10 @@ test("development keeps business work local and synchronizes only proven reusabl
     "不得为此新增目录扫描、MCP、外部研究或独立技能调用",
     "涉及持久化时从最终生效配置解析存储位置",
     "一个准备批次",
+    "一个模型工具回合",
+    "事实未变时不重读技能、蓝图、基线或任务事实",
     "一个失败即停的验证批次",
+    "批次指一次模型往返，不强求单个 shell 命令",
     "同任务续改",
     "原任务范围",
     "不重建任务基线",
@@ -331,6 +334,36 @@ test("development keeps business work local and synchronizes only proven reusabl
   assert.doesNotMatch(development, /潜在复用场景.*必须.*中断/);
   assert.doesNotMatch(development, /^## Plan mode$/m);
   assert.doesNotMatch(development, /提交首行|提交批次|五至七个执行项|本地提交 hash/);
+  assert.equal(
+    (development.match(/当前需求是否必然改变：技术栈、运行\/部署形态、基础设施选型或介质职责/g) ?? [])
+      .length,
+    1,
+  );
+  assert.match(
+    development,
+    /清空后、形成整份摘要前，完整读取.*design-document-standard\.md/,
+  );
+  assert.match(development, /只登记待开发工作时不读取两者/);
+  assert.match(development, /只有目标性描述时.*仍存在多种会改变结果的合理语义.*属于阻塞差量/);
+  assert.match(development, /不得用常见做法或 AI 自选默认值补齐整份设计/);
+  assert.match(development, /不得在该差量确认前读取设计规范或模板/);
+});
+
+test("external reference research fails closed on missing transport or evidence", () => {
+  const research = read("skills/nova-development/references/reference-research-sop.md");
+  for (const phrase of [
+    "只有实际创建并到达完成状态、且返回非空可定位证据的代理才算独立研究",
+    "接收者为空",
+    "响应正文非空",
+    "进程退出码为零本身不证明证据有效",
+    "pipefail",
+    "不得让末端筛选、格式化或截断命令的成功掩盖",
+    "映射到实际取得的证据",
+    "未验证标准兼容性",
+    "不声称已经独立研究、交叉核对或验证兼容性",
+  ]) {
+    assert.equal(research.includes(phrase), true, `missing external evidence gate: ${phrase}`);
+  }
 });
 
 test("review keeps accumulated rules in one skill and never commits", () => {

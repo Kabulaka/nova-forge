@@ -1,6 +1,6 @@
 {
   "name": "nova-forge",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "description": "Lightweight requirements and development SOP skills for Codex and Claude Code.",
