@@ -313,6 +313,7 @@ test("development keeps business work local and synchronizes only proven reusabl
     "一个模型工具回合",
     "事实未变时不重读技能、蓝图、基线或任务事实",
     "一个失败即停的验证批次",
+    "相关内容和环境未变化时，不得重复执行已经通过的命令",
     "批次指一次模型往返，不强求单个 shell 命令",
     "同任务续改",
     "原任务范围",
