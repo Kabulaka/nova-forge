@@ -217,7 +217,14 @@ test("clarification and architecture gates distinguish the three observed behavi
   assert.match(conversation, /不得称为“用户未回答”或“未收到选择”/);
   assert.match(conversation, /工具名称出现在本轮列表中不等于当前交互通道可用/);
   assert.match(conversation, /`codex exec`、批处理.*非交互通道必须直接使用普通文本/);
+  assert.match(rules, /可选选择和阻塞选择都允许按共享澄清 SOP 使用/);
+  assert.match(rules, /问题是否阻塞只决定无有效答案后的推进方式，不决定能否调用工具/);
+  assert.match(conversation, /可选选择和阻塞选择都允许使用/);
+  assert.match(conversation, /不承担宿主权限申请、提权或破坏性操作授权/);
+  assert.match(conversation, /业务范围、行为、契约或设计确认不因需要用户明确回答而被视为宿主权限审批/);
   assert.match(conversation, /明确报告超时、取消或未提交，并同时确认问题已成功呈现/);
+  assert.match(conversation, /阻塞问题保持待确认/);
+  assert.match(conversation, /非阻塞可选问题仅在调用前已经披露默认处理时按该默认继续/);
   assert.match(conversation, /只返回空答案或 `0\/1 answered`、没有成功呈现标记/);
 });
 

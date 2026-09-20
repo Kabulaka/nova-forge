@@ -1,6 +1,6 @@
 {
   "name": "nova-forge",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Lightweight requirements, architecture, development, review, and explicit local commit SOPs for Claude Code.",
   "author": {
     "name": "Nova Forge contributors",

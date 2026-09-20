@@ -8,6 +8,7 @@
 - 业务 API、业务 schema、DTO、数据库表、业务事件和端到端功能流程即使跨多个模块、有版本或兼容要求，也默认属于 `nova-development`；只有其中确实改变系统骨架的最小差量先交 `nova-architecture`。Development 不得自行修改蓝图中的系统骨架。
 - 任何代码、配置或测试的实现、调整、修复和维护均使用 `nova-development`；请求明确时直接实施，只有真实歧义才澄清。
 - Requirements 在用户明确要求需求澄清或创建、修改内容不足时使用 `skills/nova-development/references/conversation-sop.md`；Architecture 与 Development 在发生真实歧义时使用同一文件，不得各自维护不同的澄清协议。
+- 原生结构化提问只是交互载体，不承担宿主权限审批；出现 2–3 个真实互斥选项且当前交互通道支持时，可选选择和阻塞选择都允许按共享澄清 SOP 使用。问题是否阻塞只决定无有效答案后的推进方式，不决定能否调用工具。
 - 只有用户明确要求 Review、审查、复审或补审时才使用 `nova-review`；加载技能本身不代表获得审查授权。
 - 只有用户明确要求创建本地提交时才使用 `nova-commit`；Architecture、Development 与 Review 不得创建提交或自动转交 Commit。
 - `nova-commit` 只能消费进入技能前已有且有效的验证证据；准入失败立即结束，不得自行调用其他技能制造证据后继续提交。

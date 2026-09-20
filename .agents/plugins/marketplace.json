@@ -9,7 +9,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/Kabulaka/nova-forge.git",
-        "ref": "v0.7.2"
+        "ref": "v0.8.0"
       },
       "policy": {
         "installation": "AVAILABLE",
