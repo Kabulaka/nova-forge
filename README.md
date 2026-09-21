@@ -49,7 +49,7 @@ flowchart LR
 ### Codex
 
 ```bash
-codex plugin marketplace add Kabulaka/nova-forge --ref v0.8.1
+codex plugin marketplace add Kabulaka/nova-forge --ref v0.8.2
 codex plugin add nova-forge@nova-forge
 ```
 
