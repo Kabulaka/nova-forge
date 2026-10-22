@@ -2,15 +2,15 @@
 
 ## 1. 项目定位
 
-Nova Forge 是面向 Codex 与 Claude Code 的低干扰开发辅助 SOP。它在人工要求时帮助用户澄清整体业务需求、维护共享架构、直接完成开发、执行 Review 或创建本地提交；它不是需求生命周期管理、审计或自动化开发框架。
+Nova Forge 是面向 Codex、Claude Code 与 DeepSeek Harness 的低干扰开发辅助 SOP。它在人工要求时帮助用户澄清整体业务需求、维护共享架构、直接完成开发、执行 Review 或创建本地提交；它不是需求生命周期管理、审计或自动化开发框架。
 
 ## 2. 技术栈
 
 | 类别 | 选择 | 约束 |
 |---|---|---|
 | 技能 | Markdown 与 YAML frontmatter | 只保留 requirements、architecture、development、review、commit |
-| Hook 与工具 | Node.js 22.5+ ESM、仅标准库 | 只在 SessionStart 注入静态规则 |
-| 插件 | Codex 与 Claude Code 原生 manifest/marketplace | 共享同一份 skills、hooks 与规则 |
+| Hook 与工具 | Node.js 22.5+ ESM；共享 Hook 与维护工具仅用标准库 | 只在 SessionStart 注入静态规则 |
+| 插件 | Codex、Claude Code 原生 manifest/marketplace；DeepSeek Harness 原生 bundle | 三宿主共享同一份 skills、hooks 与规则；DSH 官方 SDK 仅由 DSH 入口依赖 |
 | 发布 | npm pack、GitHub Actions、SemVer 标签 | `package.json` 是版本单一来源 |
 
 ## 3. 代码结构
@@ -21,6 +21,7 @@ Nova Forge 是面向 Codex 与 Claude Code 的低干扰开发辅助 SOP。它在
 | `skills/` | 五个按需加载的技能 |
 | `hooks/` | 单一 SessionStart Hook |
 | `.codex-plugin/`、`.claude-plugin/`、`.agents/plugins/` | 双宿主插件与 marketplace 清单 |
+| `dsh/`、`package.json` 的 `dsh` 字段 | DeepSeek Harness 原生 ESM 适配入口与 bundle 挂载声明 |
 | `scripts/`、`tests/` | 本地安装、结构、打包与发布验证 |
 | `.nova/design/` | 保留的设计文档；禁止主动扫描 |
 | `.nova/architecture/` | 蓝图精确引用的必要共享架构文档 |
@@ -35,7 +36,8 @@ Nova Forge 是面向 Codex 与 Claude Code 的低干扰开发辅助 SOP。它在
 | Review | 人工触发的独立审查与修复，初审和复审总计最多三次结论 | 不维护持久状态，不扩展审查范围，不提交 |
 | Commit | 仅在人工明确要求时精确创建本地 Conventional Commit | 不改代码、不测试、不 Review、不执行远程操作 |
 | Hook | 注入全局开发约定 | 不保存状态，不处理其他生命周期事件 |
-| Distribution | 双宿主安装、检查与标签发布 | 不定义开发流程语义 |
+| DSH 适配器（`dsh/`） | 通过宿主技能 provider 和官方 hooks 兼容桥挂载包内共享资源 | 依赖方向为适配入口 → DSH 官方组件 → 共享技能与 Hook；共享层不反向依赖 DSH |
+| Distribution | 三宿主安装、检查与标签发布 | 不定义开发流程语义；DSH 安装配置与注册生命周期由指定 profile 的原生管理器和插件作用域拥有 |
 
 ## 5. 公共约束
 
@@ -48,6 +50,7 @@ Nova Forge 是面向 Codex 与 Claude Code 的低干扰开发辅助 SOP。它在
 - 设计只在用户明确要求时创建；上述用户明确提出功能后的限域交接视为对该功能设计与登记的明确请求。AI 不得扫描 `.nova/design/`，只能读取本蓝图针对当前待办的精确链接。
 - 完成报告由提示词约束，不通过程序或 Schema 校验。
 - Review、Commit、push、发布和远程写操作都不会由普通开发自动触发。
+- DSH 适配不增加独立服务或项目状态，不写用户或项目 AGENTS.md，不向全局目录复制技能；DSH 依赖不成为 Codex、Claude Code 加载技能或执行共享 Hook 的前置条件。
 
 ## 6. 开发导航
 

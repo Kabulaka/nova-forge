@@ -37,7 +37,23 @@ requireValue(packageJson.name === "nova-forge", "package name must be nova-forge
 requireValue(/^\d+\.\d+\.\d+$/.test(packageJson.version), "package version must be stable SemVer");
 requireValue(packageJson.type === "module", "package type must be module");
 requireValue(packageJson.engines?.node === ">=22.5.0", "Node engine must be >=22.5.0");
-requireValue(!packageJson.dependencies && !packageJson.devDependencies, "dependencies are forbidden");
+requireValue(!packageJson.devDependencies, "development dependencies are forbidden");
+requireValue(
+  JSON.stringify(packageJson.dependencies) === JSON.stringify({
+    "@deepseek-ai/dsh-hook-protocol": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-hooks-claude-code": "0.2.1-rc.2",
+  }),
+  "only the pinned official DSH hooks bridge and protocol may be runtime dependencies",
+);
+requireValue(
+  JSON.stringify(packageJson.peerDependencies) === JSON.stringify({
+    "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.2",
+  }) && packageJson.peerDependenciesMeta?.["@deepseek-ai/dsh-skill-filesystem"]?.optional === true,
+  "DSH skill provider must be an optional host-shared peer",
+);
+requireValue(packageJson.engines?.dsh === "0.2.1-rc.2", "DSH compatibility must match the verified version");
+requireValue(packageJson.exports?.["."] === "./dsh/index.mjs", "DSH ESM entry mismatch");
+requireValue(packageJson.dsh?.bundle?.patch === "./dsh/cordis.patch.yml", "DSH bundle patch mismatch");
 
 for (const [label, manifest] of [["Codex", codex], ["Claude Code", claude]]) {
   requireValue(manifest.name === packageJson.name, `${label} manifest name mismatch`);
@@ -102,6 +118,9 @@ for (const relative of [
 for (const relative of [
   "codex/AGENTS.global.md",
   "hooks/run.mjs",
+  "dsh/index.mjs",
+  "dsh/mount.mjs",
+  "dsh/cordis.patch.yml",
   "skills/nova-requirements/assets/PRODUCT_REQUIREMENTS.template.md",
   "skills/nova-requirements/agents/openai.yaml",
   "skills/nova-requirements/references/examples/AI_GATEWAY_REQUIREMENTS.md",
@@ -131,5 +150,5 @@ if (errors.length) {
   errors.forEach((error) => process.stderr.write(`ERROR: ${error}\n`));
   process.exitCode = 1;
 } else {
-  process.stdout.write("PASS: lightweight dual-host plugin structure\n");
+  process.stdout.write("PASS: lightweight three-host plugin structure\n");
 }

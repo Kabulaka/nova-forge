@@ -1,6 +1,6 @@
 # Nova Forge
 
-Nova Forge 是面向 Codex 与 Claude Code 的轻量级开发 SOP。它让 AI 先理解项目事实，再完成实现和测试；架构、需求、Review、提交、push 与发布仍由你按需明确发起。
+Nova Forge 是面向 Codex、Claude Code 与 DeepSeek Harness 的轻量级开发 SOP。它让 AI 先理解项目事实，再完成实现和测试；架构、需求、Review、提交、push 与发布仍由你按需明确发起。
 
 它不是自动化开发框架，也不维护状态机、审计台账或“需求—代码—提交”的强制追溯链路。日常开发仍然可以直接说人话。
 
@@ -65,6 +65,30 @@ codex plugin add nova-forge@nova-forge
 ```
 
 插件只在 `SessionStart` 的 `startup`、`resume`、`clear` 和 `compact` 事件注入核心规则。没有 MCP 服务、后台状态或其他生命周期 Hook。
+
+### DeepSeek Harness
+
+适配目标为 DSH `0.2.1-rc.2`。使用原生 bundle 管理器安装到指定 profile；五个技能及规则从安装包挂载，不需要复制技能或修改 AGENTS.md。
+
+当前适配尚未发布，先用 `npm pack --ignore-scripts` 生成本地包，再安装生成的压缩包（原生管理器会安装官方桥依赖）：
+
+```bash
+dsh plugin --profile headless add /absolute/path/to/nova-forge-0.8.2.tgz
+dsh --profile headless --dump-config
+```
+
+在指定 profile 中新开会话，使用 `/nova-development` 等原生技能名或自然语言。隔离测试时将 `DSH_HOME`、`DSH_AGENTS_HOME` 设为临时绝对路径；其他 profile 不会自动安装 Nova。已有会话的历史上下文会保留。
+
+包含本适配的标签发布后，可使用 `dsh plugin --profile <profile> add github:Kabulaka/nova-forge#<发布标签>`；当前 `v0.8.2` 不包含本次未提交适配，不能用它验证远程安装。
+
+禁用使用宿主 Plugins 界面，或在该 profile 的 `cordis.patch.yml` 用户覆盖层加入以下列表项（文件为空列表 `[]` 时替换该空列表）：
+
+```yaml
+- id: nova-forge
+  disabled: true
+```
+
+删除这条禁用覆盖可重新启用。更新不会强行清除用户的禁用选择。卸载使用 `dsh plugin --profile <profile> remove nova-forge`；按宿主提示停止 profile 后操作，并新开会话核对。卸载不会清理其他来源的技能或历史会话上下文。
 
 ## 新开一个项目怎么做
 
@@ -210,7 +234,15 @@ npm run claude:dev:uninstall
 npm run check
 ```
 
-它会依次校验版本、双宿主插件结构、Release Notes、GitHub Actions 工作流、自动化测试和 npm 包内容。
+它会依次校验版本、三宿主插件结构、Release Notes、GitHub Actions 工作流、自动化测试和 npm 包内容；Codex、Claude Code 的检查及共享 Hook 不要求安装 DSH SDK。
+
+DSH 原生运行验收单独执行（需要已安装 DSH `0.2.1-rc.2`）：
+
+```bash
+npm run test:dsh
+```
+
+该命令使用临时 profile、工作区和 mock 模型，覆盖原生 bundle 生命周期与首个模型请求，并向真实桥转发四种 SessionStart 来源。它不覆盖宿主 clear/compact 界面的完整操作，也不代表真实模型已完成自然语言路由、澄清或独立 Review；这些使用链和远程标签安装需单独验收。
 
 ## 常见问题
 

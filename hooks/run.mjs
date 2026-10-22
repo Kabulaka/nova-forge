@@ -55,12 +55,17 @@ export function handleHook(input, environment = process.env) {
   if (!SESSION_SOURCES.has(input.source)) {
     throw new HookError("UNSUPPORTED_SESSION_SOURCE", "unsupported SessionStart source");
   }
-  const rulesPath = path.join(resolvePluginRoot(environment), "codex", "AGENTS.global.md");
+  const pluginRoot = resolvePluginRoot(environment);
+  const rulesPath = path.join(pluginRoot, "codex", "AGENTS.global.md");
   let rules;
   try {
     rules = fs.readFileSync(rulesPath, "utf8");
   } catch {
     throw new HookError("RULES_UNAVAILABLE", "global rules cannot be read");
+  }
+  if (environment.NOVA_DSH_ROOT === pluginRoot) {
+    rules += `\n\nDeepSeek Harness 的 Nova Forge 包内资源根目录：${pluginRoot}\n` +
+      `本规则的 skills/ 路径相对此目录；共享澄清 SOP：${path.join(pluginRoot, "skills/nova-development/references/conversation-sop.md")}\n`;
   }
   return {
     hookSpecificOutput: {

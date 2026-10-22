@@ -32,6 +32,8 @@ description: 仅在用户明确要求时，对指定 Git/SVN 提交、范围或�
 
 ## 3. 独立 Reviewer 输入、角色与思考度
 
+DeepSeek Harness 使用当前实际暴露的子代理工具和已注册 provider；本文的 `spawn_agent`、`followup_task` 分别表示创建独立代理、向同一代理续发任务，不要求宿主提供同名工具。必须保留独立代理身份和同一 reviewer 复审语义；宿主无法创建独立 reviewer 或无法续接同一 reviewer 时，报告阻断，不以主代理自检或新代理替代后宣称通过。
+
 主代理每轮必须向独立 Reviewer 提供：
 
 1. 当前任务差异的完整 Git/SVN patch、任务开始基线内容标识及路径/行块清单；

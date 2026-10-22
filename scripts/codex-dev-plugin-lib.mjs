@@ -361,6 +361,9 @@ function writeClaudeMarketplace(stageRoot, version) {
 
 export function validateSnapshot(pluginRoot) {
   const required = [
+    "dsh/index.mjs",
+    "dsh/mount.mjs",
+    "dsh/cordis.patch.yml",
     ".codex-plugin/plugin.json",
     "hooks/hooks.json",
     "hooks/run.mjs",

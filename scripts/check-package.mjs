@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
   encoding: "utf8",
@@ -31,6 +34,9 @@ const required = [
   ".claude-plugin/plugin.json",
   "hooks/hooks.json",
   "hooks/run.mjs",
+  "dsh/index.mjs",
+  "dsh/mount.mjs",
+  "dsh/cordis.patch.yml",
   "codex/AGENTS.global.md",
   "skills/nova-requirements/SKILL.md",
   "skills/nova-requirements/agents/openai.yaml",
@@ -47,7 +53,17 @@ const required = [
   "skills/nova-commit/SKILL.md",
   "skills/nova-commit/agents/openai.yaml",
 ];
-const missing = required.filter((file) => !files.has(file));
+// All shared resources must survive packing, including local and cross-skill
+// references added later. Checking only SKILL.md would miss a broken plugin.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+function resourceFiles(directory) {
+  return fs.readdirSync(path.join(root, directory), { withFileTypes: true }).flatMap((entry) => {
+    const relative = `${directory}/${entry.name}`;
+    return entry.isDirectory() ? resourceFiles(relative) : /\.(md|ya?ml|mjs)$/.test(entry.name) ? [relative] : [];
+  });
+}
+const missing = [...new Set([...required, ...resourceFiles("skills"), ...resourceFiles("dsh")])]
+  .filter((file) => !files.has(file));
 const packagedSkills = new Set(
   [...files]
     .filter((file) => file.startsWith("skills/"))

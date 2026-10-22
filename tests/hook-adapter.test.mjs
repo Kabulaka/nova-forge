@@ -31,6 +31,20 @@ test("non-SessionStart events do not inject context", () => {
   assert.deepEqual(handleHook({ hook_event_name: "PostToolUse" }, environment), {});
 });
 
+test("DSH adds an absolute resource base only with its scoped host marker", () => {
+  const input = { hook_event_name: "SessionStart", source: "startup" };
+  const plain = handleHook(input, environment).hookSpecificOutput.additionalContext;
+  const dsh = handleHook(input, {
+    ...environment, NOVA_DSH_ROOT: pluginRoot,
+  }).hookSpecificOutput.additionalContext;
+  assert.equal(dsh.startsWith(plain), true);
+  assert.equal(dsh.includes(path.join(pluginRoot, "skills/nova-development/references/conversation-sop.md")), true);
+  assert.equal(handleHook(input, {
+    ...environment, NOVA_DSH_ROOT: "wrong-root",
+  }).hookSpecificOutput.additionalContext, plain);
+  assert.throws(() => handleHook(input, { NOVA_DSH_ROOT: pluginRoot }), HookError);
+});
+
 test("plugin root accepts host variables and rejects relative or missing roots", () => {
   assert.equal(resolvePluginRoot({ NOVA_PLUGIN_ROOT: pluginRoot }), pluginRoot);
   assert.equal(resolvePluginRoot({ CLAUDE_PLUGIN_ROOT: pluginRoot }), pluginRoot);
