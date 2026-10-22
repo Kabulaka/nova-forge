@@ -55,7 +55,7 @@ flowchart LR
 ### Codex
 
 ```bash
-codex plugin marketplace add Kabulaka/nova-forge --ref v0.9.0
+codex plugin marketplace add Kabulaka/nova-forge --ref v0.9.1
 codex plugin add nova-forge@nova-forge
 ```
 
@@ -79,13 +79,13 @@ codex plugin add nova-forge@nova-forge
 安装固定版本的原生 bundle（原生管理器会安装官方桥依赖）：
 
 ```bash
-dsh plugin --profile headless add github:Kabulaka/nova-forge#v0.9.0
+dsh plugin --profile headless add github:Kabulaka/nova-forge#v0.9.1
 dsh --profile headless --dump-config
 ```
 
 在指定 profile 中新开会话，使用 `/nova-development` 等原生技能名或自然语言。隔离测试时将 `DSH_HOME`、`DSH_AGENTS_HOME` 设为临时绝对路径；其他 profile 不会自动安装 Nova。已有会话的历史上下文会保留。
 
-也可用 `npm pack --ignore-scripts` 生成本地包，再执行 `dsh plugin --profile <profile> add /absolute/path/to/nova-forge-0.9.0.tgz`。v0.9.0 是首个包含 DSH 适配的版本。
+也可用 `npm pack --ignore-scripts` 生成本地包，再执行 `dsh plugin --profile <profile> add /absolute/path/to/nova-forge-0.9.1.tgz`。v0.9.0 是首个包含 DSH 适配的版本。
 
 禁用使用宿主 Plugins 界面，或在该 profile 的 `cordis.patch.yml` 用户覆盖层加入以下列表项（文件为空列表 `[]` 时替换该空列表）：
 
