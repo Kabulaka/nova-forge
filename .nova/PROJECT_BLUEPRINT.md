@@ -62,4 +62,6 @@ Nova Forge 是面向 Codex、Claude Code 与 DeepSeek Harness 的低干扰开发
 
 ## 7. 待开发工作
 
-当前无待开发工作。
+| 何时处理 | 待开发工作 | 交付结果 | 设计入口 |
+|----------|------------|----------|----------|
+| 扩展 DeepSeek Harness 宿主支持时 | DeepSeek Harness 原生插件适配 | 原生 plugin 安装自动挂载五个共享技能与 SessionStart 全局规则注入，支持禁用和卸载，保持 Codex、Claude Code 现有功能 | [插件适配设计](design/2026-10-22_deepseek-harness-plugin.md#design-summary) |

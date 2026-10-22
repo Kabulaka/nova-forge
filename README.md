@@ -8,6 +8,12 @@ Nova Forge 是面向 Codex、Claude Code 与 DeepSeek Harness 的轻量级开发
 
 > 上图来自隔离的 `CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `NOVA_HOME` 与临时 Git 项目实测：双宿主开发插件安装成功，仓库测试 54/54 通过，并真实完成“创建蓝图 → 开发 greet 命令 → 示例测试 2/2 通过”。
 
+## 运作原理
+
+![Nova Forge 角色分工、协作链路与资料流转原理图](docs/images/nova-forge-operation-overview.png)
+
+用户负责目标与授权，AI 按需切换产品、架构、开发与 Review 角色；各阶段不会自动触发下一阶段。
+
 ## 30 秒理解
 
 ```mermaid
