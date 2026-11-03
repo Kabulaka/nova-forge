@@ -21,6 +21,7 @@ const expectedSkills = new Set([
   "nova-development",
   "nova-review",
   "nova-commit",
+  "nova-consult",
 ]);
 const removedReferences = new Set([
   "skills/nova-architecture/references/architecture-standard.md",
@@ -52,6 +53,8 @@ const required = [
   "skills/nova-review/SKILL.md",
   "skills/nova-commit/SKILL.md",
   "skills/nova-commit/agents/openai.yaml",
+  "skills/nova-consult/SKILL.md",
+  "skills/nova-consult/agents/openai.yaml",
 ];
 // All shared resources must survive packing, including local and cross-skill
 // references added later. Checking only SKILL.md would miss a broken plugin.

@@ -31,7 +31,7 @@ async function probe(ctx, config) {
     return;
   }
   const skills = await novaSkills();
-  assert.deepEqual(skills.map((s) => s.name).sort(), ["nova-architecture", "nova-commit", "nova-development", "nova-requirements", "nova-review"]);
+  assert.deepEqual(skills.map((s) => s.name).sort(), ["nova-architecture", "nova-commit", "nova-consult", "nova-development", "nova-requirements", "nova-review"]);
   for (const skill of skills) {
     const loaded = await ctx.skills.get(skill.name, { cwd: workspace });
     assert.ok(loaded.content.length > 100);
@@ -104,7 +104,7 @@ async function probe(ctx, config) {
   assert.equal(afterDispose.inbox.nextStep.filter((m) => JSON.stringify(m).includes("全局工作约定")).length, 0);
 
   const replacement = await ctx.plugin(Nova);
-  assert.equal((await novaSkills()).length, 5);
+  assert.equal((await novaSkills()).length, skills.length);
   const marker = path.join(workspace, "hook-pid");
   // Only the test-installed copy is delayed. Production resources are untouched.
   fs.writeFileSync(hookPath, original.replace("if (isMain) await main();", `if (isMain) { fs.writeFileSync(${JSON.stringify(marker)}, String(process.pid)); await new Promise(r => setTimeout(r, 30000)); await main(); }`));
@@ -124,7 +124,7 @@ async function probe(ctx, config) {
   } finally { fs.writeFileSync(hookPath, original); }
 
   const reenabled = await ctx.plugin(Nova);
-  assert.equal((await novaSkills()).length, 5);
+  assert.equal((await novaSkills()).length, skills.length);
   const fresh = await ctx.agentLoop.create(sessionId("nova-reenabled"), { provider: "nova-mock", model: "probe" }, { cwd: workspace });
   assert.equal(fresh.inbox.nextStep.filter((m) => JSON.stringify(m).includes("全局工作约定")).length, 1);
   await reenabled.dispose();

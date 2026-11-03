@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const skillNames = [
-  "nova-requirements", "nova-architecture", "nova-development", "nova-review", "nova-commit",
+  "nova-requirements", "nova-architecture", "nova-development", "nova-review", "nova-commit", "nova-consult",
 ];
 
 export async function mountNova(ctx, skillPlugin, hooksPlugin, root = packageRoot) {
@@ -21,6 +21,7 @@ export async function mountNova(ctx, skillPlugin, hooksPlugin, root = packageRoo
     "skills/nova-development/references/conversation-sop.md",
     "skills/nova-development/references/reference-research-sop.md",
     "skills/nova-development/references/design-document-standard.md",
+    "skills/nova-consult/agents/openai.yaml",
   ]) {
     try {
       if (!fs.statSync(path.join(pluginRoot, relative)).isFile()) throw new Error();

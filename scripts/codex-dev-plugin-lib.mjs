@@ -16,6 +16,7 @@ const EXPECTED_SKILLS = [
   "nova-development",
   "nova-review",
   "nova-commit",
+  "nova-consult",
 ];
 const REMOVED_REFERENCES = [
   "skills/nova-architecture/references/architecture-standard.md",
@@ -381,6 +382,8 @@ export function validateSnapshot(pluginRoot) {
     "skills/nova-review/SKILL.md",
     "skills/nova-commit/SKILL.md",
     "skills/nova-commit/agents/openai.yaml",
+    "skills/nova-consult/SKILL.md",
+    "skills/nova-consult/agents/openai.yaml",
   ];
   const missing = required.filter((relative) => !fs.existsSync(path.join(pluginRoot, relative)));
   if (missing.length) throw new Error(`development snapshot is missing: ${missing.join(", ")}`);

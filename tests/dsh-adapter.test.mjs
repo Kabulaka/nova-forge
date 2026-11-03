@@ -15,17 +15,20 @@ test("incomplete DSH packages fail before any plugin is registered", async () =>
 });
 
 test("missing linked resources and invalid hook configuration cannot partially mount Nova", async () => {
-  for (const failure of ["asset", "json", "event"]) {
+  for (const failure of ["asset", "consult", "json", "event"]) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nova-invalid-dsh-"));
     try {
       for (const directory of ["hooks", "skills", "codex"]) {
         fs.cpSync(path.join(pluginRoot, directory), path.join(root, directory), { recursive: true });
       }
       if (failure === "asset") fs.unlinkSync(path.join(root, "skills/nova-development/assets/DESIGN.template.md"));
+      if (failure === "consult") fs.unlinkSync(path.join(root, "skills/nova-consult/agents/openai.yaml"));
       if (failure === "json") fs.writeFileSync(path.join(root, "hooks/hooks.json"), "{");
       if (failure === "event") fs.writeFileSync(path.join(root, "hooks/hooks.json"), '{"hooks":{}}');
       const ctx = { plugin() { assert.fail("partial registration"); } };
-      const expected = failure === "asset" ? /installation is incomplete: skills\/nova-development\/assets\/DESIGN.template.md/ : failure === "json" ? SyntaxError : /no SessionStart hook/;
+      const expected = failure === "asset" ? /installation is incomplete: skills\/nova-development\/assets\/DESIGN.template.md/
+        : failure === "consult" ? /installation is incomplete: skills\/nova-consult\/agents\/openai.yaml/
+        : failure === "json" ? SyntaxError : /no SessionStart hook/;
       await assert.rejects(mountNova(ctx, {}, {}, root), expected);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   }

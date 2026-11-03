@@ -2,7 +2,7 @@
 
 ## 目标
 
-同一发布包为 Codex 和 Claude Code 提供相同的五个 Nova 技能与 SessionStart 规则注入，不引入常驻服务或项目状态。Requirements、Architecture、Development、Review 与 Commit 只按用户当前明确意图工作，彼此不自动调用。
+同一发布包为 Codex 和 Claude Code 提供相同的五个核心 Nova 技能、独立 Consult 技能与 SessionStart 规则注入，不引入常驻服务或项目状态。Requirements、Architecture、Development、Review 与 Commit 只按用户当前明确意图工作，彼此不自动调用；Consult 仅显式调用，不接入默认流程，提供独立意见，决策和实施仍由当前任务所在技能处理。
 
 ## 组件
 

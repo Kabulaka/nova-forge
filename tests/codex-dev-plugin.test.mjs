@@ -260,6 +260,12 @@ test("development snapshot rejects missing authority, removed references, and un
     assert.throws(() => validateSnapshot(snapshot.pluginRoot), /skills must be exactly/);
     fs.rmSync(path.dirname(unexpectedSkill), { recursive: true, force: true });
 
+    const consultPolicy = path.join(snapshot.pluginRoot, "skills/nova-consult/agents/openai.yaml");
+    const policyContent = fs.readFileSync(consultPolicy, "utf8");
+    fs.rmSync(consultPolicy);
+    assert.throws(() => validateSnapshot(snapshot.pluginRoot), /missing: skills\/nova-consult\/agents\/openai.yaml/);
+    fs.writeFileSync(consultPolicy, policyContent);
+
     const requiredBlueprintTemplate = path.join(
       snapshot.pluginRoot,
       "skills",

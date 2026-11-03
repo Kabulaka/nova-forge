@@ -10,6 +10,7 @@ const skills = [
   "nova-development",
   "nova-review",
   "nova-commit",
+  "nova-consult",
 ];
 const removed = ["nova-doctor"];
 const removedReferences = [
@@ -129,6 +130,7 @@ for (const relative of [
   "skills/nova-development/references/conversation-sop.md",
   "skills/nova-development/references/design-document-standard.md",
   "skills/nova-development/references/reference-research-sop.md",
+  "skills/nova-consult/agents/openai.yaml",
 ]) {
   requireValue(fs.existsSync(path.join(root, relative)), `missing component ${relative}`);
 }

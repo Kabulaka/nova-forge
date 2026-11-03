@@ -8,7 +8,7 @@ Nova Forge 是面向 Codex、Claude Code 与 DeepSeek Harness 的低干扰开发
 
 | 类别 | 选择 | 约束 |
 |---|---|---|
-| 技能 | Markdown 与 YAML frontmatter | 只保留 requirements、architecture、development、review、commit |
+| 技能 | Markdown 与 YAML frontmatter | requirements、architecture、development、review、commit 五个核心技能，加上仅显式调用的独立 consult 技能 |
 | Hook 与工具 | Node.js 22.5+ ESM；共享 Hook 与维护工具仅用标准库 | 只在 SessionStart 注入静态规则 |
 | 插件 | Codex、Claude Code 原生 manifest/marketplace；DeepSeek Harness 原生 bundle | 三宿主共享同一份 skills、hooks 与规则；DSH 官方 SDK 仅由 DSH 入口依赖 |
 | 发布 | npm pack、GitHub Actions、SemVer 标签 | `package.json` 是版本单一来源 |
@@ -18,7 +18,7 @@ Nova Forge 是面向 Codex、Claude Code 与 DeepSeek Harness 的低干扰开发
 | 路径 | 职责 |
 |---|---|
 | `codex/AGENTS.global.md` | SessionStart 注入的最小路由与开发约定 |
-| `skills/` | 五个按需加载的技能 |
+| `skills/` | 五个核心技能与独立显式调用的 `nova-consult` |
 | `hooks/` | 单一 SessionStart Hook |
 | `.codex-plugin/`、`.claude-plugin/`、`.agents/plugins/` | 双宿主插件与 marketplace 清单 |
 | `dsh/`、`package.json` 的 `dsh` 字段 | DeepSeek Harness 原生 ESM 适配入口与 bundle 挂载声明 |
@@ -35,6 +35,7 @@ Nova Forge 是面向 Codex、Claude Code 与 DeepSeek Harness 的低干扰开发
 | Development | 承接全部具体开发、必要澄清和测试 | 只读蓝图精确链接的上下文，不自动 Review 或提交 |
 | Review | 人工触发的独立审查与修复，初审和复审总计最多三次结论 | 不维护持久状态，不扩展审查范围，不提交 |
 | Commit | 仅在人工明确要求时精确创建本地 Conventional Commit | 不改代码、不测试、不 Review、不执行远程操作 |
+| Consult（`skills/nova-consult/`） | 显式委托隔离上下文的只读顾问，提供方案分析和建议 | 不接管决策或实施，不接入默认流程；现有技能不依赖或自动调用 Consult |
 | Hook | 注入全局开发约定 | 不保存状态，不处理其他生命周期事件 |
 | DSH 适配器（`dsh/`） | 通过宿主技能 provider 和官方 hooks 兼容桥挂载包内共享资源 | 依赖方向为适配入口 → DSH 官方组件 → 共享技能与 Hook；共享层不反向依赖 DSH |
 | Distribution | 三宿主安装、检查与标签发布 | 不定义开发流程语义；DSH 安装配置与注册生命周期由指定 profile 的原生管理器和插件作用域拥有 |

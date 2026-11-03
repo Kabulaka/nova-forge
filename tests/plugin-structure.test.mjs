@@ -20,10 +20,11 @@ test("marketplaces use host-native versioned sources", () => {
   assert.equal(claude.plugins[0].version, version);
 });
 
-test("plugin exposes exactly five skills, one hook event, and no MCP", () => {
+test("plugin exposes six skills, one hook event, and no MCP", () => {
   const expectedSkills = [
     "nova-architecture",
     "nova-commit",
+    "nova-consult",
     "nova-development",
     "nova-requirements",
     "nova-review",
