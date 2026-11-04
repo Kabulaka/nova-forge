@@ -1,6 +1,6 @@
 {
   "name": "nova-forge",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "description": "Lightweight development SOP skills for Codex, Claude Code, and DeepSeek Harness.",
