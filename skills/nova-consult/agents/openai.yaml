@@ -1,2 +1,7 @@
+interface:
+  display_name: "Nova Consult"
+  short_description: "显式调用隔离上下文的只读顾问，获取独立方案分析与取舍建议"
+  default_prompt: "Use $nova-consult to get independent, read-only analysis of this proposal in a fresh-context subagent, without implementing changes."
+
 policy:
   allow_implicit_invocation: false
