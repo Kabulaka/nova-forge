@@ -48,11 +48,11 @@ requireValue(
 );
 requireValue(
   JSON.stringify(packageJson.peerDependencies) === JSON.stringify({
-    "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-skill-filesystem": "*",
   }) && packageJson.peerDependenciesMeta?.["@deepseek-ai/dsh-skill-filesystem"]?.optional === true,
-  "DSH skill provider must be an optional host-shared peer",
+  "DSH skill provider must be an optional host-shared peer without a version restriction",
 );
-requireValue(packageJson.engines?.dsh === "0.2.1-rc.2", "DSH compatibility must match the verified version");
+requireValue(!Object.hasOwn(packageJson.engines ?? {}, "dsh"), "DSH host version must not be restricted");
 requireValue(packageJson.exports?.["."] === "./dsh/index.mjs", "DSH ESM entry mismatch");
 requireValue(packageJson.dsh?.bundle?.patch === "./dsh/cordis.patch.yml", "DSH bundle patch mismatch");
 

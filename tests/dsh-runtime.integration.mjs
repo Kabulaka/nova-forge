@@ -26,7 +26,8 @@ test("native DSH package install, shared resources, model request, disable, re-e
     return result.stdout;
   };
   try {
-    assert.equal(run("dsh", ["--version"]).trim(), "0.2.1-rc.2");
+    const dshVersion = run("dsh", ["--version"]).trim();
+    assert.match(dshVersion, /^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/);
     const report = JSON.parse(run("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", root], pluginRoot))[0];
     const archive = path.join(root, report.filename);
     const probeRoot = path.join(root, "probe");
@@ -35,7 +36,7 @@ test("native DSH package install, shared resources, model request, disable, re-e
     fs.writeFileSync(path.join(probeRoot, "package.json"), JSON.stringify({
       name: "nova-dsh-probe", version: "1.0.0", type: "module", exports: "./index.mjs",
       dsh: { bundle: { patch: "./cordis.patch.yml" } },
-      peerDependencies: { "@deepseek-ai/dsh-llm": "0.2.1-rc.2", "@deepseek-ai/dsh-session": "0.2.1-rc.2" },
+      peerDependencies: { "@deepseek-ai/dsh-llm": dshVersion, "@deepseek-ai/dsh-session": dshVersion },
     }));
     fs.writeFileSync(path.join(probeRoot, "cordis.patch.yml"), "[]\n");
     run("dsh", ["plugin", "--profile", "headless", "add", probeRoot]);

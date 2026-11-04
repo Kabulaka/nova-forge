@@ -10,8 +10,7 @@
     "url": "https://github.com/Kabulaka/nova-forge.git"
   },
   "engines": {
-    "node": ">=22.5.0",
-    "dsh": "0.2.1-rc.2"
+    "node": ">=22.5.0"
   },
   "exports": {
     ".": "./dsh/index.mjs"
@@ -26,7 +25,7 @@
     "@deepseek-ai/dsh-hooks-claude-code": "0.2.1-rc.2"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.2"
+    "@deepseek-ai/dsh-skill-filesystem": "*"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-skill-filesystem": {

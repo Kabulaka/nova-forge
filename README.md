@@ -83,7 +83,7 @@ codex plugin add nova-forge@nova-forge
 
 ### DeepSeek Harness
 
-适配目标为 DSH `0.2.1-rc.2`。使用原生 bundle 管理器安装到指定 profile；共享技能及规则从安装包挂载，不需要复制技能或修改 AGENTS.md。
+不限制 DSH 宿主版本。适配器仍使用官方技能 provider 和 hooks 兼容桥，其依赖版本独立管理；不限制宿主版本不代表已验证所有版本。使用原生 bundle 管理器安装到指定 profile；共享技能及规则从安装包挂载，不需要复制技能或修改 AGENTS.md。
 
 安装固定版本的原生 bundle（原生管理器会安装官方桥依赖）：
 
@@ -251,7 +251,7 @@ npm run check
 
 它会依次校验版本、三宿主插件结构、Release Notes、GitHub Actions 工作流、自动化测试和 npm 包内容；Codex、Claude Code 的检查及共享 Hook 不要求安装 DSH SDK。
 
-DSH 原生运行验收单独执行（需要已安装 DSH `0.2.1-rc.2`）：
+DSH 原生运行验收单独执行（需要已安装 DSH，测试使用当前宿主版本）：
 
 ```bash
 npm run test:dsh
